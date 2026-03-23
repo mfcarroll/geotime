@@ -1,3 +1,4 @@
+/// <reference types="vite/client" />
 // src/main.ts
 
 import './style.css';
@@ -14,7 +15,7 @@ import { faLocationDot, faWifi, faBullseye, faMobileAlt, faSatelliteDish } from 
 library.add(faLocationDot, faWifi, faBullseye, faMobileAlt, faSatelliteDish);
 faDom.watch();
 
-const GOOGLE_MAPS_API_KEY = "AIzaSyAmfnxthlRCjJNKNQTvp6RX-0pTQPL2cB0";
+const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
 
 function handleUrlParameters() {
     const urlParams = new URLSearchParams(window.location.search);

@@ -5,7 +5,7 @@ import { state } from './state';
 import { point as turfPoint } from '@turf/helpers';
 import { booleanPointInPolygon } from '@turf/boolean-point-in-polygon';
 
-const GOOGLE_MAPS_API_KEY = "AIzaSyAmfnxthlRCjJNKNQTvp6RX-0pTQPL2cB0";
+const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
 
 export function getDisplayTimezoneName(tz: string): string {
     if (tz.startsWith('Etc/GMT')) {
