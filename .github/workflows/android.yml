@@ -1,0 +1,65 @@
+name: Build Android Release
+
+on:
+  push:
+    branches: ["main"] # Triggers when you push to main
+  workflow_dispatch: # Allows you to trigger it manually
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Dependencies
+        run: npm install
+
+      - name: Build Web App
+        env:
+          VITE_GOOGLE_MAPS_API_KEY: ${{ secrets.VITE_GOOGLE_MAPS_API_KEY }}
+        run: npm run build
+
+      - name: Sync Capacitor Android
+        run: npx cap sync android
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: "zulu"
+          java-version: "17" # Required for modern Android Gradle Plugin
+
+      - name: Build Android App Bundle (AAB)
+        working-directory: ./android
+        run: ./gradlew bundleRelease
+
+      - name: Sign App Bundle
+        uses: r0adkll/sign-android-release@v1
+        id: sign_app
+        with:
+          releaseDirectory: android/app/build/outputs/bundle/release
+          signingKeyBase64: ${{ secrets.KEYSTORE_BASE64 }}
+          alias: ${{ secrets.KEY_ALIAS }}
+          keyStorePassword: ${{ secrets.KEYSTORE_PASSWORD }}
+          keyPassword: ${{ secrets.KEY_PASSWORD }}
+
+      - name: Upload Signed AAB Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-release
+          path: ${{steps.sign_app.outputs.signedReleaseFile}}
+
+      - name: Upload to Google Play
+        uses: r0adkll/upload-google-play@v1
+        with:
+          serviceAccountJsonPlainText: ${{ secrets.PLAY_STORE_JSON }}
+          packageName: ca.matthewcarroll.geotime
+          releaseFiles: ${{steps.sign_app.outputs.signedReleaseFile}}
+          track: production
+          status: completed
