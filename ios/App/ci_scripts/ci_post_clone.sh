@@ -40,10 +40,13 @@ PROJECT_FILE_PATH="ios/App/App.xcodeproj/project.pbxproj"
 PACKAGE_VERSION=$(node -p "require('./package.json').version")
 
 echo "Version from package.json: $PACKAGE_VERSION"
-# echo "Xcode Cloud Build Number: $CI_BUILD_NUMBER"
+echo "Xcode Cloud Build Number: $CI_BUILD_NUMBER"
 
+# Inject the public version (e.g., 1.0.1)
 sed -i '' "s/MARKETING_VERSION = .*/MARKETING_VERSION = $PACKAGE_VERSION;/g" "$PROJECT_FILE_PATH"
-# sed -i '' "s/CURRENT_PROJECT_VERSION = .*/CURRENT_PROJECT_VERSION = $CI_BUILD_NUMBER;/g" "$PROJECT_FILE_PATH"
+
+# Inject the internal Xcode Cloud build number (e.g., 42)
+sed -i '' "s/CURRENT_PROJECT_VERSION = .*/CURRENT_PROJECT_VERSION = $CI_BUILD_NUMBER;/g" "$PROJECT_FILE_PATH"
 
 echo "--- VERSIONING COMPLETE ---"
 

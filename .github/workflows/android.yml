@@ -33,11 +33,15 @@ jobs:
         uses: actions/setup-java@v4
         with:
           distribution: "zulu"
-          java-version: "17" # Required for modern Android Gradle Plugin
+          java-version: "17" 
+
+      - name: Extract Version from package.json
+        id: get_version
+        run: echo "version=$(node -e "console.log(require('./package.json').version)")" >> "$GITHUB_OUTPUT"
 
       - name: Build Android App Bundle (AAB)
         working-directory: ./android
-        run: ./gradlew bundleRelease
+        run: ./gradlew bundleRelease -PbuildVersionCode=${{ github.run_number }} -PbuildVersionName=${{ steps.get_version.outputs.version }}
 
       - name: Sign App Bundle
         uses: r0adkll/sign-android-release@v1
