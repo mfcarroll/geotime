@@ -20,14 +20,11 @@ target 'App' do
 end
 
 post_install do |installer|
-  # --- ADD THIS NEW CODE BLOCK ---
   installer.pods_project.targets.each do |target|
     target.build_configurations.each do |config|
-      config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '13.0'
       config.build_settings['CODE_SIGN_STYLE'] = 'Automatic'
     end
   end
-  # --- END OF NEW CODE BLOCK ---
-  
+
   assertDeploymentTarget(installer)
 end

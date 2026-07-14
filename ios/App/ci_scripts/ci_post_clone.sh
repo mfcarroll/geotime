@@ -8,15 +8,15 @@ set -x
 echo "--- SETTING UP NODE.JS ENVIRONMENT ---"
 
 # Install nvm (Node Version Manager)
-curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
 
 # Source nvm to make it available in the current shell session
 export NVM_DIR="$HOME/.nvm"
 [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
 
-# Install and use Node 20
-nvm install 20
-nvm use 20
+# Install and use Node 24 (matches the Android CI workflow)
+nvm install 24
+nvm use 24
 
 echo "Node.js version: $(node -v)"
 echo "npm version: $(npm -v)"
@@ -32,7 +32,12 @@ echo "--- INSTALLING NPM DEPENDENCIES ---"
 npm install
 
 echo "--- BUILDING WEB APP ---"
-# This will now crash visibly if VITE_GOOGLE_MAPS_API_KEY is missing in App Store Connect
+# Vite silently embeds undefined if the key is missing, so fail loudly here instead.
+# Set VITE_GOOGLE_MAPS_API_KEY in the Xcode Cloud workflow's Environment settings.
+if [ -z "${VITE_GOOGLE_MAPS_API_KEY:-}" ]; then
+    echo "ERROR: VITE_GOOGLE_MAPS_API_KEY is not set in the Xcode Cloud workflow environment."
+    exit 1
+fi
 npm run build
 
 echo "--- SYNCING CAPACITOR PROJECT --"

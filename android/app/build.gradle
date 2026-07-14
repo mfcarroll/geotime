@@ -10,7 +10,7 @@ android {
         
         // This will grab the build number from GitHub Actions, or default to 1 for local testing
         versionCode (project.hasProperty('buildVersionCode') ? project.property('buildVersionCode').toInteger() : 1)
-        versionName "1.0" 
+        versionName (project.hasProperty('buildVersionName') ? project.property('buildVersionName') : "1.0")
         
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
