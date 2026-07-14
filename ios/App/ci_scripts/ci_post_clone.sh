@@ -7,16 +7,11 @@ set -x
 
 echo "--- SETTING UP NODE.JS ENVIRONMENT ---"
 
-# Install nvm (Node Version Manager)
-curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
-
-# Source nvm to make it available in the current shell session
-export NVM_DIR="$HOME/.nvm"
-[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
-
-# Install and use Node 24 (matches the Android CI workflow)
-nvm install 24
-nvm use 24
+# nodejs.org is intermittently unreachable from Xcode Cloud runners, which broke
+# the previous nvm-based install. Homebrew is preinstalled on Xcode Cloud and
+# fetches from GitHub's registry, so install Node 24 (matches Android CI) from it.
+brew install node@24
+export PATH="$(brew --prefix node@24)/bin:$PATH"
 
 echo "Node.js version: $(node -v)"
 echo "npm version: $(npm -v)"
