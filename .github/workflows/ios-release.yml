@@ -1,0 +1,35 @@
+name: Submit iOS Release
+
+on:
+  push:
+    branches: ["main"]
+  workflow_dispatch:
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+      ASC_PRIVATE_KEY: ${{ secrets.ASC_PRIVATE_KEY }}
+
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      # Waits for Xcode Cloud (triggered by the same push) to upload and
+      # process the build, then attaches it to an App Store version and
+      # submits for review with automatic release on approval.
+      - name: Submit to App Store review
+        run: |
+          if [ -z "$ASC_PRIVATE_KEY" ]; then
+            echo "ASC_* secrets not configured; skipping App Store submission."
+            exit 0
+          fi
+          node scripts/release-ios.mjs
