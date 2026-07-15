@@ -1,12 +1,12 @@
 {
   "name": "geotime-dashboard",
   "private": true,
-  "version": "1.1.3",
+  "version": "1.2.0",
   "type": "module",
   "scripts": {
     "dev": "vite --host",
     "build": "vite build",
-    "build:prod": "op run --env-file=\".env.production\" -- vite build --mode production",
+    "build:prod": "op run --env-file=\".env.1password\" -- vite build --mode production",
     "preview": "vite preview --host",
     "sync-version": "capacitor-set-version"
   },

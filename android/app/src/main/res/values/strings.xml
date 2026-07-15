@@ -4,4 +4,5 @@
     <string name="title_activity_main">GeoTime</string>
     <string name="package_name">ca.matthewcarroll.geotime</string>
     <string name="custom_url_scheme">ca.matthewcarroll.geotime</string>
+    <string name="widget_description">Your world clocks at a glance</string>
 </resources>

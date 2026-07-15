@@ -81,11 +81,12 @@ export function getFormattedTime(tz: string, options: Intl.DateTimeFormatOptions
 
   if (offset !== null) {
     const targetTime = new Date(correctedTime.getTime() + offset * 3600000);
-    return targetTime.toLocaleTimeString('en-US', { timeZone: 'UTC', ...options });
+    // undefined locale: follow the device's locale and 12/24h preference
+    return targetTime.toLocaleTimeString(undefined, { timeZone: 'UTC', ...options });
   }
 
   try {
-    return correctedTime.toLocaleTimeString('en-US', { timeZone: tz, ...options });
+    return correctedTime.toLocaleTimeString(undefined, { timeZone: tz, ...options });
   } catch (e) {
     return "Invalid";
   }
@@ -121,7 +122,7 @@ export function updateAllClocks() {
   const localTimezone = state.localTimezone || Intl.DateTimeFormat().resolvedOptions().timeZone;
   
   try {
-    dom.localTimeEl.textContent = correctedTime.toLocaleTimeString('en-US', { 
+    dom.localTimeEl.textContent = correctedTime.toLocaleTimeString(undefined, {
       timeZone: localTimezone,
       hour: 'numeric',
       minute: '2-digit',
@@ -160,8 +161,11 @@ export function updateAllClocks() {
   });
   
   const deviceNow = new Date();
-  const deviceTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-  dom.deviceTimeEl.textContent = deviceNow.toLocaleTimeString('en-US', {
+  // Prefer the native-reported OS timezone; the WebView's own Intl can be stale
+  // after an OS timezone change until the process restarts.
+  const deviceTz = state.deviceTimezone || Intl.DateTimeFormat().resolvedOptions().timeZone;
+  dom.deviceTimeEl.textContent = deviceNow.toLocaleTimeString(undefined, {
+    timeZone: deviceTz,
     hour: 'numeric',
     minute: '2-digit',
     second: '2-digit'

@@ -1,9 +1,10 @@
 // src/map.ts
 
 import * as dom from './dom';
-import { state } from './state';
+import { state, persistTimezones } from './state';
 import { fetchTimezoneForCoordinates, findTimezoneFromGeoJSON, startClocks, getTimezoneOffset, getFormattedTime, getUtcOffset, getDisplayTimezoneName, getValidTimezoneName, updateAllClocks } from './time';
 import { locationMapStyles, worldTimezoneMapStyles } from './map-styles';
+import { syncWidgetTimezones } from './widget';
 import { distance, formatAccuracy } from './utils';
 
 let userTimeInterval: number | null = null;
@@ -70,7 +71,6 @@ export function updateUserTimezoneDetails(tzid: string) {
     dom.userTimezoneTimeEl.textContent = getFormattedTime(tzid, {
       hour: 'numeric',
       minute: '2-digit',
-      hour12: true,
     });
   };
   
@@ -433,11 +433,14 @@ export async function onLocationSuccess(pos: GeolocationPosition) {
       console.log(`Timezone updated to ${tzid}`);
       state.localTimezone = tzid;
       state.gpsTzid = tzid;
-      
+
       updateUserTimezoneDetails(tzid);
 
       state.gpsZone = getUtcOffset(tzid);
-      
+
+      // The widget bases its pin/offsets on the GPS-derived local zone.
+      syncWidgetTimezones(state.addedTimezones, state.localTimezone);
+
       updateMapHighlights();
 
       document.dispatchEvent(new CustomEvent('gpstimezonefound', { detail: { tzid } }));
@@ -456,10 +459,10 @@ export function addUniqueTimezoneToList(tz: string) {
         return;
     }
 
-    state.addedTimezones = state.addedTimezones.filter(existingTz => getUtcOffset(existingTz) !== newOffset);
-    state.addedTimezones.push(tz);
+    const next = state.addedTimezones.filter(existingTz => getUtcOffset(existingTz) !== newOffset);
+    next.push(tz);
 
-    localStorage.setItem('worldClocks', JSON.stringify(state.addedTimezones));
+    persistTimezones(next);
     renderWorldClocks();
 }
 

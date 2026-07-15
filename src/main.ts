@@ -4,10 +4,11 @@
 import './style.css';
 import { Loader } from '@googlemaps/js-api-loader';
 import * as dom from './dom';
-import { state } from './state';
+import { state, persistTimezones } from './state';
 import { initMaps, onLocationError, onLocationSuccess, selectTimezone, renderWorldClocks, addUniqueTimezoneToList, updateUserTimezoneDetails, showLocationUnavailable } from './map';
 import { updateAllClocks, getUtcOffset, syncClock, getDisplayTimezoneName, startClocks } from './time';
 import { Capacitor } from '@capacitor/core';
+import { syncWidgetTimezones, getDeviceTimezone, onDeviceTimezoneChanged } from './widget';
 import { Geolocation, PositionOptions } from '@capacitor/geolocation';
 import { library, dom as faDom } from '@fortawesome/fontawesome-svg-core';
 import { faLocationDot, faWifi, faBullseye, faMobileAlt, faSatelliteDish } from '@fortawesome/free-solid-svg-icons';
@@ -24,9 +25,8 @@ function handleUrlParameters() {
         if (timezonesParam) {
             const timezones = timezonesParam.split(',').filter(tz => tz.trim() !== '');
             
-            localStorage.setItem('worldClocks', JSON.stringify(timezones));
-            state.addedTimezones = timezones;
-            
+            persistTimezones(timezones);
+
             state.timezonesFromUrl = timezones;
         }
 
@@ -70,9 +70,18 @@ async function startApp() {
   state.gpsZone = getUtcOffset(initialTimezone);
   updateUserTimezoneDetails(initialTimezone);
 
+  // Device (OS) timezone from native — WKWebView's Intl can be stale after the
+  // OS timezone changes, so trust native and refresh on its change event.
+  getDeviceTimezone().then((id) => { if (id) state.deviceTimezone = id; });
+  onDeviceTimezoneChanged((id) => { state.deviceTimezone = id; });
+
   startClocks();
   syncClock();
-  
+
+  // Heal the native home-screen widget on every launch, in case a previous
+  // write was missed (app killed mid-write, data predating the widget, etc).
+  syncWidgetTimezones(state.addedTimezones, state.localTimezone);
+
   // Start watching for location immediately.
   if (Capacitor.isNativePlatform()) {
     let options: PositionOptions = {}
@@ -87,7 +96,9 @@ async function startApp() {
         return;
       }
       if (position) {
-          onLocationSuccess(position as GeolocationPosition);
+          // Capacitor's Position lacks GeolocationPosition's toJSON; shape is
+          // otherwise compatible.
+          onLocationSuccess(position as unknown as GeolocationPosition);
       }
     });
   } else {
@@ -134,8 +145,7 @@ async function startApp() {
 
     if (removeBtn) {
       const timezoneToRemove = (removeBtn as HTMLElement).dataset.timezone!;
-      state.addedTimezones = state.addedTimezones.filter((tz: string) => tz !== timezoneToRemove);
-      localStorage.setItem('worldClocks', JSON.stringify(state.addedTimezones));
+      persistTimezones(state.addedTimezones.filter((tz: string) => tz !== timezoneToRemove));
       renderWorldClocks();
       updateAllClocks();
     } else if (pinBtn) {
