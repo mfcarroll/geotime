@@ -65,7 +65,7 @@ console.log(`Using build ${build.attributes.version} (uploaded ${build.attribute
 
 // --- 2. Find or create the App Store version -------------------------------
 const EDITABLE = ['PREPARE_FOR_SUBMISSION', 'DEVELOPER_REJECTED', 'REJECTED', 'METADATA_REJECTED', 'INVALID_BINARY'];
-const IN_FLIGHT = ['WAITING_FOR_REVIEW', 'IN_REVIEW', 'PENDING_APPLE_RELEASE', 'PENDING_DEVELOPER_RELEASE', 'PROCESSING_FOR_APP_STORE', 'IN_REVIEW'];
+const IN_FLIGHT = ['WAITING_FOR_REVIEW', 'IN_REVIEW', 'PENDING_APPLE_RELEASE', 'PENDING_DEVELOPER_RELEASE', 'PROCESSING_FOR_APP_STORE'];
 const versions = (
   await api(`/v1/apps/${APP_ID}/appStoreVersions?fields[appStoreVersions]=versionString,appStoreState,releaseType&limit=10`)
 ).data;
@@ -83,6 +83,23 @@ if (version) {
   });
   console.log(`Reusing editable App Store version record (${version.id})`);
 } else {
+  // Apple allows only one in-flight version at a time. If a *different* version
+  // is still in review/pending, we can't create this one — fail loudly with a
+  // clear, actionable message rather than a raw 409 stack trace. (We deliberately
+  // do NOT auto-cancel: dropping a prior review is a human judgement call.)
+  const blocking = versions.find((v) => IN_FLIGHT.includes(v.attributes.appStoreState));
+  if (blocking) {
+    console.error(
+      `\nCannot submit ${VERSION}: version ${blocking.attributes.versionString} is still ` +
+      `${blocking.attributes.appStoreState}. Apple only allows one in-flight App Store version.\n` +
+      `Resolve the previous version, then re-run this workflow:\n` +
+      `  • wait for ${blocking.attributes.versionString} to be released, then re-run; or\n` +
+      `  • cancel its review — App Store Connect (version → “Remove from Review”), or\n` +
+      `    the API (find the in-flight reviewSubmission, PATCH { canceled: true }) — then re-run.\n` +
+      `Re-running reuses the freed-up record automatically; no new build/push is needed.`,
+    );
+    process.exit(1);
+  }
   version = (
     await api('/v1/appStoreVersions', 'POST', {
       data: {
