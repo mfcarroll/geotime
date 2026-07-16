@@ -32,6 +32,7 @@ private struct RowMetrics {
     let useFullDay: Bool       // full weekday name ("Tuesday") vs short ("Tue")
     let showLocalLabel: Bool   // "Local time" tag on the local row (single-line only)
     let showDeviceLabel: Bool  // "· Device time" tag on the device row (single-line only)
+    let dayUnderTime: Bool     // small two-line: day label under the time, not beside it
     let dayTimeGap: CGFloat    // extra space between day label and time
     let hGap: CGFloat          // base horizontal gap between elements (tighter on small)
     let timeColW: CGFloat
@@ -114,6 +115,9 @@ struct GeoTimeWidgetView: View {
         let cityBase: CGFloat = isSmall ? 14 : (rich ? 15 : 14)
         let dayTimeGap: CGFloat = isSmall ? 4 : 6   // ←— DAY↔TIME GAP LEVER
         let hGap: CGFloat = isSmall ? 3 : 5
+        // Small two-line: the day label tucks under the time (line 2) rather than
+        // beside it, so it no longer competes with the city name for line-1 width.
+        let dayUnderTime = isSmall && rich
 
         // City width is limited only by each row's OWN right-side content, so a
         // long name on a row with no day label can use the space that only other
@@ -137,7 +141,8 @@ struct GeoTimeWidgetView: View {
                         if r.isDevice && deviceLabel { reserved += width("· Device time", detailFont) + hGap }
                     }
                 }
-                if let day = fullDay ? r.weekdayFull : r.weekdayShort {
+                // When the day tucks under the time it doesn't take line-1 width.
+                if !dayUnderTime, let day = fullDay ? r.weekdayFull : r.weekdayShort {
                     reserved += width(day, detailFont) + dayTimeGap
                 }
                 let availName = clusterW - reserved
@@ -161,7 +166,8 @@ struct GeoTimeWidgetView: View {
                           subtitleFont: subtitleFont, pinSize: pinSize, rich: rich,
                           inlineOffset: inlineOffset, useFullDay: useFullDay,
                           showLocalLabel: showLocalLabel, showDeviceLabel: showDeviceLabel,
-                          dayTimeGap: dayTimeGap, hGap: hGap, timeColW: timeColW, periodColW: periodColW)
+                          dayUnderTime: dayUnderTime, dayTimeGap: dayTimeGap, hGap: hGap,
+                          timeColW: timeColW, periodColW: periodColW)
     }
 }
 
@@ -170,24 +176,33 @@ private struct RowView: View {
     let metrics: RowMetrics
 
     var body: some View {
-        if metrics.rich {
-            // Multi-line: the city name (line 1) and the time align on the same
-            // baseline; the offset + marker sit on line 2 under the city.
+        if metrics.rich && metrics.dayUnderTime {
+            // Small two-line: two independent full-width rows, so the full-word day
+            // on line 2 never competes with the city name on line 1.
+            VStack(alignment: .leading, spacing: 1) {
+                HStack(alignment: .firstTextBaseline, spacing: metrics.hGap) {
+                    cityLine
+                    Spacer(minLength: 4)
+                    time
+                }
+                HStack(alignment: .firstTextBaseline, spacing: metrics.hGap) {
+                    subtitle
+                    if let weekday = row.weekdayFull {
+                        Spacer(minLength: 4)
+                        Text(weekday)
+                            .font(.system(size: metrics.detailFont))
+                            .foregroundColor(.widgetSecondary)
+                            .lineLimit(1)
+                    }
+                }
+            }
+        } else if metrics.rich {
+            // Large two-line: city/offset on the left; day · time on the right,
+            // both blocks aligned on the city/time baseline.
             HStack(alignment: .firstTextBaseline, spacing: metrics.hGap) {
                 VStack(alignment: .leading, spacing: 1) {
                     cityLine
-                    HStack(spacing: 4) {
-                        Text(row.relativeText)
-                            .font(.system(size: metrics.subtitleFont))
-                            .foregroundColor(.widgetSecondary)
-                            .lineLimit(1)
-                        if row.isDevice && metrics.showDeviceLabel {
-                            Text("· Device time")
-                                .font(.system(size: metrics.subtitleFont))
-                                .foregroundColor(.widgetSecondary)
-                                .lineLimit(1)
-                        }
-                    }
+                    subtitle
                 }
                 Spacer(minLength: 4)
                 rightGroup
@@ -198,6 +213,22 @@ private struct RowView: View {
                 cityLine
                 Spacer(minLength: 4)
                 rightGroup
+            }
+        }
+    }
+
+    // Offset (+ "· Device time" where it fits) shown under the city in rich rows.
+    private var subtitle: some View {
+        HStack(spacing: 4) {
+            Text(row.relativeText)
+                .font(.system(size: metrics.subtitleFont))
+                .foregroundColor(.widgetSecondary)
+                .lineLimit(1)
+            if row.isDevice && metrics.showDeviceLabel {
+                Text("· Device time")
+                    .font(.system(size: metrics.subtitleFont))
+                    .foregroundColor(.widgetSecondary)
+                    .lineLimit(1)
             }
         }
     }

@@ -67,3 +67,4 @@ jobs:
           releaseFiles: ${{steps.sign_app.outputs.signedReleaseFile}}
           track: production
           status: completed
+          whatsNewDirectory: distribution/whatsnew

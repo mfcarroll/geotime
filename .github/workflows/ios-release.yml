@@ -32,4 +32,6 @@ jobs:
             echo "ASC_* secrets not configured; skipping App Store submission."
             exit 0
           fi
+          # Shared release notes (same file Android uses for its "What's New").
+          export RELEASE_NOTES="$(cat distribution/whatsnew/whatsnew-en-US)"
           node scripts/release-ios.mjs

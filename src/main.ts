@@ -87,8 +87,8 @@ async function startApp() {
     let options: PositionOptions = {}
     if (Capacitor.getPlatform() === 'android') {
       options.enableHighAccuracy = true;
-      options.maximumAge = 0;
-      options.timeout = 1000;
+      options.maximumAge = 30000;  // accept a fix up to 30s old
+      options.timeout = 30000;     // allow 30s to acquire (1s was too short for a cold GPS fix)
     }
     Geolocation.watchPosition(options, (position, err) => {
       if (err) {
