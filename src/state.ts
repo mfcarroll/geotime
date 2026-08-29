@@ -20,13 +20,49 @@ export interface AppState {
     lastFetchedCoords: { lat: number, lon: number } | null;
     geoJsonData: any | null;
     geoJsonLoaded: boolean;
-    hoveredZone: number | null;
-    selectedZone: number | null;
-    gpsZone: number | null;
+    // Zones are identified by IANA id, not by current UTC offset. Two zones can
+    // share an offset today and diverge in November; keying on the offset made
+    // them interchangeable and let the map overwrite a specific choice
+    // (America/Vancouver) with a band's representative zone.
+    hoveredTzid: string | null;
+    selectedTzid: string | null;
     temporaryTimezone: string | null;
-    hoveredTimezoneName: string | null;
     gpsTimezoneSelected: boolean;
     timezonesFromUrl: string[] | null;
+}
+
+/**
+ * Repairs a stored zone list written by older builds.
+ *
+ * Pre-rebuild the app synthesised `Etc/GMT±N.N` ids for map features that had no
+ * name and a fractional offset. Those are not valid tzdb ids — `Intl` throws on
+ * them — so they were carried by hand-written parsers on three platforms. They
+ * are rounded to the nearest valid whole-hour zone here and the parsers dropped.
+ */
+export function migrateStoredTimezones(raw: unknown): string[] {
+    if (!Array.isArray(raw)) return [];
+    const out: string[] = [];
+    for (const entry of raw) {
+        if (typeof entry !== 'string' || !entry.trim()) continue;
+        let id = entry;
+        const fractional = id.match(/^Etc\/GMT([+-])(\d+)\.\d+$/);
+        if (fractional) id = `Etc/GMT${fractional[1]}${fractional[2]}`;
+        try {
+            new Intl.DateTimeFormat('en-US', { timeZone: id });
+        } catch {
+            continue; // unrecoverable; drop rather than poison the widget
+        }
+        if (!out.includes(id)) out.push(id);
+    }
+    return out;
+}
+
+function loadStoredTimezones(): string[] {
+    try {
+        return migrateStoredTimezones(JSON.parse(localStorage.getItem('worldClocks') || '[]'));
+    } catch {
+        return [];
+    }
 }
 
 export const state: AppState = {
@@ -34,7 +70,7 @@ export const state: AppState = {
     localTimezone: null,
     deviceTimezone: null,
     gpsTzid: null,
-    addedTimezones: JSON.parse(localStorage.getItem('worldClocks') || '[]'),
+    addedTimezones: loadStoredTimezones(),
     clocksInterval: null,
     locationMap: null,
     timezoneMap: null,
@@ -47,11 +83,9 @@ export const state: AppState = {
     lastFetchedCoords: null,
     geoJsonData: null,
     geoJsonLoaded: false,
-    hoveredZone: null,
-    selectedZone: null,
-    gpsZone: null,
+    hoveredTzid: null,
+    selectedTzid: null,
     temporaryTimezone: null,
-    hoveredTimezoneName: null,
     gpsTimezoneSelected: false,
     timezonesFromUrl: null,
 };

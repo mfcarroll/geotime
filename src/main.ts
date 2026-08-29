@@ -4,9 +4,9 @@
 import './style.css';
 import { Loader } from '@googlemaps/js-api-loader';
 import * as dom from './dom';
-import { state, persistTimezones } from './state';
+import { state, persistTimezones, migrateStoredTimezones } from './state';
 import { initMaps, onLocationError, onLocationSuccess, selectTimezone, renderWorldClocks, addUniqueTimezoneToList, updateUserTimezoneDetails, showLocationUnavailable } from './map';
-import { updateAllClocks, getUtcOffset, syncClock, getDisplayTimezoneName, startClocks } from './time';
+import { updateAllClocks, syncClock, getDisplayTimezoneName, startClocks, isValidTimezone } from './time';
 import { Capacitor } from '@capacitor/core';
 import { syncWidgetTimezones, getDeviceTimezone, onDeviceTimezoneChanged } from './widget';
 import { Geolocation, PositionOptions } from '@capacitor/geolocation';
@@ -23,8 +23,8 @@ function handleUrlParameters() {
     if (urlParams.has('timezones')) {
         const timezonesParam = urlParams.get('timezones');
         if (timezonesParam) {
-            const timezones = timezonesParam.split(',').filter(tz => tz.trim() !== '');
-            
+            const timezones = migrateStoredTimezones(timezonesParam.split(','));
+
             persistTimezones(timezones);
 
             state.timezonesFromUrl = timezones;
@@ -35,17 +35,18 @@ function handleUrlParameters() {
 }
 
 function handleAddTimezone() {
-    const newTimezone = dom.timezoneInput.value;
-    const ianaTimezones = Intl.supportedValuesOf('timeZone');
-    if (newTimezone && ianaTimezones.includes(newTimezone)) {
+    const newTimezone = dom.timezoneInput.value.trim();
+    if (!newTimezone) return;
+
+    if (isValidTimezone(newTimezone)) {
         addUniqueTimezoneToList(newTimezone);
         if (state.localTimezone) {
           updateAllClocks();
         }
-    } else if (newTimezone && !ianaTimezones.includes(newTimezone)) {
+        dom.timezoneInput.value = '';
+    } else {
         alert('Invalid or unsupported timezone. Please select from the list.');
     }
-    dom.timezoneInput.value = '';
 }
 
 async function startApp() {
@@ -67,7 +68,6 @@ async function startApp() {
   const initialTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   state.localTimezone = initialTimezone;
   state.gpsTzid = initialTimezone;
-  state.gpsZone = getUtcOffset(initialTimezone);
   updateUserTimezoneDetails(initialTimezone);
 
   // Device (OS) timezone from native — WKWebView's Intl can be stale after the
@@ -123,8 +123,14 @@ async function startApp() {
     // The location card will function independently.
   }
 
-  const ianaTimezones = Intl.supportedValuesOf('timeZone');
-  dom.timezoneList.innerHTML = ianaTimezones.map((tz: string) => `<option value="${tz}"></option>`).join('');
+  // Union of what the runtime lists and what the map data uses. They disagree:
+  // supportedValuesOf returns engine-dependent aliases (Asia/Calcutta on V8,
+  // Asia/Kolkata on WebKit) while the boundaries always use the modern name, so
+  // listing only one of them leaves zones you can click but cannot type.
+  const listedZones = new Set<string>(Intl.supportedValuesOf('timeZone'));
+  for (const f of state.geoJsonData?.features ?? []) listedZones.add(f.properties.tzid);
+  dom.timezoneList.innerHTML = [...listedZones].sort()
+    .map((tz) => `<option value="${tz}"></option>`).join('');
 
   dom.addTimezoneBtn.addEventListener('click', handleAddTimezone);
   dom.timezoneInput.addEventListener('keypress', (e) => {
@@ -132,8 +138,9 @@ async function startApp() {
   });
   
   dom.timezoneInput.addEventListener('input', () => {
-    const ianaTimezones = Intl.supportedValuesOf('timeZone');
-    if (ianaTimezones.includes(dom.timezoneInput.value)) {
+    // Picking a datalist option fires 'input' with the full value; typing toward
+    // one usually doesn't land on a valid id until the pick.
+    if (isValidTimezone(dom.timezoneInput.value)) {
         handleAddTimezone();
     }
   });
@@ -154,10 +161,9 @@ async function startApp() {
       renderWorldClocks();
       updateAllClocks();
     } else {
-        const clockDiv = target.closest('.grid');
-        if (clockDiv) {
-            const timezone = (clockDiv as HTMLElement).id.replace('clock-', '').replace(/-/g, '/');
-            selectTimezone(timezone);
+        const clockDiv = target.closest<HTMLElement>('[data-clock-tz]');
+        if (clockDiv?.dataset.clockTz) {
+            selectTimezone(clockDiv.dataset.clockTz);
         }
     }
   });
@@ -178,11 +184,6 @@ async function startApp() {
       }
   });
 
-  document.addEventListener('replacetimezone', (e: Event) => {
-      const { tzid } = (e as CustomEvent).detail;
-      addUniqueTimezoneToList(tzid);
-  });
-
   document.addEventListener('gpstimezonefound', (e) => {
     const { tzid } = (e as CustomEvent).detail;
     dom.localTimezoneEl.textContent = getDisplayTimezoneName(tzid);
@@ -191,9 +192,7 @@ async function startApp() {
     if (state.timezonesFromUrl) {
       const timezoneToSelect = state.timezonesFromUrl.find(tz => tz !== tzid);
       if (timezoneToSelect) {
-          state.temporaryTimezone = timezoneToSelect;
-          state.selectedZone = getUtcOffset(timezoneToSelect);
-          document.dispatchEvent(new CustomEvent('temporarytimezonechanged'));
+          selectTimezone(timezoneToSelect);
       }
       state.timezonesFromUrl = null;
     }

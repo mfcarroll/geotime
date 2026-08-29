@@ -13,13 +13,18 @@ struct WidgetRow: Identifiable {
     let offsetSeconds: Int
 }
 
-// Canonical row set — dedup by offset (local/device win), sorted ascending. Kept
-// in sync with the Android GeoTimeWidgetProvider.buildRows. Truncation to fit the
-// widget height happens in the view (GeometryReader), not here.
+// Canonical row set — dedup by zone id (local/device win), sorted by offset then
+// name. Kept in sync with the Android GeoTimeWidgetProvider.buildRows. Truncation
+// to fit the widget height happens in the view (GeometryReader), not here.
+//
+// Zones are NOT deduped by UTC offset: America/Vancouver and America/Los_Angeles
+// read the same today and differ in November, and if both were added the user
+// asked for both. (The device row is still offset-gated — see below — because
+// that row exists to answer "is my phone showing a different time".)
 enum ZoneRowResolver {
     static func resolve(storedIds: [String], local: TimeZone, deviceTz: TimeZone, now: Date) -> [WidgetRow] {
         let localOffset = local.secondsFromGMT(for: now)
-        var seenOffsets: Set<Int> = [localOffset] // local pre-claims its offset slot
+        var seenIds: Set<String> = [local.identifier] // local pre-claims its slot
         var rows: [WidgetRow] = []
 
         let localParts = TimezoneDisplay.timeParts(local, at: now)
@@ -40,7 +45,7 @@ enum ZoneRowResolver {
         // (e.g. phone still on Vancouver time while you're in London).
         let deviceOffset = deviceTz.secondsFromGMT(for: now)
         if deviceOffset != localOffset {
-            seenOffsets.insert(deviceOffset)
+            seenIds.insert(deviceTz.identifier)
             let parts = TimezoneDisplay.timeParts(deviceTz, at: now)
             let differs = TimezoneDisplay.dayDiffers(deviceTz, local, at: now)
             rows.append(WidgetRow(
@@ -61,8 +66,8 @@ enum ZoneRowResolver {
             if id == local.identifier { continue }
             guard let info = TimezoneDisplay.resolveZone(id) else { continue }
             let off = info.timeZone.secondsFromGMT(for: now)
-            if seenOffsets.contains(off) { continue } // local / device / earlier zone wins the slot
-            seenOffsets.insert(off)
+            if seenIds.contains(info.timeZone.identifier) { continue }
+            seenIds.insert(info.timeZone.identifier)
             let parts = TimezoneDisplay.timeParts(info.timeZone, at: now)
             let differs = TimezoneDisplay.dayDiffers(info.timeZone, local, at: now)
             rows.append(WidgetRow(
@@ -79,8 +84,12 @@ enum ZoneRowResolver {
             ))
         }
 
-        // All offsets are distinct (offset-dedup above), so ordering is unambiguous.
-        rows.sort { $0.offsetSeconds < $1.offsetSeconds }
+        // Offsets can now tie, so break ties by name for a stable order.
+        rows.sort {
+            $0.offsetSeconds != $1.offsetSeconds
+                ? $0.offsetSeconds < $1.offsetSeconds
+                : $0.name.localizedCompare($1.name) == .orderedAscending
+        }
         return rows
     }
 
@@ -92,7 +101,11 @@ enum ZoneRowResolver {
         let others = rows.filter { !$0.isLocal && !$0.isDevice }
         var kept = specials
         kept += others.prefix(max(0, maxRows - specials.count))
-        kept.sort { $0.offsetSeconds < $1.offsetSeconds }
+        kept.sort {
+            $0.offsetSeconds != $1.offsetSeconds
+                ? $0.offsetSeconds < $1.offsetSeconds
+                : $0.name.localizedCompare($1.name) == .orderedAscending
+        }
         return (kept, rows.count - kept.count)
     }
 }

@@ -135,9 +135,18 @@ public class GeoTimeWidgetProvider extends AppWidgetProvider {
     }
 
     // --- Canonical row algorithm (kept in sync with iOS ZoneRowResolver) ----
+    //
+    // Zones are deduped by IANA id, NOT by UTC offset: America/Vancouver and
+    // America/Los_Angeles read the same today and differ in November, and if both
+    // were added the user asked for both. (The device row is still offset-gated;
+    // that row exists to answer "is my phone showing a different time".)
 
     private static final Comparator<Row> OFFSET_ORDER = new Comparator<Row>() {
-        public int compare(Row a, Row b) { return Long.compare(a.offsetMin, b.offsetMin); }
+        public int compare(Row a, Row b) {
+            // Offsets can tie now, so break ties by label for a stable order.
+            int byOffset = Long.compare(a.offsetMin, b.offsetMin);
+            return byOffset != 0 ? byOffset : a.label.compareToIgnoreCase(b.label);
+        }
     };
 
     private static class Row {
@@ -172,8 +181,8 @@ public class GeoTimeWidgetProvider extends AppWidgetProvider {
         List<String> stored = readStored(ctx);
 
         List<Row> rows = new ArrayList<>();
-        Set<Long> seen = new HashSet<>();
-        seen.add(baseOffset); // local pre-claims its offset slot
+        Set<String> seen = new HashSet<>();
+        seen.add(baseId); // local pre-claims its slot
 
         rows.add(new Row(cityLabel(baseId), baseId, baseOffset, true, false, null, null, ""));
 
@@ -181,7 +190,7 @@ public class GeoTimeWidgetProvider extends AppWidgetProvider {
         TimeZone osTz = TimeZone.getDefault();
         long osOffset = osTz.getOffset(now) / 60000L;
         if (osOffset != baseOffset) {
-            seen.add(osOffset);
+            seen.add(osTz.getID());
             boolean d = dayDiffers(osTz, baseTz, now);
             rows.add(new Row(cityLabel(osTz.getID()), osTz.getID(), osOffset, false, true,
                     d ? formatDay(osTz, now, false) : null,
@@ -193,15 +202,15 @@ public class GeoTimeWidgetProvider extends AppWidgetProvider {
             if (id.equals(baseId)) continue;
             Resolved rz = resolveTimeZone(id);
             long off = rz.tz.getOffset(now) / 60000L;
-            if (seen.contains(off)) continue; // local / device / earlier zone wins the slot
-            seen.add(off);
+            if (seen.contains(rz.tzId)) continue; // local / device / earlier zone wins the slot
+            seen.add(rz.tzId);
             boolean differs = dayDiffers(rz.tz, baseTz, now);
             String dayShort = differs ? formatDay(rz.tz, now, false) : null;
             String dayFull = differs ? formatDay(rz.tz, now, true) : null;
             rows.add(new Row(cityLabel(id), rz.tzId, off, false, false, dayShort, dayFull, relativeOffset(off, baseOffset)));
         }
 
-        Collections.sort(rows, OFFSET_ORDER); // distinct offsets => unambiguous
+        Collections.sort(rows, OFFSET_ORDER);
         return rows;
     }
 
