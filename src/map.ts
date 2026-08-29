@@ -6,6 +6,7 @@ import { fetchTimezoneForCoordinates, findTimezoneFromGeoJSON, startClocks, getT
 import { locationMapStyles, worldTimezoneMapStyles } from './map-styles';
 import { syncWidgetTimezones } from './widget';
 import { distance, formatAccuracy } from './utils';
+import { resolveZoneStyle } from './map-highlight';
 
 let userTimeInterval: number | null = null;
 const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
@@ -248,36 +249,16 @@ function bandOf(tzid: string | null): google.maps.Data.Feature[] {
   return featuresByOffset.get(getUtcOffset(tzid)) ?? [];
 }
 
-const STYLES = {
-  // Two tiers per state: the whole same-time band gets a wash, the individual
-  // zone under the cursor/selection gets a stronger fill and an outline, so a
-  // segment reads as part of its band rather than as a separate thing.
-  base:           { fillColor: '#000000', fillOpacity: 0, strokeColor: 'rgba(255,255,255,0.2)', strokeWeight: 1, zIndex: 1 },
-  gpsBand:        { fillColor: '#3F80FF', fillOpacity: 0.35, strokeColor: 'rgba(255,255,255,0.2)', strokeWeight: 1, zIndex: 2 },
-  gpsSegment:     { fillColor: '#3F80FF', fillOpacity: 0.75, strokeColor: '#FFFFFF', strokeWeight: 1.5, zIndex: 5 },
-  hoverBand:      { fillColor: '#FFFFFF', fillOpacity: 0.18, strokeColor: 'rgba(255,255,255,0.3)', strokeWeight: 1, zIndex: 3 },
-  hoverSegment:   { fillColor: '#FFFFFF', fillOpacity: 0.45, strokeColor: '#FFFFFF', strokeWeight: 1.5, zIndex: 4 },
-  selectedBand:   { fillColor: '#FFD700', fillOpacity: 0.3, strokeColor: 'rgba(255,255,255,0.25)', strokeWeight: 1, zIndex: 6 },
-  selectedSegment:{ fillColor: '#FFD700', fillOpacity: 0.8, strokeColor: '#FFFFFF', strokeWeight: 2, zIndex: 7 },
-} satisfies Record<string, google.maps.Data.StyleOptions>;
-
 function styleFor(feature: google.maps.Data.Feature): google.maps.Data.StyleOptions {
-  const tzid = feature.getProperty('tzid') as string;
-  const offset = feature.getProperty('current_offset') as number;
-
-  const sameOffsetAs = (other: string | null) =>
-    other !== null && getUtcOffset(other) === offset;
-
-  // The GPS zone is shown as "selected" (gold) while it is the active choice.
-  const selectedTzid = state.gpsTimezoneSelected ? state.gpsTzid : state.selectedTzid;
-
-  if (tzid === selectedTzid) return STYLES.selectedSegment;
-  if (tzid === state.gpsTzid) return STYLES.gpsSegment;
-  if (sameOffsetAs(selectedTzid)) return STYLES.selectedBand;
-  if (sameOffsetAs(state.gpsTzid)) return STYLES.gpsBand;
-  if (tzid === state.hoveredTzid) return STYLES.hoverSegment;
-  if (sameOffsetAs(state.hoveredTzid)) return STYLES.hoverBand;
-  return STYLES.base;
+  return resolveZoneStyle({
+    tzid: feature.getProperty('tzid') as string,
+    offset: feature.getProperty('current_offset') as number,
+    // The GPS zone is shown as "selected" (gold) while it is the active choice.
+    selectedTzid: state.gpsTimezoneSelected ? state.gpsTzid : state.selectedTzid,
+    gpsTzid: state.gpsTzid,
+    hoveredTzid: state.hoveredTzid,
+    offsetOf: getUtcOffset,
+  });
 }
 
 /** Full restyle. Only for selection changes — hover uses the delta path below. */
