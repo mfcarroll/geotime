@@ -40,6 +40,8 @@ struct Provider: TimelineProvider {
         // is read live and shown separately when it differs.
         let local = WidgetSharedStore.loadLocalTimezone()
         return ClockEntry(date: date,
-                          rows: ZoneRowResolver.resolve(storedIds: ids, local: local, deviceTz: .current, now: date))
+                          rows: ZoneRowResolver.resolve(storedIds: ids, local: local, deviceTz: .current,
+                                                        now: date,
+                                                        localPlaceName: WidgetSharedStore.loadLocalPlaceName()))
     }
 }

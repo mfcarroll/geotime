@@ -23,6 +23,7 @@ public class WidgetBridgePlugin extends Plugin {
     static final String PREFS_NAME = "GeoTimeWidget";
     static final String PREFS_KEY = "worldClocks";
     static final String PREFS_LOCAL_TZ_KEY = "localTimezone";
+    static final String PREFS_LOCAL_PLACE_KEY = "localPlaceName";
 
     @Override
     public void load() {
@@ -50,6 +51,7 @@ public class WidgetBridgePlugin extends Plugin {
            .edit()
            .putString(PREFS_KEY, timezones.toString()) // JSArray extends JSONArray => JSON text
            .putString(PREFS_LOCAL_TZ_KEY, call.getString("localTimezone")) // may be null -> cleared
+           .putString(PREFS_LOCAL_PLACE_KEY, call.getString("localPlaceName"))
            .apply();
         GeoTimeWidgetProvider.refreshAll(ctx);
         call.resolve();

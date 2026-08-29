@@ -68,7 +68,7 @@ async function startApp() {
 
   // Heal the native home-screen widget on every launch, in case a previous
   // write was missed (app killed mid-write, data predating the widget, etc).
-  syncWidgetTimezones(state.addedTimezones, state.localTimezone);
+  syncWidgetTimezones(state.addedTimezones, state.localTimezone, state.localPlaceName);
 
   // Start watching for location immediately.
   if (Capacitor.isNativePlatform()) {

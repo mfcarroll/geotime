@@ -30,6 +30,8 @@ interface CityIndex {
   zoneOf: Int32Array;
   /** Region centroids, [lat, lon] pairs parallel to `regions`. */
   regionAt: Float64Array;
+  /** City positions, [lat, lon] pairs parallel to `names`. */
+  cityAt: Float64Array;
   /** Centroid of each zone's largest city's region, parallel to `zones`. */
   zoneAt: Float64Array;
 }
@@ -56,11 +58,25 @@ export function loadCityIndex(): Promise<CityIndex | null> {
 
       const regionAt = Float64Array.from(raw.ra.split(','), (n: string) => Number(n) / 100);
 
+      // Positions are stored as hundredths-of-a-degree offsets from the city's
+      // region centroid; small numbers gzip far better than absolute coordinates.
+      const dLat = raw.la.split(',');
+      const dLon = raw.lo.split(',');
+      const cityAt = new Float64Array(names.length * 2);
+      for (let i = 0; i < names.length; i++) {
+        const r = regionOf[i] * 2;
+        cityAt[i * 2] = regionAt[r] + Number(dLat[i]) / 100;
+        cityAt[i * 2 + 1] = regionAt[r + 1] + Number(dLon[i]) / 100;
+      }
+
       if (regionOf.length !== names.length || zoneOf.length !== names.length) {
         throw new Error('city index arrays are out of step');
       }
       if (regionAt.length !== raw.r.length * 2) {
         throw new Error('region centroids are out of step with the region list');
+      }
+      if (dLat.length !== names.length || dLon.length !== names.length) {
+        throw new Error('city coordinates are out of step with the name list');
       }
 
       // A zone borrows the centroid of its largest city's region. Cities are in
@@ -73,7 +89,7 @@ export function loadCityIndex(): Promise<CityIndex | null> {
         zoneAt[z + 1] = regionAt[regionOf[i] * 2 + 1];
       }
 
-      return { zones: raw.z, regions: raw.r, names, folded, regionOf, zoneOf, regionAt, zoneAt };
+      return { zones: raw.z, regions: raw.r, names, folded, regionOf, zoneOf, regionAt, cityAt, zoneAt };
     } catch (error) {
       // Zone-id search still works without this, so degrade rather than fail.
       console.warn('Could not load the city index:', error);
@@ -253,6 +269,71 @@ export function searchPlaces(
     }
   }
   return results;
+}
+
+export interface NearbyPlace {
+  /** "Nelson" */
+  name: string;
+  /** "BC, Canada" */
+  region: string;
+  km: number;
+}
+
+/**
+ * How far out of its way the lookup will go for a more recognisable place,
+ * in km per tenfold increase in population rank.
+ *
+ * Purely nearest is worse than it sounds: GeoNames puts Surrey's centroid 9 km
+ * from Surrey city hall while the neighbourhood of Fleetwood sits 4 km away, so
+ * the literal answer names a place most people there wouldn't use. At 6 the
+ * larger, better-known name wins that trade without swallowing genuine small
+ * towns — Nelson, Squamish and Creston still name themselves while standing in
+ * them. It does mean Brooklyn reports as New York City.
+ */
+const PROMINENCE_KM_PER_DECADE = 6;
+
+/**
+ * The nearest town to `origin` that keeps the same time.
+ *
+ * Restricted to `tzid` on purpose: naming a town just across a timezone
+ * boundary would put a place on the Local Time card that isn't on local time.
+ * In north-west Arizona the nearest town outright is Moapa Valley, Nevada, an
+ * hour behind — the answer has to be New Kingman-Butler instead.
+ *
+ * Returns null past `maxKm`, and for zones with no town at all, so callers fall
+ * back to naming the zone itself. Every zone that has any town in GeoNames
+ * contributes its largest one regardless of size, so Dawson and Cambridge Bay
+ * still answer; 26 zones (Adak, Thule, Resolute, ...) genuinely have none.
+ */
+export function nearestPlace(
+  index: CityIndex | null,
+  origin: Origin,
+  tzid: string,
+  maxKm = 150
+): NearbyPlace | null {
+  if (!index) return null;
+  const zoneIdx = index.zones.indexOf(tzid);
+  if (zoneIdx < 0) return null;
+
+  const { zoneOf, cityAt } = index;
+  let bestIdx = -1;
+  let bestKm = Infinity;
+  let bestScore = Infinity;
+  for (let i = 0; i < zoneOf.length; i++) {
+    if (zoneOf[i] !== zoneIdx) continue;
+    const km = distance(origin.lat, origin.lon, cityAt[i * 2], cityAt[i * 2 + 1]);
+    if (km > maxKm) continue;
+    // Index order is population order, so i is the prominence rank.
+    const score = km + PROMINENCE_KM_PER_DECADE * Math.log10(1 + i);
+    if (score < bestScore) { bestScore = score; bestKm = km; bestIdx = i; }
+  }
+
+  if (bestIdx < 0) return null;
+  return {
+    name: index.names[bestIdx],
+    region: index.regions[index.regionOf[bestIdx]],
+    km: bestKm,
+  };
 }
 
 /** A raw IANA id typed in full, for anything the index misses. */

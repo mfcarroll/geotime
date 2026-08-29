@@ -7,6 +7,12 @@ export interface AppState {
     localTimezone: string | null;
     deviceTimezone: string | null;   // OS timezone reported by native (may differ from localTimezone)
     gpsTzid: string | null;
+    /**
+     * Nearest town to the GPS fix inside the GPS zone; null when none is close.
+     * Persisted so a relaunch can hand the widget the last known place instead
+     * of blanking it until a fresh fix arrives.
+     */
+    localPlaceName: string | null;
     addedTimezones: string[];
     /**
      * Zone id -> the place the user actually picked. Searching "Nelson" stores
@@ -89,6 +95,7 @@ export const state: AppState = {
     localTimezone: null,
     deviceTimezone: null,
     gpsTzid: null,
+    localPlaceName: localStorage.getItem('localPlaceName') || null,
     addedTimezones: stored.map((z) => z.tz),
     zoneLabels: Object.fromEntries(
         stored.flatMap((z) => (z.label ? [[z.tz, z.label]] : []))),
@@ -128,7 +135,14 @@ export function persistTimezones(timezones: string[]): void {
 
     // The widgets take plain ids. Labels reach them in the widget work; sending
     // the richer shape now would break the build already on people's phones.
-    syncWidgetTimezones(timezones, state.localTimezone);
+    syncWidgetTimezones(timezones, state.localTimezone, state.localPlaceName);
+}
+
+/** Single write path for the resolved local place name (see AppState). */
+export function setLocalPlaceName(name: string | null): void {
+    state.localPlaceName = name;
+    if (name) localStorage.setItem('localPlaceName', name);
+    else localStorage.removeItem('localPlaceName');
 }
 
 /** Records the name the user picked for a zone (see AppState.zoneLabels). */

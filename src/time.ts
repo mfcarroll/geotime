@@ -116,7 +116,8 @@ export function updateAllClocks() {
       second: '2-digit'
     });
     dom.localDateEl.textContent = correctedTime.toLocaleDateString('en-US', { timeZone: localTimezone, weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
-    dom.localTimezoneEl.textContent = getDisplayTimezoneName(localTimezone);
+    // The town you're in, when we can name it — otherwise the zone.
+    dom.localTimezoneEl.textContent = state.localPlaceName ?? getDisplayTimezoneName(localTimezone);
   } catch (e) {
     dom.localTimeEl.textContent = "Error";
   }

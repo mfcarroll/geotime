@@ -8,7 +8,11 @@
 import { Capacitor, registerPlugin, type PluginListenerHandle } from '@capacitor/core';
 
 export interface WidgetBridgePlugin {
-  setTimezones(options: { timezones: string[]; localTimezone: string | null }): Promise<void>;
+  setTimezones(options: {
+    timezones: string[];
+    localTimezone: string | null;
+    localPlaceName: string | null;
+  }): Promise<void>;
   getDeviceTimezone(): Promise<{ id: string }>;
   addListener(
     eventName: 'deviceTimezoneChanged',
@@ -20,11 +24,22 @@ const WidgetBridge = registerPlugin<WidgetBridgePlugin>('WidgetBridge');
 
 // localTimezone is the app's GPS-derived "true" local zone (the widget uses it
 // as its base for the pin and offsets, matching the app's Local Time card).
-export function syncWidgetTimezones(timezones: string[], localTimezone: string | null): void {
+//
+// localPlaceName is the nearest town to the last GPS fix — "Nelson" rather than
+// "Vancouver". The widget can't work this out itself: the city index is a 1.8 MB
+// JSON the app parses, so the app resolves the name and hands over the result.
+// That means it only changes while the app is running, which the widget-refresh
+// work will need to address.
+export function syncWidgetTimezones(
+  timezones: string[],
+  localTimezone: string | null,
+  localPlaceName: string | null = null
+): void {
   if (!Capacitor.isNativePlatform()) return;
-  WidgetBridge.setTimezones({ timezones: [...timezones], localTimezone }).catch((err) => {
-    console.warn('WidgetBridge.setTimezones failed:', err);
-  });
+  WidgetBridge.setTimezones({ timezones: [...timezones], localTimezone, localPlaceName })
+    .catch((err) => {
+      console.warn('WidgetBridge.setTimezones failed:', err);
+    });
 }
 
 export async function getDeviceTimezone(): Promise<string | null> {

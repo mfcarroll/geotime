@@ -22,7 +22,8 @@ struct WidgetRow: Identifiable {
 // asked for both. (The device row is still offset-gated — see below — because
 // that row exists to answer "is my phone showing a different time".)
 enum ZoneRowResolver {
-    static func resolve(storedIds: [String], local: TimeZone, deviceTz: TimeZone, now: Date) -> [WidgetRow] {
+    static func resolve(storedIds: [String], local: TimeZone, deviceTz: TimeZone, now: Date,
+                        localPlaceName: String? = nil) -> [WidgetRow] {
         let localOffset = local.secondsFromGMT(for: now)
         var seenIds: Set<String> = [local.identifier] // local pre-claims its slot
         var rows: [WidgetRow] = []
@@ -30,7 +31,8 @@ enum ZoneRowResolver {
         let localParts = TimezoneDisplay.timeParts(local, at: now)
         rows.append(WidgetRow(
             id: local.identifier,
-            name: TimezoneDisplay.displayName(local.identifier),
+            // The town the app last placed you in, else the zone's own name.
+            name: localPlaceName ?? TimezoneDisplay.displayName(local.identifier),
             isLocal: true,
             isDevice: false,
             timeDigits: localParts.digits,

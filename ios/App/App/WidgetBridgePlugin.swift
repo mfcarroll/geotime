@@ -30,6 +30,7 @@ public class WidgetBridgePlugin: CAPPlugin, CAPBridgedPlugin {
         }
         WidgetSharedStore.save(zones)
         WidgetSharedStore.saveLocalTimezone(call.getString("localTimezone"))
+        WidgetSharedStore.saveLocalPlaceName(call.getString("localPlaceName"))
         if #available(iOS 14.0, *) {
             WidgetCenter.shared.reloadAllTimelines()
         }

@@ -184,7 +184,10 @@ public class GeoTimeWidgetProvider extends AppWidgetProvider {
         Set<String> seen = new HashSet<>();
         seen.add(baseId); // local pre-claims its slot
 
-        rows.add(new Row(cityLabel(baseId), baseId, baseOffset, true, false, null, null, ""));
+        // The town the app last placed you in ("Nelson"), else the zone's own name.
+        String localPlace = localPlaceName(ctx);
+        String baseLabel = localPlace != null ? localPlace : cityLabel(baseId);
+        rows.add(new Row(baseLabel, baseId, baseOffset, true, false, null, null, ""));
 
         // Device OS zone, shown separately when it differs from the GPS-local zone.
         TimeZone osTz = TimeZone.getDefault();
@@ -381,6 +384,15 @@ public class GeoTimeWidgetProvider extends AppWidgetProvider {
             return rz.tz;
         }
         return TimeZone.getDefault();
+    }
+
+    // Resolved by the app: the city index it comes from is far too large to
+    // parse in a widget provider.
+    private static String localPlaceName(Context ctx) {
+        SharedPreferences prefs = ctx.getSharedPreferences(
+                WidgetBridgePlugin.PREFS_NAME, Context.MODE_PRIVATE);
+        String name = prefs.getString(WidgetBridgePlugin.PREFS_LOCAL_PLACE_KEY, null);
+        return (name != null && !name.isEmpty()) ? name : null;
     }
 
     private static List<String> readStored(Context ctx) {

@@ -7,6 +7,7 @@ enum WidgetSharedStore {
     static let suiteName = "group.ca.matthewcarroll.geotime"
     static let key = "worldClocks"
     static let localTimezoneKey = "localTimezone"
+    static let localPlaceKey = "localPlaceName"
 
     static func save(_ zones: [String]) {
         guard let defaults = UserDefaults(suiteName: suiteName) else { return }
@@ -35,6 +36,22 @@ enum WidgetSharedStore {
         } else {
             defaults.removeObject(forKey: localTimezoneKey)
         }
+    }
+
+    // The nearest town to the app's last GPS fix, inside that fix's own zone —
+    // "Nelson" rather than "Vancouver". Resolved by the app, because the city
+    // index it comes from is far too large to parse in an extension.
+    static func saveLocalPlaceName(_ name: String?) {
+        guard let defaults = UserDefaults(suiteName: suiteName) else { return }
+        if let name = name, !name.isEmpty {
+            defaults.set(name, forKey: localPlaceKey)
+        } else {
+            defaults.removeObject(forKey: localPlaceKey)
+        }
+    }
+
+    static func loadLocalPlaceName() -> String? {
+        UserDefaults(suiteName: suiteName)?.string(forKey: localPlaceKey)
     }
 
     static func loadLocalTimezone() -> TimeZone {

@@ -1,11 +1,12 @@
 // src/map.ts
 
 import * as dom from './dom';
-import { state, persistTimezones } from './state';
-import { fetchTimezoneForCoordinates, findTimezoneFromGeoJSON, startClocks, getTimezoneOffset, getFormattedTime, getUtcOffset, getDisplayTimezoneName, getZoneLabel } from './time';
+import { state, persistTimezones, setLocalPlaceName } from './state';
+import { fetchTimezoneForCoordinates, findTimezoneFromGeoJSON, startClocks, getTimezoneOffset, getFormattedTime, getUtcOffset, getDisplayTimezoneName, getZoneLabel, updateAllClocks } from './time';
 import { locationMapStyles, worldTimezoneMapStyles } from './map-styles';
 import { syncWidgetTimezones } from './widget';
 import { distance, formatAccuracy, fold } from './utils';
+import { loadCityIndex, nearestPlace } from './cities';
 import { resolveZoneStyle } from './map-highlight';
 
 let userTimeInterval: number | null = null;
@@ -51,8 +52,8 @@ function updateCard(
 }
 
 export function updateUserTimezoneDetails(tzid: string) {
-  const city = getDisplayTimezoneName(tzid);
-  dom.userTimezoneNameEl.textContent = city;
+  // The map card names the zone; the Local Time card names the town you're in.
+  dom.userTimezoneNameEl.textContent = getDisplayTimezoneName(tzid);
   dom.userTimezoneDetailsEl.classList.remove('hidden');
 
   if (userTimeInterval) window.clearInterval(userTimeInterval);
@@ -411,13 +412,18 @@ export async function onLocationSuccess(pos: GeolocationPosition) {
       updateUserTimezoneDetails(tzid);
 
       // The widget bases its pin/offsets on the GPS-derived local zone.
-      syncWidgetTimezones(state.addedTimezones, state.localTimezone);
+      syncWidgetTimezones(state.addedTimezones, state.localTimezone, state.localPlaceName);
 
       refreshMapStyles();
 
       document.dispatchEvent(new CustomEvent('gpstimezonefound', { detail: { tzid } }));
     }
   }
+
+  // After the zone is settled, not before: the nearest-town lookup is scoped to
+  // the zone you are actually in, so running it against a stale gpsTzid finds
+  // nothing and falls back to the zone name.
+  void refreshLocalPlaceName(latitude, longitude);
 }
 
 /**
@@ -428,6 +434,34 @@ export async function onLocationSuccess(pos: GeolocationPosition) {
  * two zones can read the same today and differ in November, and if the user
  * asked for both they get both.
  */
+/**
+ * Names the town the user is standing in, for the Local Time card and the
+ * widget. Restricted to the user's own zone: a town just over a timezone
+ * boundary keeps a different time, so naming it on a "local time" card would be
+ * wrong. Falls back to the zone's own name when nothing is within range.
+ */
+let lastPlaceLookup: { lat: number; lon: number; tzid: string } | null = null;
+
+async function refreshLocalPlaceName(lat: number, lon: number): Promise<void> {
+  const tzid = state.gpsTzid;
+  if (!tzid) return;
+
+  // Only worth redoing once the fix has actually moved, or the zone changed.
+  if (lastPlaceLookup && lastPlaceLookup.tzid === tzid
+      && distance(lat, lon, lastPlaceLookup.lat, lastPlaceLookup.lon) < 1) {
+    return;
+  }
+  lastPlaceLookup = { lat, lon, tzid };
+
+  const place = nearestPlace(await loadCityIndex(), { lat, lon }, tzid);
+  const name = place?.name ?? null;
+  if (name === state.localPlaceName) return;
+
+  setLocalPlaceName(name);
+  updateAllClocks();
+  syncWidgetTimezones(state.addedTimezones, state.localTimezone, state.localPlaceName);
+}
+
 export function addUniqueTimezoneToList(tz: string) {
     if (state.addedTimezones.includes(tz)) return;
 
