@@ -24,9 +24,12 @@ export const FILLS = {
   selectedSegment: { fillColor: '#FFD700', fillOpacity: 0.8,  zIndex: 7 },
 } as const;
 
+// Same weight throughout — hover reads as a brighter border, not a thicker one.
+// A weight change nudges the boundary by a pixel, which looks like the shape
+// moved; brightness alone plus the fill lift is enough to pick a zone out.
 export const OUTLINE = {
   none:  { strokeColor: 'rgba(255,255,255,0.2)', strokeWeight: 1 },
-  hover: { strokeColor: '#FFFFFF', strokeWeight: 2.5 },
+  hover: { strokeColor: '#FFFFFF', strokeWeight: 1 },
 } as const;
 
 export interface ZoneStyleInput {
