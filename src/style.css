@@ -33,3 +33,63 @@
 .is-ios #app-container {
   margin-top: env(safe-area-inset-top);
 }
+
+/* --- city / timezone search combobox ---------------------------------- */
+/* A real listbox rather than a native <datalist>: on iOS the datalist renders
+   as a suggestion strip above the keyboard that people miss entirely. */
+
+.combobox-listbox {
+  position: absolute;
+  z-index: 30;
+  left: 0;
+  right: 0;
+  top: calc(100% + 0.25rem);
+  margin: 0;
+  padding: 0.25rem;
+  list-style: none;
+  max-height: 19rem;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  background: #374151;               /* gray-700, matching the input */
+  border: 1px solid #4b5563;         /* gray-600 */
+  border-radius: 0.5rem;
+  box-shadow: 0 12px 28px -8px rgb(0 0 0 / 0.55);
+}
+
+.combobox-option {
+  display: flex;
+  flex-direction: column;
+  gap: 0.05rem;
+  padding: 0.5rem 0.65rem;
+  border-radius: 0.375rem;
+  cursor: pointer;
+}
+
+.combobox-option.is-active {
+  background: #1d4ed8;               /* blue-700 */
+}
+
+.combobox-primary {
+  color: #f9fafb;
+  font-size: 0.975rem;
+  line-height: 1.25;
+}
+
+/* The zone a place actually keeps time by — "Nelson, BC, Canada" over
+   "Vancouver". Quieter, because it's context rather than the thing chosen. */
+.combobox-secondary {
+  color: #9ca3af;                    /* gray-400 */
+  font-size: 0.8rem;
+  line-height: 1.25;
+}
+
+.combobox-option.is-active .combobox-secondary {
+  color: #bfdbfe;                    /* blue-200 */
+}
+
+/* Safari shows its own clear affordance on type=search; ours is Escape. */
+#timezone-input::-webkit-search-decoration,
+#timezone-input::-webkit-search-cancel-button {
+  -webkit-appearance: none;
+}

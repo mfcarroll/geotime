@@ -8,10 +8,20 @@ import { booleanPointInPolygon } from '@turf/boolean-point-in-polygon';
 const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
 
 /**
- * A zone's display label. Prefers the label stored alongside the id (so a clock
- * added by searching "Mumbai" keeps saying Mumbai), and otherwise falls back to
- * the last segment of the IANA id.
+ * The name for a clock the user added: the place they picked if there is one
+ * (searching "Mumbai" keeps saying Mumbai, not Kolkata), else the zone's own
+ * name.
+ *
+ * Scope matters. Labels belong to rows in the World Clock list. Anything
+ * describing *where you are* or *which zone is on the map* uses
+ * getDisplayTimezoneName instead — otherwise labelling a clock "Nelson" renames
+ * the Local Time card too, and the app claims you're somewhere you aren't.
  */
+export function getZoneLabel(tz: string): string {
+    return state.zoneLabels[tz] ?? getDisplayTimezoneName(tz);
+}
+
+/** A zone's own name, derived from its IANA id. */
 export function getDisplayTimezoneName(tz: string): string {
     const gmt = parseEtcGmt(tz);
     if (gmt !== null) return `UTC${gmt >= 0 ? '+' : ''}${gmt}`;

@@ -8,6 +8,12 @@ export interface AppState {
     deviceTimezone: string | null;   // OS timezone reported by native (may differ from localTimezone)
     gpsTzid: string | null;
     addedTimezones: string[];
+    /**
+     * Zone id -> the place the user actually picked. Searching "Nelson" stores
+     * America/Vancouver but should keep saying Nelson; without this every clock
+     * is named after whichever city happens to name its zone.
+     */
+    zoneLabels: Record<string, string>;
     clocksInterval: number | null;
     locationMap: google.maps.Map | null;
     timezoneMap: google.maps.Map | null;
@@ -31,6 +37,11 @@ export interface AppState {
     timezonesFromUrl: string[] | null;
 }
 
+export interface StoredZone {
+    tz: string;
+    label?: string;
+}
+
 /**
  * Repairs a stored zone list written by older builds.
  *
@@ -39,12 +50,15 @@ export interface AppState {
  * them — so they were carried by hand-written parsers on three platforms. They
  * are rounded to the nearest valid whole-hour zone here and the parsers dropped.
  */
-export function migrateStoredTimezones(raw: unknown): string[] {
+export function migrateStoredTimezones(raw: unknown): StoredZone[] {
     if (!Array.isArray(raw)) return [];
-    const out: string[] = [];
+    const out: StoredZone[] = [];
     for (const entry of raw) {
-        if (typeof entry !== 'string' || !entry.trim()) continue;
-        let id = entry;
+        // Older builds stored bare id strings; newer ones store {tz, label}.
+        const source = typeof entry === 'string' ? { tz: entry } : entry;
+        if (!source || typeof source.tz !== 'string' || !source.tz.trim()) continue;
+
+        let id = source.tz;
         const fractional = id.match(/^Etc\/GMT([+-])(\d+)\.\d+$/);
         if (fractional) id = `Etc/GMT${fractional[1]}${fractional[2]}`;
         try {
@@ -52,12 +66,15 @@ export function migrateStoredTimezones(raw: unknown): string[] {
         } catch {
             continue; // unrecoverable; drop rather than poison the widget
         }
-        if (!out.includes(id)) out.push(id);
+        if (out.some((z) => z.tz === id)) continue;
+        out.push(typeof source.label === 'string' && source.label.trim()
+            ? { tz: id, label: source.label }
+            : { tz: id });
     }
     return out;
 }
 
-function loadStoredTimezones(): string[] {
+function loadStoredTimezones(): StoredZone[] {
     try {
         return migrateStoredTimezones(JSON.parse(localStorage.getItem('worldClocks') || '[]'));
     } catch {
@@ -65,12 +82,16 @@ function loadStoredTimezones(): string[] {
     }
 }
 
+const stored = loadStoredTimezones();
+
 export const state: AppState = {
     timeOffset: 0,
     localTimezone: null,
     deviceTimezone: null,
     gpsTzid: null,
-    addedTimezones: loadStoredTimezones(),
+    addedTimezones: stored.map((z) => z.tz),
+    zoneLabels: Object.fromEntries(
+        stored.flatMap((z) => (z.label ? [[z.tz, z.label]] : []))),
     clocksInterval: null,
     locationMap: null,
     timezoneMap: null,
@@ -94,6 +115,24 @@ export const state: AppState = {
 // localStorage, and mirrors the list to the native home-screen widgets.
 export function persistTimezones(timezones: string[]): void {
     state.addedTimezones = timezones;
-    localStorage.setItem('worldClocks', JSON.stringify(timezones));
+
+    // Drop labels for zones no longer on the list, so removing and re-adding a
+    // zone doesn't resurrect an old name.
+    for (const tz of Object.keys(state.zoneLabels)) {
+        if (!timezones.includes(tz)) delete state.zoneLabels[tz];
+    }
+
+    const payload: StoredZone[] = timezones.map((tz) =>
+        state.zoneLabels[tz] ? { tz, label: state.zoneLabels[tz] } : { tz });
+    localStorage.setItem('worldClocks', JSON.stringify(payload));
+
+    // The widgets take plain ids. Labels reach them in the widget work; sending
+    // the richer shape now would break the build already on people's phones.
     syncWidgetTimezones(timezones, state.localTimezone);
+}
+
+/** Records the name the user picked for a zone (see AppState.zoneLabels). */
+export function setZoneLabel(tzid: string, label: string | undefined): void {
+    if (label && label !== tzid) state.zoneLabels[tzid] = label;
+    else delete state.zoneLabels[tzid];
 }

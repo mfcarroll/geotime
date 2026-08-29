@@ -19,7 +19,7 @@ export default defineConfig({
   plugins: [
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['timezones.geojson', 'track.json', 'route.json'],
+      includeAssets: ['timezones.geojson', 'cities.json', 'track.json', 'route.json'],
       manifest: {
         name: 'GeoTime Dashboard',
         short_name: 'GeoTime',

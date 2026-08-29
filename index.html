@@ -106,10 +106,9 @@
           </div>
           <div class="card rounded-2xl shadow-lg p-6">
             <h2 class="text-xl font-semibold text-white mb-4">World Clock</h2>
-            <div class="flex flex-col sm:flex-row gap-2 mb-4">
-              <input list="timezone-list" id="timezone-input" class="flex-grow bg-gray-700 border border-gray-600 text-white placeholder-gray-400 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:outline-none" placeholder="Add timezone (e.g., Europe/London)">
-              <datalist id="timezone-list"></datalist>
-              <button id="add-timezone-btn" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg transition-colors duration-200">Add</button>
+            <div class="relative mb-4">
+              <input id="timezone-input" type="search" class="w-full bg-gray-700 border border-gray-600 text-white placeholder-gray-400 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:outline-none" placeholder="Search a city or timezone">
+              <ul id="timezone-results" class="combobox-listbox hidden"></ul>
             </div>
             <div id="world-clocks-container" class="space-y-4 pr-2"></div>
           </div>

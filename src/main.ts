@@ -4,12 +4,13 @@
 import './style.css';
 import { Loader } from '@googlemaps/js-api-loader';
 import * as dom from './dom';
-import { state, persistTimezones, migrateStoredTimezones } from './state';
-import { initMaps, onLocationError, onLocationSuccess, selectTimezone, renderWorldClocks, addUniqueTimezoneToList, updateUserTimezoneDetails, showLocationUnavailable } from './map';
-import { updateAllClocks, syncClock, getDisplayTimezoneName, startClocks, isValidTimezone } from './time';
+import { state, persistTimezones, migrateStoredTimezones, setZoneLabel } from './state';
+import { initMaps, onLocationError, onLocationSuccess, selectTimezone, renderWorldClocks, addUniqueTimezoneToList, updateUserTimezoneDetails, showLocationUnavailable, loadTimezoneGeoJson } from './map';
+import { updateAllClocks, syncClock, getDisplayTimezoneName, startClocks } from './time';
 import { Capacitor } from '@capacitor/core';
 import { syncWidgetTimezones, getDeviceTimezone, onDeviceTimezoneChanged } from './widget';
 import { Geolocation, PositionOptions } from '@capacitor/geolocation';
+import { createSearchCombobox } from './combobox';
 import { library, dom as faDom } from '@fortawesome/fontawesome-svg-core';
 import { faLocationDot, faWifi, faBullseye, faMobileAlt, faSatelliteDish } from '@fortawesome/free-solid-svg-icons';
 
@@ -23,7 +24,9 @@ function handleUrlParameters() {
     if (urlParams.has('timezones')) {
         const timezonesParam = urlParams.get('timezones');
         if (timezonesParam) {
-            const timezones = migrateStoredTimezones(timezonesParam.split(','));
+            const shared = migrateStoredTimezones(timezonesParam.split(','));
+            const timezones = shared.map((z) => z.tz);
+            for (const zone of shared) setZoneLabel(zone.tz, zone.label);
 
             persistTimezones(timezones);
 
@@ -31,21 +34,6 @@ function handleUrlParameters() {
         }
 
         history.replaceState(null, '', window.location.pathname);
-    }
-}
-
-function handleAddTimezone() {
-    const newTimezone = dom.timezoneInput.value.trim();
-    if (!newTimezone) return;
-
-    if (isValidTimezone(newTimezone)) {
-        addUniqueTimezoneToList(newTimezone);
-        if (state.localTimezone) {
-          updateAllClocks();
-        }
-        dom.timezoneInput.value = '';
-    } else {
-        alert('Invalid or unsupported timezone. Please select from the list.');
     }
 }
 
@@ -108,6 +96,10 @@ async function startApp() {
     );
   }
 
+  // The boundaries drive zone-id search and the offline GPS lookup, neither of
+  // which should wait on Google Maps — or be lost entirely when it fails to load.
+  const geoJsonReady = loadTimezoneGeoJson();
+
   // Load maps separately. A failure here will not block location services.
   const loader = new Loader({
     apiKey: GOOGLE_MAPS_API_KEY,
@@ -123,26 +115,18 @@ async function startApp() {
     // The location card will function independently.
   }
 
-  // Union of what the runtime lists and what the map data uses. They disagree:
-  // supportedValuesOf returns engine-dependent aliases (Asia/Calcutta on V8,
-  // Asia/Kolkata on WebKit) while the boundaries always use the modern name, so
-  // listing only one of them leaves zones you can click but cannot type.
-  const listedZones = new Set<string>(Intl.supportedValuesOf('timeZone'));
-  for (const f of state.geoJsonData?.features ?? []) listedZones.add(f.properties.tzid);
-  dom.timezoneList.innerHTML = [...listedZones].sort()
-    .map((tz) => `<option value="${tz}"></option>`).join('');
+  await geoJsonReady;
 
-  dom.addTimezoneBtn.addEventListener('click', handleAddTimezone);
-  dom.timezoneInput.addEventListener('keypress', (e) => {
-    if (e.key === 'Enter') handleAddTimezone();
-  });
-  
-  dom.timezoneInput.addEventListener('input', () => {
-    // Picking a datalist option fires 'input' with the full value; typing toward
-    // one usually doesn't land on a valid id until the pick.
-    if (isValidTimezone(dom.timezoneInput.value)) {
-        handleAddTimezone();
-    }
+  createSearchCombobox({
+    input: dom.timezoneInput,
+    listbox: dom.timezoneResults,
+    zoneIds: () => (state.geoJsonData?.features ?? []).map((f: any) => f.properties.tzid),
+    onSelect: (place) => {
+      setZoneLabel(place.tzid, place.kind === 'city' ? place.label : undefined);
+      addUniqueTimezoneToList(place.tzid);
+      selectTimezone(place.tzid);
+      updateAllClocks();
+    },
   });
 
   dom.worldClocksContainerEl.addEventListener('click', (e: MouseEvent) => {

@@ -22,8 +22,7 @@ export const deviceTimezoneEl = document.getElementById('device-timezone')!;
 
 // World Clock
 export const timezoneInput = document.getElementById('timezone-input') as HTMLInputElement;
-export const timezoneList = document.getElementById('timezone-list')!;
-export const addTimezoneBtn = document.getElementById('add-timezone-btn')!;
+export const timezoneResults = document.getElementById('timezone-results')!;
 export const worldClocksContainerEl = document.getElementById('world-clocks-container')!;
 export const worldClockTemplate = document.getElementById('world-clock-template') as HTMLTemplateElement;
 

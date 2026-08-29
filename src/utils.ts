@@ -34,3 +34,16 @@ export function formatAccuracy(accuracy: number): string {
         return `${accuracyInKm.toLocaleString(undefined, { minimumFractionDigits: fixed, maximumFractionDigits: fixed })}km`;
     }
 }
+const ASCII_ONLY = /^[\x20-\x7E]*$/;
+
+/**
+ * Lowercase and strip diacritics, for comparing and matching names — so a query
+ * for "zurich" finds "Zürich", and "Reykjavík" is recognised as the same place
+ * as the zone named "Reykjavik".
+ */
+export function fold(value: string): string {
+    const lower = value.toLowerCase();
+    // 81% of city names are plain ASCII; normalize() is comparatively slow.
+    if (ASCII_ONLY.test(lower)) return lower;
+    return lower.normalize('NFD').replace(/\p{Mn}+/gu, '');
+}

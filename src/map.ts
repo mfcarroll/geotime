@@ -2,10 +2,10 @@
 
 import * as dom from './dom';
 import { state, persistTimezones } from './state';
-import { fetchTimezoneForCoordinates, findTimezoneFromGeoJSON, startClocks, getTimezoneOffset, getFormattedTime, getUtcOffset, getDisplayTimezoneName } from './time';
+import { fetchTimezoneForCoordinates, findTimezoneFromGeoJSON, startClocks, getTimezoneOffset, getFormattedTime, getUtcOffset, getDisplayTimezoneName, getZoneLabel } from './time';
 import { locationMapStyles, worldTimezoneMapStyles } from './map-styles';
 import { syncWidgetTimezones } from './widget';
-import { distance, formatAccuracy } from './utils';
+import { distance, formatAccuracy, fold } from './utils';
 import { resolveZoneStyle } from './map-highlight';
 
 let userTimeInterval: number | null = null;
@@ -199,7 +199,7 @@ export async function initMaps() {
 
 async function setupTimezoneMapListeners() {
   if (!state.timezoneMap) return;
-  await loadTimezoneGeoJson();
+  await loadTimezoneGeoJson();   // usually already resolved; see startApp
 
   state.timezoneMap.data.addGeoJson(state.geoJsonData);
   indexFeaturesByOffset();
@@ -281,7 +281,7 @@ function setHoveredZone(tzid: string | null) {
   for (const f of touched) state.timezoneMap.data.overrideStyle(f, styleFor(f));
 }
 
-async function loadTimezoneGeoJson() {
+export async function loadTimezoneGeoJson() {
   if (state.geoJsonLoaded) return;
   try {
     const response = await fetch('timezones.geojson');
@@ -446,7 +446,7 @@ export function renderWorldClocks() {
     timezonesToRender
         .sort((a, b) =>
             getUtcOffset(a) - getUtcOffset(b) ||
-            getDisplayTimezoneName(a).localeCompare(getDisplayTimezoneName(b)))
+            getZoneLabel(a).localeCompare(getZoneLabel(b)))
         .forEach((tz: string) => {
             const clockElement = createClockElement(tz);
             dom.worldClocksContainerEl.appendChild(clockElement);
@@ -481,7 +481,14 @@ function createClockElement(tz: string): HTMLElement {
         clockDiv.classList.remove('bg-yellow-800', 'bg-opacity-50');
     }
 
-    clone.querySelector('.city')!.textContent = getDisplayTimezoneName(tz);
+    clone.querySelector('.city')!.textContent = getZoneLabel(tz);
+    // When the row is named after a place rather than its zone ("Nelson"), name
+    // the zone underneath so the mapping is visible ("Vancouver").
+    const zoneName = getDisplayTimezoneName(tz);
+    const regionEl = clone.querySelector('.region')!;
+    // Accents aside, "Reykjavík" and the zone "Reykjavik" are the same place —
+    // naming it twice would just look like a mistake.
+    regionEl.textContent = fold(zoneName) === fold(getZoneLabel(tz)) ? '' : zoneName;
     const removeBtn = clone.querySelector('.remove-btn') as HTMLElement;
     const pinBtn = clone.querySelector('.pin-btn') as HTMLElement;
 
