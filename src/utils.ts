@@ -47,3 +47,32 @@ export function fold(value: string): string {
     if (ASCII_ONLY.test(lower)) return lower;
     return lower.normalize('NFD').replace(/\p{Mn}+/gu, '');
 }
+
+/** A zone's own name, derived from its IANA id. */
+export function getDisplayTimezoneName(tz: string): string {
+    const gmt = parseEtcGmt(tz);
+    if (gmt !== null) return `UTC${gmt >= 0 ? '+' : ''}${gmt}`;
+    return tz.split('/').pop()?.replace(/_/g, ' ') || tz;
+}
+
+/**
+ * POSIX sign inversion: `Etc/GMT+5` is UTC-5. Returns null for everything else.
+ * Only whole-hour ids exist in tzdb — the fractional `Etc/GMT+5.5` ids the app
+ * used to synthesise were never valid, and are repaired on load (see state.ts).
+ */
+function parseEtcGmt(timeZone: string): number | null {
+    const m = timeZone.match(/^Etc\/GMT([+-])(\d+)$/);
+    if (!m) return null;
+    return (m[1] === '+' ? -1 : 1) * parseInt(m[2], 10);
+}
+
+/** True if the runtime can actually format in this zone. */
+export function isValidTimezone(tz: string): boolean {
+    if (!tz || !tz.trim()) return false;
+    try {
+        new Intl.DateTimeFormat('en-US', { timeZone: tz });
+        return true;
+    } catch {
+        return false;
+    }
+}

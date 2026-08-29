@@ -121,6 +121,9 @@ async function startApp() {
     input: dom.timezoneInput,
     listbox: dom.timezoneResults,
     zoneIds: () => (state.geoJsonData?.features ?? []).map((f: any) => f.properties.tzid),
+    origin: () => state.lastFetchedCoords
+      ? { lat: state.lastFetchedCoords.lat, lon: state.lastFetchedCoords.lon }
+      : null,
     onSelect: (place) => {
       setZoneLabel(place.tzid, place.kind === 'city' ? place.label : undefined);
       addUniqueTimezoneToList(place.tzid);

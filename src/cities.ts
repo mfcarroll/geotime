@@ -6,8 +6,7 @@
 // afterwards. On iOS/Android it ships inside the app package, so there is no
 // download at all.
 
-import { getDisplayTimezoneName, isValidTimezone } from './time';
-import { fold } from './utils';
+import { fold, distance, getDisplayTimezoneName, isValidTimezone } from './utils';
 
 export interface PlaceResult {
   /** IANA zone this place resolves to. */
@@ -29,6 +28,15 @@ interface CityIndex {
   folded: string[];
   regionOf: Int32Array;
   zoneOf: Int32Array;
+  /** Region centroids, [lat, lon] pairs parallel to `regions`. */
+  regionAt: Float64Array;
+  /** Centroid of each zone's largest city's region, parallel to `zones`. */
+  zoneAt: Float64Array;
+}
+
+export interface Origin {
+  lat: number;
+  lon: number;
 }
 
 let indexPromise: Promise<CityIndex | null> | null = null;
@@ -46,10 +54,26 @@ export function loadCityIndex(): Promise<CityIndex | null> {
       const regionOf = Int32Array.from(raw.ri.split(','), Number);
       const zoneOf = Int32Array.from(raw.zi.split(','), Number);
 
+      const regionAt = Float64Array.from(raw.ra.split(','), (n: string) => Number(n) / 100);
+
       if (regionOf.length !== names.length || zoneOf.length !== names.length) {
         throw new Error('city index arrays are out of step');
       }
-      return { zones: raw.z, regions: raw.r, names, folded, regionOf, zoneOf };
+      if (regionAt.length !== raw.r.length * 2) {
+        throw new Error('region centroids are out of step with the region list');
+      }
+
+      // A zone borrows the centroid of its largest city's region. Cities are in
+      // population order, so the first one seen for a zone is that city.
+      const zoneAt = new Float64Array(raw.z.length * 2).fill(NaN);
+      for (let i = 0; i < names.length; i++) {
+        const z = zoneOf[i] * 2;
+        if (!Number.isNaN(zoneAt[z])) continue;
+        zoneAt[z] = regionAt[regionOf[i] * 2];
+        zoneAt[z + 1] = regionAt[regionOf[i] * 2 + 1];
+      }
+
+      return { zones: raw.z, regions: raw.r, names, folded, regionOf, zoneOf, regionAt, zoneAt };
     } catch (error) {
       // Zone-id search still works without this, so degrade rather than fail.
       console.warn('Could not load the city index:', error);
@@ -85,48 +109,127 @@ function zoneResult(tzid: string): PlaceResult {
 }
 
 /**
+ * Distance from the origin to each region's centroid.
+ *
+ * Cities share a region, so this is 3,190 distance calculations per search
+ * instead of one per match — and the result is cached, because the origin only
+ * changes when the user physically moves.
+ */
+let distanceCache: { origin: Origin; km: Float64Array } | null = null;
+
+function regionDistances(index: CityIndex, origin: Origin): Float64Array {
+  if (distanceCache && distanceCache.origin.lat === origin.lat
+      && distanceCache.origin.lon === origin.lon) {
+    return distanceCache.km;
+  }
+  const { regionAt } = index;
+  const km = new Float64Array(regionAt.length / 2);
+  for (let r = 0; r < km.length; r++) {
+    km[r] = distance(origin.lat, origin.lon, regionAt[r * 2], regionAt[r * 2 + 1]);
+  }
+  distanceCache = { origin, km };
+  return km;
+}
+
+/** The `k` lowest-scoring entries, in order. Linear, with no full sort. */
+function bestBy(items: number[], k: number, score: (item: number) => number): number[] {
+  if (items.length <= k) {
+    return items.map((i) => [i, score(i)] as const)
+      .sort((a, b) => a[1] - b[1]).map(([i]) => i);
+  }
+  const top: { item: number; score: number }[] = [];
+  let worst = Infinity;
+  for (const item of items) {
+    const s = score(item);
+    if (top.length === k && s >= worst) continue;
+    let at = top.length;
+    while (at > 0 && top[at - 1].score > s) at--;
+    top.splice(at, 0, { item, score: s });
+    if (top.length > k) top.pop();
+    worst = top[top.length - 1].score;
+  }
+  return top.map((entry) => entry.item);
+}
+
+/**
+ * How much a place's prominence is discounted by being far away.
+ *
+ * Both terms are log-scaled and weighted equally, which lands where it should:
+ * searching "Nelson" from Nelson BC puts the local one first even though Nelson
+ * NZ is five times larger, while searching "London" from BC still puts London
+ * England ahead of London Ontario — 8.9 million people outweighs 4,500 km.
+ * Distance in km; lower score sorts first.
+ */
+function rankScore(populationRank: number, km: number): number {
+  return Math.log10(1 + populationRank) + Math.log10(1 + km / 50);
+}
+
+/**
  * Ranked matches for a query.
  *
  * Zone ids are searched from `zoneIds` (every zone on the map) and cities from
  * the downloaded index, so a zone with no town over the population floor —
  * America/Creston — stays findable even before the index loads.
+ *
+ * `origin` is the user's position when known. Without it, results fall back to
+ * pure prominence, which is the order the index is already stored in.
  */
 export function searchPlaces(
   query: string,
   zoneIds: string[],
   index: CityIndex | null,
+  origin: Origin | null = null,
   limit = 8
 ): PlaceResult[] {
   const q = fold(query.trim());
   if (!q) return [];
 
-  // Whole-string equality, then prefix, then anywhere. Within a tier the index
-  // is already population-ordered, so first-found is the best answer.
-  const cityExact: PlaceResult[] = [];
-  const cityPrefix: PlaceResult[] = [];
-  const cityContains: PlaceResult[] = [];
-  const zoneExact: PlaceResult[] = [];
-  const zonePrefix: PlaceResult[] = [];
-  const zoneContains: PlaceResult[] = [];
+  // Whole-string equality, then prefix, then anywhere. Cities are collected as
+  // indices and only turned into results once the tier has been ranked — the
+  // whole list has to be scanned, because a nearby small town can outrank a
+  // distant large one and an early cut-off would never see it.
+  const cityTiers: number[][] = [[], [], []];
+  const zoneTiers: PlaceResult[][] = [[], [], []];
 
   for (const tzid of zoneIds) {
     const segment = fold(getDisplayTimezoneName(tzid));
     const full = fold(tzid);
-    if (segment === q) zoneExact.push(zoneResult(tzid));
-    else if (segment.startsWith(q) || full.startsWith(q)) zonePrefix.push(zoneResult(tzid));
-    else if (full.includes(q)) zoneContains.push(zoneResult(tzid));
+    if (segment === q) zoneTiers[0].push(zoneResult(tzid));
+    else if (segment.startsWith(q) || full.startsWith(q)) zoneTiers[1].push(zoneResult(tzid));
+    else if (full.includes(q)) zoneTiers[2].push(zoneResult(tzid));
   }
 
   if (index) {
     const { folded } = index;
     for (let i = 0; i < folded.length; i++) {
       const name = folded[i];
-      // Cheap rejection first: most entries fail this.
-      if (!name.includes(q)) continue;
-      if (name === q) cityExact.push(cityResult(index, i));
-      else if (name.startsWith(q)) cityPrefix.push(cityResult(index, i));
-      else cityContains.push(cityResult(index, i));
-      if (cityExact.length + cityPrefix.length >= limit * 4) break;
+      if (!name.includes(q)) continue;               // cheap rejection first
+      if (name === q) cityTiers[0].push(i);
+      else if (name.startsWith(q)) cityTiers[1].push(i);
+      else cityTiers[2].push(i);
+    }
+  }
+
+  if (origin && index) {
+    const { regionOf, zones, zoneAt } = index;
+    const regionKm = regionDistances(index, origin);
+    const zoneIndexOf = new Map(zones.map((z, i) => [z, i]));
+
+    // Top-k selection, not a sort: a one-letter query matches tens of thousands
+    // of cities and only eight are ever drawn, so sorting them all is wasted.
+    for (let t = 0; t < cityTiers.length; t++) {
+      cityTiers[t] = bestBy(cityTiers[t], limit, (i) => rankScore(i, regionKm[regionOf[i]]));
+    }
+
+    // Zones only need ordering among themselves, so distance alone decides.
+    for (const tier of zoneTiers) {
+      const scored = new Map(tier.map((r) => {
+        const z = (zoneIndexOf.get(r.tzid) ?? -1) * 2;
+        return [r, z < 0 || Number.isNaN(zoneAt[z])
+          ? Infinity
+          : distance(origin.lat, origin.lon, zoneAt[z], zoneAt[z + 1])];
+      }));
+      tier.sort((a, b) => scored.get(a)! - scored.get(b)!);
     }
   }
 
@@ -135,16 +238,19 @@ export function searchPlaces(
   // Cities ahead of zones within each tier. A zone named after its city
   // ("Creston") collides with the city itself, and the city row is the better
   // one to keep — it says where the place is.
-  const ordered = [...cityExact, ...zoneExact, ...cityPrefix, ...zonePrefix,
-                   ...cityContains, ...zoneContains];
-  for (const candidate of ordered) {
-    // One row per place: the same city name can repeat across regions, but an
-    // identical name *and* zone is a duplicate as far as the user is concerned.
-    const key = `${candidate.tzid}|${candidate.label}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    results.push(candidate);
-    if (results.length >= limit) break;
+  for (let tier = 0; tier < 3 && results.length < limit; tier++) {
+    // Only the leading slice is materialised — a broad query like "san" matches
+    // thousands, and building a result object for each would be wasted work.
+    const ranked = cityTiers[tier].slice(0, limit).map((i) => cityResult(index!, i));
+    for (const candidate of [...ranked, ...zoneTiers[tier]]) {
+      // One row per place: the same city name can repeat across regions, but an
+      // identical name *and* zone is a duplicate as far as the user is concerned.
+      const key = `${candidate.tzid}|${candidate.label}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      results.push(candidate);
+      if (results.length >= limit) break;
+    }
   }
   return results;
 }

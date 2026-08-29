@@ -2,10 +2,15 @@
 
 import * as dom from './dom';
 import { state } from './state';
+import { getDisplayTimezoneName, isValidTimezone } from './utils';
 import { point as turfPoint } from '@turf/helpers';
 import { booleanPointInPolygon } from '@turf/boolean-point-in-polygon';
 
 const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
+
+// Zone naming is pure and lives in utils so it can be used (and tested)
+// without pulling in the DOM; re-exported here for existing callers.
+export { getDisplayTimezoneName, isValidTimezone } from './utils';
 
 /**
  * The name for a clock the user added: the place they picked if there is one
@@ -19,35 +24,6 @@ const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
  */
 export function getZoneLabel(tz: string): string {
     return state.zoneLabels[tz] ?? getDisplayTimezoneName(tz);
-}
-
-/** A zone's own name, derived from its IANA id. */
-export function getDisplayTimezoneName(tz: string): string {
-    const gmt = parseEtcGmt(tz);
-    if (gmt !== null) return `UTC${gmt >= 0 ? '+' : ''}${gmt}`;
-    return tz.split('/').pop()?.replace(/_/g, ' ') || tz;
-}
-
-/**
- * POSIX sign inversion: `Etc/GMT+5` is UTC-5. Returns null for everything else.
- * Only whole-hour ids exist in tzdb — the fractional `Etc/GMT+5.5` ids the app
- * used to synthesise were never valid, and are repaired on load (see state.ts).
- */
-function parseEtcGmt(timeZone: string): number | null {
-    const m = timeZone.match(/^Etc\/GMT([+-])(\d+)$/);
-    if (!m) return null;
-    return (m[1] === '+' ? -1 : 1) * parseInt(m[2], 10);
-}
-
-/** True if the runtime can actually format in this zone. */
-export function isValidTimezone(tz: string): boolean {
-    if (!tz || !tz.trim()) return false;
-    try {
-        new Intl.DateTimeFormat('en-US', { timeZone: tz });
-        return true;
-    } catch {
-        return false;
-    }
 }
 
 /**

@@ -9,17 +9,20 @@
 // default, and Enter or a tap commits it. There is no way to submit something
 // that isn't a real zone, so there is nothing to reject.
 
-import { loadCityIndex, searchPlaces, zoneFromRawInput, type PlaceResult } from './cities';
+import { loadCityIndex, searchPlaces, zoneFromRawInput, type Origin, type PlaceResult } from './cities';
 
 export interface ComboboxOptions {
   input: HTMLInputElement;
   listbox: HTMLElement;
   /** Every zone on the map, so zone ids stay searchable without the city index. */
   zoneIds: () => string[];
+  /** The user's position when known — read per search, since a GPS fix can
+   *  arrive after the box is already open. Results are ranked by nearness. */
+  origin: () => Origin | null;
   onSelect: (result: PlaceResult) => void;
 }
 
-export function createSearchCombobox({ input, listbox, zoneIds, onSelect }: ComboboxOptions) {
+export function createSearchCombobox({ input, listbox, zoneIds, origin, onSelect }: ComboboxOptions) {
   let results: PlaceResult[] = [];
   let active = -1;
   let queryToken = 0;
@@ -110,7 +113,7 @@ export function createSearchCombobox({ input, listbox, zoneIds, onSelect }: Comb
     // has to wait for the download.
     const show = (index: Awaited<ReturnType<typeof loadCityIndex>>) => {
       if (token !== queryToken) return; // a newer keystroke already won
-      results = searchPlaces(query, zoneIds(), index);
+      results = searchPlaces(query, zoneIds(), index, origin());
       const raw = zoneFromRawInput(query);
       if (raw && !results.some((r) => r.tzid === raw.tzid)) results.unshift(raw);
       active = results.length > 0 ? 0 : -1;
