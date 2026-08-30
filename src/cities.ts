@@ -99,17 +99,18 @@ export function loadCityIndex(): Promise<CityIndex | null> {
   return indexPromise;
 }
 
+// The second line is always the IANA id, on every row and for both kinds of
+// result. It used to show the zone's *city name* ("Vancouver") and swap to the
+// id only when that would have repeated the place name — so the same slot meant
+// "the zone's name" on one row and "the zone's identifier" on the next, which
+// read as arbitrary. One meaning throughout is worth a little more text.
 function cityResult(index: CityIndex, i: number): PlaceResult {
   const name = index.names[i];
-  const tzid = index.zones[index.zoneOf[i]];
-  const zoneName = getDisplayTimezoneName(tzid);
   return {
-    tzid,
+    tzid: index.zones[index.zoneOf[i]],
     label: name,
     primary: `${name}, ${index.regions[index.regionOf[i]]}`,
-    // When the place *is* the zone's namesake, the zone name adds nothing —
-    // show the identifier instead, which does.
-    secondary: fold(zoneName) === fold(name) ? tzid : zoneName,
+    secondary: index.zones[index.zoneOf[i]],
     kind: 'city',
   };
 }
