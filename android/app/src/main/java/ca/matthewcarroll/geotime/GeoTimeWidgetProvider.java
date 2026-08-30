@@ -174,7 +174,10 @@ public class GeoTimeWidgetProvider extends AppWidgetProvider {
 
     private static List<Row> buildRows(Context ctx) {
         long now = System.currentTimeMillis();
-        TimeZone baseTz = localBaseTimeZone(ctx);   // GPS-derived local
+        TimeZone osTz = TimeZone.getDefault();
+
+        LocalZone local = resolveLocal(ctx, osTz);
+        TimeZone baseTz = local.tz;                 // GPS-derived local, unless stale
         String baseId = baseTz.getID();
         long baseOffset = baseTz.getOffset(now) / 60000L;
 
@@ -185,12 +188,10 @@ public class GeoTimeWidgetProvider extends AppWidgetProvider {
         seen.add(baseId); // local pre-claims its slot
 
         // The town the app last placed you in ("Nelson"), else the zone's own name.
-        String localPlace = localPlaceName(ctx);
-        String baseLabel = localPlace != null ? localPlace : cityLabel(baseId);
+        String baseLabel = local.placeName != null ? local.placeName : cityLabel(baseId);
         rows.add(new Row(baseLabel, baseId, baseOffset, true, false, null, null, ""));
 
         // Device OS zone, shown separately when it differs from the GPS-local zone.
-        TimeZone osTz = TimeZone.getDefault();
         long osOffset = osTz.getOffset(now) / 60000L;
         if (osOffset != baseOffset) {
             seen.add(osTz.getID());
@@ -202,7 +203,7 @@ public class GeoTimeWidgetProvider extends AppWidgetProvider {
         }
 
         for (String id : stored) {
-            if (id.equals(baseId)) continue;
+            if (id.equals(baseId) || !isKnownZone(id)) continue;
             Resolved rz = resolveTimeZone(id);
             long off = rz.tz.getOffset(now) / 60000L;
             if (seen.contains(rz.tzId)) continue; // local / device / earlier zone wins the slot
@@ -221,6 +222,20 @@ public class GeoTimeWidgetProvider extends AppWidgetProvider {
         final TimeZone tz;
         final String tzId;
         Resolved(TimeZone tz, String tzId) { this.tz = tz; this.tzId = tzId; }
+    }
+
+    /**
+     * Whether tzdb actually knows this id.
+     *
+     * TimeZone.getTimeZone silently returns GMT for anything it doesn't
+     * recognise, so an id that never resolves would quietly show the wrong time
+     * rather than falling back. (Swift's TimeZone(identifier:) returns nil here,
+     * so without this check the two platforms disagree on corrupt input.)
+     */
+    private static boolean isKnownZone(String id) {
+        if (ETC_GMT.matcher(id).matches()) return true;      // remapped below
+        if (id.equals("GMT") || id.equals("UTC")) return true;
+        return !TimeZone.getTimeZone(id).getID().equals("GMT");
     }
 
     // "Etc/GMT+5.5" is not a valid tzdb id (naive getTimeZone => GMT+0). Parse it,
@@ -373,26 +388,51 @@ public class GeoTimeWidgetProvider extends AppWidgetProvider {
         return need <= usable;
     }
 
-    // The app's GPS-derived local zone (falls back to the OS default). This is the
-    // "local" base for the pin and offsets, matching the app's Local Time card.
-    private static TimeZone localBaseTimeZone(Context ctx) {
-        SharedPreferences prefs = ctx.getSharedPreferences(
-                WidgetBridgePlugin.PREFS_NAME, Context.MODE_PRIVATE);
-        String id = prefs.getString(WidgetBridgePlugin.PREFS_LOCAL_TZ_KEY, null);
-        if (id != null && !id.isEmpty()) {
-            Resolved rz = resolveTimeZone(id);
-            return rz.tz;
+    static class LocalZone {
+        final TimeZone tz;
+        final String placeName;
+        /** True when the stored GPS zone was discarded as overtaken by travel. */
+        final boolean supersededByDevice;
+        LocalZone(TimeZone tz, String placeName, boolean supersededByDevice) {
+            this.tz = tz; this.placeName = placeName;
+            this.supersededByDevice = supersededByDevice;
         }
-        return TimeZone.getDefault();
     }
 
-    // Resolved by the app: the city index it comes from is far too large to
-    // parse in a widget provider.
-    private static String localPlaceName(Context ctx) {
+    /**
+     * What the widget should treat as "local", and what to call it.
+     *
+     * The stored zone is GPS-derived and only refreshed while the app runs, so on
+     * its own the widget stays on your old timezone for a whole trip until you
+     * happen to open the app. Phones update their *own* timezone on landing, so a
+     * device zone that has changed since the app last wrote is firm evidence the
+     * stored one has been overtaken — trust the OS, and drop the place name with
+     * it, since it names a town you have left.
+     *
+     * Pure so the rule can be tested directly, and so it can be read beside the
+     * iOS twin, chooseLocal in WidgetSharedStore.swift.
+     */
+    static LocalZone chooseLocal(String storedZone, String writtenUnder,
+                                 String placeName, TimeZone deviceTz) {
+        if (storedZone == null || storedZone.isEmpty() || !isKnownZone(storedZone)) {
+            return new LocalZone(deviceTz, null, false);
+        }
+        if (writtenUnder != null && !writtenUnder.equals(deviceTz.getID())) {
+            return new LocalZone(deviceTz, null, true);
+        }
+        return new LocalZone(resolveTimeZone(storedZone).tz,
+                (placeName != null && !placeName.isEmpty()) ? placeName : null, false);
+    }
+
+    /** Reads the stored values and applies {@link #chooseLocal}. */
+    private static LocalZone resolveLocal(Context ctx, TimeZone osTz) {
         SharedPreferences prefs = ctx.getSharedPreferences(
                 WidgetBridgePlugin.PREFS_NAME, Context.MODE_PRIVATE);
-        String name = prefs.getString(WidgetBridgePlugin.PREFS_LOCAL_PLACE_KEY, null);
-        return (name != null && !name.isEmpty()) ? name : null;
+        return chooseLocal(
+                prefs.getString(WidgetBridgePlugin.PREFS_LOCAL_TZ_KEY, null),
+                prefs.getString(WidgetBridgePlugin.PREFS_DEVICE_TZ_AT_WRITE_KEY, null),
+                prefs.getString(WidgetBridgePlugin.PREFS_LOCAL_PLACE_KEY, null),
+                osTz);
     }
 
     private static List<String> readStored(Context ctx) {
