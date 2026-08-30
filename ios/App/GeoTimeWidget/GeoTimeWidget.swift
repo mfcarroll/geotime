@@ -43,14 +43,45 @@ struct GeoTimeWidgetView: View {
     @Environment(\.widgetFamily) private var family
     let entry: ClockEntry
 
-    private let richStride: CGFloat = 44
-    private let compactStride: CGFloat = 22
+    // Row heights are measured from the fonts each layout actually uses rather
+    // than assumed — see rowHeight(rich:). A fixed "stride" has to guess, and the
+    // guess was 44 against a real two-line row of 29, so a third row was refused
+    // roughly 30pt before it stopped fitting.
+    private let richSpacing: CGFloat = 8     // VStack spacing in two-line mode
+    private let compactSpacing: CGFloat = 4  // VStack spacing in single-line mode
+    private let rowSlack: CGFloat = 2        // guard against rounding, per row
     private let footerStride: CGFloat = 16
     private var isSmall: Bool { family == .systemSmall }
     private var detailFont: CGFloat { isSmall ? 7 : 10 }   // smaller secondary text on small
     private var vPad: CGFloat { family == .systemLarge ? 14 : 0 }
     private var hPad: CGFloat { isSmall ? 0 : 12 }
     private var pinSize: CGFloat { isSmall ? 9 : 10 }
+
+    // Font sizes live here so the height calculation and metrics() cannot drift.
+    private func cityBase(rich: Bool) -> CGFloat { isSmall ? 14 : (rich ? 15 : 14) }
+    private func subtitleSize() -> CGFloat { isSmall ? 9 : 10 }
+    private func timeSize(rich: Bool) -> CGFloat { (rich && !isSmall) ? 17 : 14 }
+
+    private func lineHeight(_ size: CGFloat) -> CGFloat {
+        ceil(UIFont.systemFont(ofSize: size).lineHeight)
+    }
+
+    /// Height of one row as RowView actually lays it out. Rich rows stack the
+    /// city over its offset (VStack spacing 1) beside the time; single-line rows
+    /// share one baseline. Uses the unscaled city size, so this is an upper bound.
+    private func rowHeight(rich: Bool) -> CGFloat {
+        let time = lineHeight(timeSize(rich: rich))
+        let city = lineHeight(cityBase(rich: rich))
+        let stacked = rich ? city + 1 + lineHeight(subtitleSize()) : city
+        return max(stacked, time) + rowSlack
+    }
+
+    /// Largest n with n*rowHeight + (n-1)*spacing <= available.
+    private func rowsThatFit(in available: CGFloat, rich: Bool) -> Int {
+        let h = rowHeight(rich: rich)
+        let spacing = rich ? richSpacing : compactSpacing
+        return max(1, Int((available + spacing) / (h + spacing)))
+    }
 
     private func width(_ s: String, _ size: CGFloat, weight: UIFont.Weight = .regular, mono: Bool = false) -> CGFloat {
         let font = mono ? UIFont.monospacedDigitSystemFont(ofSize: size, weight: weight)
@@ -65,19 +96,19 @@ struct GeoTimeWidgetView: View {
 
             // Two-line rows (offset under the city) when they all fit — for small
             // and large. Medium keeps its inline-offset single-line look.
-            let twoLineFits = Double(rows.count) * richStride <= usableH
+            // n rows occupy n heights and n-1 gaps, not n of each.
+            let twoLineFits = rows.count <= rowsThatFit(in: usableH, rich: true)
             let rich = family != .systemMedium && twoLineFits
 
-            let rowStride = rich ? richStride : compactStride
-            let maxRows = max(1, Int(usableH / rowStride))
+            let maxRows = rowsThatFit(in: usableH, rich: rich)
             let fitCount = rows.count > maxRows
-                ? max(1, Int((usableH - footerStride) / rowStride))
+                ? rowsThatFit(in: usableH - footerStride, rich: rich)
                 : maxRows
             let result = ZoneRowResolver.fit(rows, maxRows: fitCount)
             let metrics = self.metrics(for: result.visible, usableW: geo.size.width - hPad * 2, rich: rich)
 
             ZStack(alignment: .bottomTrailing) {
-                VStack(alignment: .leading, spacing: rich ? 8 : 4) {
+                VStack(alignment: .leading, spacing: rich ? richSpacing : compactSpacing) {
                     ForEach(result.visible) { row in
                         RowView(row: row, metrics: metrics)
                     }
@@ -102,17 +133,17 @@ struct GeoTimeWidgetView: View {
     // Fixed right-hand columns + one city font size that fits every row's name
     // (plus its inline offset, where shown).
     private func metrics(for rows: [WidgetRow], usableW: CGFloat, rich: Bool) -> RowMetrics {
-        let timeFont: CGFloat = (rich && !isSmall) ? 17 : 14
+        let timeFont = timeSize(rich: rich)
         let inlineOffset = !isSmall && !rich
         let hasPeriod = rows.contains { !$0.timePeriod.isEmpty }
         let periodColW = hasPeriod ? width("PM", detailFont, weight: .medium, mono: true) + 2 : 0
         let timeColW = width("88:88", timeFont, mono: true) + (hasPeriod ? periodColW + 2 : 0)
-        let subtitleFont: CGFloat = isSmall ? 9 : 10   // ←— RICH OFFSET-UNDER-CITY SIZE LEVER
+        let subtitleFont = subtitleSize()   // ←— RICH OFFSET-UNDER-CITY SIZE LEVER
 
         // Max city font. Small has its own value (stays compact even when it
         // expands to two lines, so single-line names still fit); large rich a
         // little larger.  ←— SMALL CITY SIZE LEVER
-        let cityBase: CGFloat = isSmall ? 14 : (rich ? 15 : 14)
+        let cityBase = self.cityBase(rich: rich)
         let dayTimeGap: CGFloat = isSmall ? 4 : 6   // ←— DAY↔TIME GAP LEVER
         let hGap: CGFloat = isSmall ? 3 : 5
         // Small two-line: the day label tucks under the time (line 2) rather than
