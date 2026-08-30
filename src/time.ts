@@ -164,7 +164,7 @@ export function getTimezoneOffset(tz1: string, tz2: string | null): string {
   try {
     const diffHours = getUtcOffset(tz1) - getUtcOffset(tz2);
 
-    if (diffHours === 0) return '±0 hrs';
+    if (diffHours === 0) return '+0 hrs';
 
     const sign = diffHours > 0 ? '+' : '−';
     const absoluteOffset = Math.abs(diffHours);
