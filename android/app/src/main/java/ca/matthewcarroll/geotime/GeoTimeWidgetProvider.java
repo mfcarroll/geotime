@@ -273,7 +273,7 @@ public class GeoTimeWidgetProvider extends AppWidgetProvider {
     // to read the same right now", not "here".
     private static String relativeOffset(long zoneOffsetMin, long deviceOffsetMin) {
         long diff = zoneOffsetMin - deviceOffsetMin;
-        if (diff == 0) return "Same time";
+        if (diff == 0) return "±0 hrs";
         String sign = diff > 0 ? "+" : "−";
         long abs = Math.abs(diff);
         long hours = abs / 60;

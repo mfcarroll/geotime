@@ -57,8 +57,13 @@ export function resolveZoneStyle(input: ZoneStyleInput): ZoneStyle {
   let fill: (typeof FILLS)[keyof typeof FILLS];
   if (tzid === selectedTzid) fill = FILLS.selectedSegment;
   else if (tzid === gpsTzid) fill = FILLS.gpsSegment;
-  else if (sameOffsetAs(selectedTzid)) fill = FILLS.selectedBand;
+  // The GPS band wins over the selected band where they are the same band.
+  // Picking a zone that already keeps your time shouldn't repaint the whole
+  // region: it is still the band you are in, so it stays blue and only the
+  // chosen zone goes gold. Gold spreads across a band only when that band is a
+  // different time from yours.
   else if (sameOffsetAs(gpsTzid)) fill = FILLS.gpsBand;
+  else if (sameOffsetAs(selectedTzid)) fill = FILLS.selectedBand;
   else if (sameOffsetAs(hoveredTzid)) fill = FILLS.hoverBand; // covers the hovered zone itself
   else fill = FILLS.base;
 

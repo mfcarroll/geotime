@@ -5,7 +5,10 @@ import UIKit
 extension Color {
     static let widgetBackground = Color(red: 31 / 255, green: 41 / 255, blue: 55 / 255)   // #1f2937
     static let widgetSecondary  = Color(red: 156 / 255, green: 163 / 255, blue: 175 / 255) // #9ca3af
-    static let widgetAccent     = Color(red: 74 / 255, green: 222 / 255, blue: 128 / 255)  // #4ade80 (green pin)
+    // White, like the arrow in Apple's own Weather widget. A green marker reads
+    // as an active-location indicator and makes the widget feel like it is
+    // tracking you, which it isn't — it renders whatever the app last resolved.
+    static let widgetAccent     = Color.white
 }
 
 struct GeoTimeWidget: Widget {

@@ -88,7 +88,7 @@ enum TimezoneDisplay {
         return a.year != b.year || a.month != b.month || a.day != b.day
     }
 
-    // Port of getTimezoneOffset (src/time.ts): "+3 hrs", "−5½ hrs", "Same time".
+    // Port of getTimezoneOffset (src/time.ts): "+3 hrs", "−5½ hrs", "±0 hrs".
     //
     // Only ever called for rows that are NOT the local one — the local row sets
     // its own text — so a zero difference means "a different place that happens
@@ -97,7 +97,7 @@ enum TimezoneDisplay {
     // Uses U+2212 minus to match the app.
     static func relativeOffset(zoneSeconds: Int, deviceSeconds: Int) -> String {
         let diffMin = (zoneSeconds - deviceSeconds) / 60
-        if diffMin == 0 { return "Same time" }
+        if diffMin == 0 { return "±0 hrs" }
         let sign = diffMin > 0 ? "+" : "\u{2212}"
         let absMin = abs(diffMin)
         let hours = absMin / 60
