@@ -135,7 +135,7 @@ export function persistTimezones(timezones: string[]): void {
 
     // The widgets take plain ids. Labels reach them in the widget work; sending
     // the richer shape now would break the build already on people's phones.
-    syncWidgetTimezones(timezones, state.localTimezone, state.localPlaceName);
+    syncWidgetTimezones(timezones, state.localTimezone, state.localPlaceName, state.zoneLabels);
 }
 
 /** Single write path for the resolved local place name (see AppState). */

@@ -179,6 +179,10 @@ public class GeoTimeWidgetProvider extends AppWidgetProvider {
         long baseOffset = baseTz.getOffset(now) / 60000L;
 
         List<String> stored = readStored(ctx);
+        // Names the user actually picked, parallel to `stored`. Searching
+        // "San Francisco" stores America/Los_Angeles, and the widget should say
+        // San Francisco rather than re-deriving Los Angeles from the id.
+        List<String> labels = readList(ctx, WidgetBridgePlugin.PREFS_LABELS_KEY);
 
         List<Row> rows = new ArrayList<>();
         Set<String> seen = new HashSet<>();
@@ -201,8 +205,11 @@ public class GeoTimeWidgetProvider extends AppWidgetProvider {
                     relativeOffset(osOffset, baseOffset)));
         }
 
-        for (String id : stored) {
-            if (id.equals(baseId)) continue;
+        // Indexed, because `labels` is parallel to `stored` — skipping an entry
+        // must not shift the rest of the names by one.
+        for (int i = 0; i < stored.size(); i++) {
+            String id = stored.get(i);
+            if (id.isEmpty() || id.equals(baseId)) continue;
             Resolved rz = resolveTimeZone(id);
             long off = rz.tz.getOffset(now) / 60000L;
             if (seen.contains(rz.tzId)) continue; // local / device / earlier zone wins the slot
@@ -210,7 +217,10 @@ public class GeoTimeWidgetProvider extends AppWidgetProvider {
             boolean differs = dayDiffers(rz.tz, baseTz, now);
             String dayShort = differs ? formatDay(rz.tz, now, false) : null;
             String dayFull = differs ? formatDay(rz.tz, now, true) : null;
-            rows.add(new Row(cityLabel(id), rz.tzId, off, false, false, dayShort, dayFull, relativeOffset(off, baseOffset)));
+            // The name the user chose, where there is one.
+            String chosen = (i < labels.size() && !labels.get(i).isEmpty()) ? labels.get(i) : null;
+            rows.add(new Row(chosen != null ? chosen : cityLabel(id), rz.tzId, off, false, false,
+                    dayShort, dayFull, relativeOffset(off, baseOffset)));
         }
 
         Collections.sort(rows, OFFSET_ORDER);
@@ -257,9 +267,13 @@ public class GeoTimeWidgetProvider extends AppWidgetProvider {
     }
 
     // Port of getTimezoneOffset (src/time.ts): "+3 hrs", "−5½ hrs" (U+2212 minus).
+    //
+    // Only ever called for rows that are NOT the local one — the local row sets
+    // its own text — so a zero difference means "a different place that happens
+    // to read the same right now", not "here".
     private static String relativeOffset(long zoneOffsetMin, long deviceOffsetMin) {
         long diff = zoneOffsetMin - deviceOffsetMin;
-        if (diff == 0) return "Local time";
+        if (diff == 0) return "Same time";
         String sign = diff > 0 ? "+" : "−";
         long abs = Math.abs(diff);
         long hours = abs / 60;
@@ -396,15 +410,20 @@ public class GeoTimeWidgetProvider extends AppWidgetProvider {
     }
 
     private static List<String> readStored(Context ctx) {
+        return readList(ctx, WidgetBridgePlugin.PREFS_KEY);
+    }
+
+    private static List<String> readList(Context ctx, String key) {
         List<String> result = new ArrayList<>();
         SharedPreferences prefs = ctx.getSharedPreferences(
                 WidgetBridgePlugin.PREFS_NAME, Context.MODE_PRIVATE);
-        String json = prefs.getString(WidgetBridgePlugin.PREFS_KEY, "[]");
+        String json = prefs.getString(key, "[]");
         try {
             JSONArray arr = new JSONArray(json);
             for (int i = 0; i < arr.length(); i++) {
-                String id = arr.optString(i, null);
-                if (id != null && !id.isEmpty()) result.add(id);
+                // Kept positional: labels are parallel to the zone list, so a
+                // blank entry must occupy its slot rather than shift the rest.
+                result.add(arr.optString(i, ""));
             }
         } catch (Exception ignored) {
             // malformed prefs -> treat as empty

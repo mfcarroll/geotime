@@ -8,6 +8,7 @@ enum WidgetSharedStore {
     static let key = "worldClocks"
     static let localTimezoneKey = "localTimezone"
     static let localPlaceKey = "localPlaceName"
+    static let labelsKey = "worldClockLabels"
 
     static func save(_ zones: [String]) {
         guard let defaults = UserDefaults(suiteName: suiteName) else { return }
@@ -15,6 +16,27 @@ enum WidgetSharedStore {
            let json = String(data: data, encoding: .utf8) {
             defaults.set(json, forKey: key)
         }
+    }
+
+    // Names the user actually picked, parallel to `load()`. Searching "San
+    // Francisco" stores America/Los_Angeles, and the widget should say San
+    // Francisco rather than re-deriving Los Angeles from the id.
+    static func saveLabels(_ labels: [String]) {
+        guard let defaults = UserDefaults(suiteName: suiteName) else { return }
+        if let data = try? JSONEncoder().encode(labels),
+           let json = String(data: data, encoding: .utf8) {
+            defaults.set(json, forKey: labelsKey)
+        }
+    }
+
+    static func loadLabels() -> [String] {
+        guard let defaults = UserDefaults(suiteName: suiteName),
+              let json = defaults.string(forKey: labelsKey),
+              let data = json.data(using: .utf8),
+              let labels = try? JSONDecoder().decode([String].self, from: data) else {
+            return []   // written by an older build; fall back to zone names
+        }
+        return labels
     }
 
     static func load() -> [String] {

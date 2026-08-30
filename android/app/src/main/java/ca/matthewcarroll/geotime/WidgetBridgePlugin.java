@@ -24,6 +24,7 @@ public class WidgetBridgePlugin extends Plugin {
     static final String PREFS_KEY = "worldClocks";
     static final String PREFS_LOCAL_TZ_KEY = "localTimezone";
     static final String PREFS_LOCAL_PLACE_KEY = "localPlaceName";
+    static final String PREFS_LABELS_KEY = "worldClockLabels";
 
     @Override
     public void load() {
@@ -46,10 +47,12 @@ public class WidgetBridgePlugin extends Plugin {
             call.reject("timezones must be a string array");
             return;
         }
+        JSArray labels = call.getArray("labels");
         Context ctx = getContext();
         ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
            .edit()
            .putString(PREFS_KEY, timezones.toString()) // JSArray extends JSONArray => JSON text
+           .putString(PREFS_LABELS_KEY, labels == null ? "[]" : labels.toString())
            .putString(PREFS_LOCAL_TZ_KEY, call.getString("localTimezone")) // may be null -> cleared
            .putString(PREFS_LOCAL_PLACE_KEY, call.getString("localPlaceName"))
            .apply();

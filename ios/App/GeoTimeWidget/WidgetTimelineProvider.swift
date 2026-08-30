@@ -42,6 +42,7 @@ struct Provider: TimelineProvider {
         return ClockEntry(date: date,
                           rows: ZoneRowResolver.resolve(storedIds: ids, local: local, deviceTz: .current,
                                                         now: date,
-                                                        localPlaceName: WidgetSharedStore.loadLocalPlaceName()))
+                                                        localPlaceName: WidgetSharedStore.loadLocalPlaceName(),
+                                                        labels: WidgetSharedStore.loadLabels()))
     }
 }

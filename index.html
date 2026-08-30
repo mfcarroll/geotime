@@ -117,14 +117,18 @@
     </div>
     
     <template id="world-clock-template">
-      <div class="relative grid grid-cols-5 lg:grid-cols-3 items-center gap-4 bg-gray-700/50 p-3 pr-10 rounded-lg border-2 border-transparent">
-        <div class="col-span-2 lg:col-span-1">
+      <!-- Flex, not a grid: the name takes whatever the time doesn't need. The
+           old grid gave the city a fixed 2 of 5 columns and left a whole third
+           column empty on wide screens, so long names truncated beside blank
+           space. min-w-0 is what lets the name actually shrink and ellipsize. -->
+      <div class="clock-row relative flex items-center gap-3 bg-gray-700/50 p-3 pr-10 rounded-lg border-2 border-transparent">
+        <div class="min-w-0 flex-1">
           <p class="city text-lg font-medium text-white truncate"></p>
-          <p class="region text-sm text-gray-400"></p>
+          <p class="region text-sm text-gray-400 truncate"></p>
         </div>
-        <div class="col-span-3 lg:col-span-1 text-left lg:text-center">
-          <p class="time text-2xl font-semibold text-white font-mono">--:--</p>
-          <p class="date-diff text-sm text-gray-400">--, +/- hrs</p>
+        <div class="flex-none text-right">
+          <p class="time text-xl font-semibold text-white font-mono whitespace-nowrap">--:--</p>
+          <p class="date-diff text-sm text-gray-400 whitespace-nowrap">--, +/- hrs</p>
         </div>
         <div class="absolute top-1/2 -translate-y-1/2 right-2 flex space-x-1">
           <button class="remove-btn text-gray-500 hover:text-red-400 transition-colors">

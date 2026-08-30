@@ -29,6 +29,7 @@ public class WidgetBridgePlugin: CAPPlugin, CAPBridgedPlugin {
             return
         }
         WidgetSharedStore.save(zones)
+        WidgetSharedStore.saveLabels(call.getArray("labels", String.self) ?? [])
         WidgetSharedStore.saveLocalTimezone(call.getString("localTimezone"))
         WidgetSharedStore.saveLocalPlaceName(call.getString("localPlaceName"))
         if #available(iOS 14.0, *) {

@@ -416,7 +416,7 @@ export async function onLocationSuccess(pos: GeolocationPosition) {
       updateUserTimezoneDetails(tzid);
 
       // The widget bases its pin/offsets on the GPS-derived local zone.
-      syncWidgetTimezones(state.addedTimezones, state.localTimezone, state.localPlaceName);
+      syncWidgetTimezones(state.addedTimezones, state.localTimezone, state.localPlaceName, state.zoneLabels);
 
       refreshMapStyles();
 
@@ -463,7 +463,7 @@ async function refreshLocalPlaceName(lat: number, lon: number): Promise<void> {
 
   setLocalPlaceName(name);
   updateAllClocks();
-  syncWidgetTimezones(state.addedTimezones, state.localTimezone, state.localPlaceName);
+  syncWidgetTimezones(state.addedTimezones, state.localTimezone, state.localPlaceName, state.zoneLabels);
 }
 
 export function addUniqueTimezoneToList(tz: string) {
@@ -494,7 +494,7 @@ export function renderWorldClocks() {
 function createClockElement(tz: string): HTMLElement {
     const template = dom.worldClockTemplate;
     const clone = template.content.cloneNode(true) as DocumentFragment;
-    const clockDiv = clone.querySelector('.grid') as HTMLElement;
+    const clockDiv = clone.querySelector('.clock-row') as HTMLElement;
 
     // Zone ids contain hyphens (America/Port-au-Prince, Etc/GMT-5), so a
     // slugified id cannot be turned back into the zone. Carry it verbatim.
@@ -524,9 +524,13 @@ function createClockElement(tz: string): HTMLElement {
     // the zone underneath so the mapping is visible ("Vancouver").
     const zoneName = getDisplayTimezoneName(tz);
     const regionEl = clone.querySelector('.region')!;
+    // Bracketed, because in a list of city names an unadorned "Los Angeles"
+    // under "San Francisco" reads like a second place rather than the zone the
+    // first one keeps time by. (The search dropdown shows bare IANA ids, where
+    // that ambiguity doesn't arise.)
     // Accents aside, "Reykjavík" and the zone "Reykjavik" are the same place —
     // naming it twice would just look like a mistake.
-    regionEl.textContent = fold(zoneName) === fold(getZoneLabel(tz)) ? '' : zoneName;
+    regionEl.textContent = fold(zoneName) === fold(getZoneLabel(tz)) ? '' : `(${zoneName})`;
     const removeBtn = clone.querySelector('.remove-btn') as HTMLElement;
     const pinBtn = clone.querySelector('.pin-btn') as HTMLElement;
 

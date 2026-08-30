@@ -10,6 +10,8 @@ import { Capacitor, registerPlugin, type PluginListenerHandle } from '@capacitor
 export interface WidgetBridgePlugin {
   setTimezones(options: {
     timezones: string[];
+    /** Parallel to `timezones`; '' where the user never named the place. */
+    labels: string[];
     localTimezone: string | null;
     localPlaceName: string | null;
   }): Promise<void>;
@@ -33,13 +35,21 @@ const WidgetBridge = registerPlugin<WidgetBridgePlugin>('WidgetBridge');
 export function syncWidgetTimezones(
   timezones: string[],
   localTimezone: string | null,
-  localPlaceName: string | null = null
+  localPlaceName: string | null = null,
+  labels: Record<string, string> = {}
 ): void {
   if (!Capacitor.isNativePlatform()) return;
-  WidgetBridge.setTimezones({ timezones: [...timezones], localTimezone, localPlaceName })
-    .catch((err) => {
-      console.warn('WidgetBridge.setTimezones failed:', err);
-    });
+  // Sent as an array parallel to `timezones` rather than a map, because the
+  // native side stores JSON arrays already and an empty string is an easy
+  // "no label" that older stores degrade to naturally.
+  WidgetBridge.setTimezones({
+    timezones: [...timezones],
+    labels: timezones.map((tz) => labels[tz] ?? ''),
+    localTimezone,
+    localPlaceName,
+  }).catch((err) => {
+    console.warn('WidgetBridge.setTimezones failed:', err);
+  });
 }
 
 export async function getDeviceTimezone(): Promise<string | null> {

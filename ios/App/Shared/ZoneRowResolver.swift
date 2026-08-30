@@ -23,7 +23,7 @@ struct WidgetRow: Identifiable {
 // that row exists to answer "is my phone showing a different time".)
 enum ZoneRowResolver {
     static func resolve(storedIds: [String], local: TimeZone, deviceTz: TimeZone, now: Date,
-                        localPlaceName: String? = nil) -> [WidgetRow] {
+                        localPlaceName: String? = nil, labels: [String] = []) -> [WidgetRow] {
         let localOffset = local.secondsFromGMT(for: now)
         var seenIds: Set<String> = [local.identifier] // local pre-claims its slot
         var rows: [WidgetRow] = []
@@ -64,9 +64,11 @@ enum ZoneRowResolver {
             ))
         }
 
-        for id in storedIds {
+        for (index, id) in storedIds.enumerated() {
             if id == local.identifier { continue }
             guard let info = TimezoneDisplay.resolveZone(id) else { continue }
+            // The name the user chose, where there is one.
+            let chosen = index < labels.count && !labels[index].isEmpty ? labels[index] : nil
             let off = info.timeZone.secondsFromGMT(for: now)
             if seenIds.contains(info.timeZone.identifier) { continue }
             seenIds.insert(info.timeZone.identifier)
@@ -74,7 +76,7 @@ enum ZoneRowResolver {
             let differs = TimezoneDisplay.dayDiffers(info.timeZone, local, at: now)
             rows.append(WidgetRow(
                 id: id,
-                name: info.displayName,
+                name: chosen ?? info.displayName,
                 isLocal: false,
                 isDevice: false,
                 timeDigits: parts.digits,
