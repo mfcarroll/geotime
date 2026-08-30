@@ -2,7 +2,7 @@
 
 import * as dom from './dom';
 import { state, persistTimezones, setLocalPlaceName } from './state';
-import { fetchTimezoneForCoordinates, findTimezoneFromGeoJSON, startClocks, getTimezoneOffset, getFormattedTime, getUtcOffset, getDisplayTimezoneName, getZoneLabel, updateAllClocks } from './time';
+import { timezoneForCoordinates, findTimezoneFromGeoJSON, startClocks, getTimezoneOffset, getFormattedTime, getUtcOffset, getDisplayTimezoneName, getZoneLabel, updateAllClocks } from './time';
 import { locationMapStyles, worldTimezoneMapStyles } from './map-styles';
 import { syncWidgetTimezones } from './widget';
 import { distance, formatAccuracy, fold } from './utils';
@@ -402,7 +402,11 @@ export async function onLocationSuccess(pos: GeolocationPosition) {
   const dist = distance(latitude, longitude, state.lastFetchedCoords?.lat || 0, state.lastFetchedCoords?.lon || 0);
   if (dist > 0.1 || crossedBoundary) {
     state.lastFetchedCoords = { lat: latitude, lon: longitude };
-    const tzid = await fetchTimezoneForCoordinates(latitude, longitude);
+    // Wait for the boundaries rather than guessing without them: resolving early
+    // would fall through to the nautical fallback and put a coastal city in the
+    // middle of the ocean.
+    await loadTimezoneGeoJson();
+    const tzid = timezoneForCoordinates(latitude, longitude);
 
     if (tzid && tzid !== state.localTimezone) {
       console.log(`Timezone updated to ${tzid}`);
