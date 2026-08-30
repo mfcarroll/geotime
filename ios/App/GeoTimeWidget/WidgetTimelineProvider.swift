@@ -36,17 +36,12 @@ struct Provider: TimelineProvider {
     }
 
     private func makeEntry(for date: Date, ids: [String]) -> ClockEntry {
-        // Foundation caches the system zone per process; an extension can outlive
-        // a timezone change, so ask for it fresh.
-        NSTimeZone.resetSystemTimeZone()
-        let deviceTz = TimeZone.current
-
-        // Base off the app's GPS-derived local zone unless the OS has moved on
-        // since it was written — see WidgetSharedStore.resolveLocal.
-        let local = WidgetSharedStore.resolveLocal(now: deviceTz)
+        // Base off the app's GPS-derived local timezone; the device's own OS zone
+        // is read live and shown separately when it differs.
+        let local = WidgetSharedStore.loadLocalTimezone()
         return ClockEntry(date: date,
-                          rows: ZoneRowResolver.resolve(storedIds: ids, local: local.zone, deviceTz: deviceTz,
+                          rows: ZoneRowResolver.resolve(storedIds: ids, local: local, deviceTz: .current,
                                                         now: date,
-                                                        localPlaceName: local.placeName))
+                                                        localPlaceName: WidgetSharedStore.loadLocalPlaceName()))
     }
 }

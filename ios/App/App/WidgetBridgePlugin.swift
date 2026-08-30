@@ -31,10 +31,6 @@ public class WidgetBridgePlugin: CAPPlugin, CAPBridgedPlugin {
         WidgetSharedStore.save(zones)
         WidgetSharedStore.saveLocalTimezone(call.getString("localTimezone"))
         WidgetSharedStore.saveLocalPlaceName(call.getString("localPlaceName"))
-        // Stamp the OS zone this write happened under, so the widget can tell
-        // when the stored GPS zone has since been overtaken by travel.
-        NSTimeZone.resetSystemTimeZone()
-        WidgetSharedStore.saveDeviceTimezoneAtWrite(TimeZone.current.identifier)
         if #available(iOS 14.0, *) {
             WidgetCenter.shared.reloadAllTimelines()
         }
