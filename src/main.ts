@@ -104,6 +104,7 @@ async function startApp() {
   const loader = new Loader({
     apiKey: GOOGLE_MAPS_API_KEY,
     version: "weekly",
+    region: "CA"
   });
 
   try {
