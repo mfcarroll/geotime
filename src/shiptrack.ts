@@ -124,12 +124,12 @@ const VOYAGE_MAX_AGE_MS = 30 * 60 * 1000;
 /**
  * How many ships' voyages to keep.
  *
- * Each holds a track of up to MAX_RETAINED_TRACK points, so this is the bound
- * that actually matters for storage: six of them is a couple of hundred
- * kilobytes at worst, against a localStorage budget this app shares with a
- * 1.8 MB city index. Six is also comfortably more than anyone keeps on a clock
- * list, so in practice nothing is ever evicted — this only stops a user who has
- * browsed many ships from filling the quota and silently losing all of it.
+ * Each holds a track of up to the upstream cap of 720 points — call it 20 KB —
+ * so this is the bound that actually matters for storage, against a localStorage
+ * budget this app shares with a 1.8 MB city index. Six is comfortably more than
+ * anyone keeps on a clock list, so in practice nothing is ever evicted; this only
+ * stops someone who has browsed many ships from filling the quota and silently
+ * losing all of it.
  */
 const MAX_CACHED_VOYAGES = 6;
 
@@ -355,94 +355,36 @@ export function voyageTrack(voyage: ShipVoyage): Array<[number, number]> {
 }
 
 /**
- * How many track points we are willing to remember for one voyage.
+ * The fresh voyage, keeping the old track when the new one is missing.
  *
- * The upstream window is 720. A fortnight-long cruise reporting every half hour
- * exceeds that, so retaining more than the window is the point — but not
- * without a bound, since this ends up in localStorage.
- */
-const MAX_RETAINED_TRACK = 2000;
-
-/** Two fixes are the same fix if they agree to about a decimetre. */
-function samePoint(a: [number, number], b: [number, number]): boolean {
-  return Math.abs(a[0] - b[0]) < 1e-6 && Math.abs(a[1] - b[1]) < 1e-6;
-}
-
-/**
- * Length of the overlap between the end of `retained` and the start of `fresh`.
+ * The narrow rule, and it took real data to get here. Upstream drops the track
+ * intermittently — observed on a vessel that had 720 points hours earlier while
+ * its route and position kept working — so a response that is a success by every
+ * other measure must not be allowed to erase history we already hold.
  *
- * The two arrays are windows onto the *same* underlying sequence of fixes, so
- * the join can be found exactly rather than estimated: the largest k where the
- * last k of one equals the first k of the other. That matters because the
- * geometric alternatives are both wrong on these itineraries. Matching the
- * nearest point discards the whole voyage when a round trip brings the ship back
- * past its start; matching the last point within a radius overshoots whenever
- * the vessel is barely moving, and duplicates the overlap. Neither can tell
- * "here again" from "here still", and the identical coordinates can.
- */
-function overlapLength(
-  retained: Array<[number, number]>,
-  fresh: Array<[number, number]>
-): number {
-  for (let k = Math.min(retained.length, fresh.length); k > 0; k--) {
-    let matched = true;
-    for (let i = 0; i < k; i++) {
-      if (!samePoint(retained[retained.length - k + i], fresh[i])) {
-        matched = false;
-        break;
-      }
-    }
-    if (matched) return k;
-  }
-  return 0;
-}
-
-/**
- * Combines the history we already had with the window upstream just sent.
+ * What this deliberately does NOT do is merge the two. That was the first
+ * attempt, splicing retained history onto the fresh window at their overlap, and
+ * two real consecutive captures of the same ship disproved it: they are
+ * index-aligned and differ in 274 of 720 points, sharing no exact run at all.
+ * Upstream is not serving a sliding window that can be spliced — it re-decimates
+ * the whole span to a 720-point cap on every request, so each response is
+ * already a complete picture of the voyage at slightly different sampling.
+ * Splicing them produced 1440 points: the same track drawn twice, once per
+ * sampling.
  *
- * Three things make this worth doing rather than simply taking the fresh copy:
+ * So anything non-empty from upstream is both complete and newer, and simply
+ * wins. Only emptiness is a reason to look backwards.
  *
- * 1. The track comes back EMPTY intermittently — observed on a vessel that had
- *    720 points hours earlier, while its route and position kept working. Taking
- *    the fresh copy would erase good history on a response that was, by every
- *    other measure, a success.
- * 2. The window is a fixed 720 points, so on a long cruise the earliest part of
- *    the voyage falls off the end. Those points are still this voyage's history.
- * 3. The wake is the one layer that cannot be re-derived later. A position we
- *    miss is gone; a route we can always re-ask for.
- */
-export function mergeTrack(
-  retained: Array<[number, number]>,
-  fresh: Array<[number, number]>
-): Array<[number, number]> {
-  if (fresh.length === 0) return retained;
-  if (retained.length === 0) return fresh;
-
-  // No overlap means the window has slid entirely past our copy, so the fresh
-  // points belong after everything we hold rather than instead of it.
-  const overlap = overlapLength(retained, fresh);
-  const merged = [...retained, ...fresh.slice(overlap)];
-
-  // Keep the newest, which is the part the map draws up to the ship.
-  return merged.length > MAX_RETAINED_TRACK
-    ? merged.slice(merged.length - MAX_RETAINED_TRACK)
-    : merged;
-}
-
-/**
- * The fresh voyage, carrying whatever history is worth keeping from the old one.
- *
- * Guarded on the voyage being the same sailing. A retained track from the
- * previous cruise would draw somebody else's wake under this one's route, which
- * is precisely the confusion clipping the track was meant to remove.
+ * Guarded on the sailing, because a track kept across a voyage boundary would
+ * draw somebody else's wake under this one's route — precisely the confusion
+ * that clipping the track exists to remove.
  */
 function withRetainedTrack(fresh: ShipVoyage, previous: ShipVoyage | undefined): ShipVoyage {
+  if (fresh.track.length > 0) return fresh;
   if (!previous || previous.track.length === 0) return fresh;
   if (previous.voyage.startDate !== fresh.voyage.startDate) return fresh;
 
-  const track = mergeTrack(previous.track, fresh.track);
-  if (track.length === fresh.track.length) return fresh;
-  return { ...fresh, track, trackRetained: true };
+  return { ...fresh, track: previous.track, trackRetained: true };
 }
 
 /**
