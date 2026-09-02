@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Debug-only overlay, merged by Gradle into debug builds and never into a
+     release. It exists for one reason: scripts/ship-gateway.mjs serves plain
+     HTTP on the emulator's host loopback (10.0.2.2), and Android has blocked
+     cleartext by default since API 28. Granting it in the main manifest would
+     ship the permission to everybody for the sake of a test. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <application android:usesCleartextTraffic="true" tools:replace="android:usesCleartextTraffic" />
+</manifest>

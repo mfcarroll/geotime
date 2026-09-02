@@ -5,7 +5,7 @@ import { defineConfig, loadEnv } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
 import basicSsl from '@vitejs/plugin-basic-ssl';
 
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
   // Change the base path for production builds
   base: '/',
   build: {
@@ -58,8 +58,57 @@ export default defineConfig({
   preview: {
     https: true,
     proxy: rcclDevProxy()
+  },
+  define: {
+    // Compiled to `null` in every mode but `shiptest`, so a release build has
+    // no path to a test host at all — see shipGateway().
+    __SHIP_GATEWAY__: JSON.stringify(shipGateway(mode)),
+  },
+}));
+
+/**
+ * The onboard-simulation gateway, or null.
+ *
+ * Native talks to api.rccl.com directly and must, since that is the only host
+ * reachable from a ship — which also means the Vite dev proxy's RCCL_SIM_SHIP
+ * trick cannot reach it, and the aboard path is otherwise untestable on a real
+ * device. scripts/ship-gateway.mjs stands in for a ship's own gateway, injecting
+ * the environment headers into real API responses; this is how the app is told
+ * to use it.
+ *
+ * Two guards, because the failure this could cause is the worst kind — a release
+ * quietly asking localhost for ship time, which would look exactly like a ship
+ * that cannot be reached:
+ *
+ *   1. Only honoured in `--mode shiptest`. Every other build, including the
+ *      ordinary `vite build` used for release, compiles this to `null`, so the
+ *      test host is not merely unused but absent from the bundle.
+ *   2. Only a loopback or emulator-host address is accepted. Anything else
+ *      fails the build rather than being ignored, since a gateway pointing
+ *      somewhere public is a mistake worth stopping.
+ */
+function shipGateway(mode) {
+  if (mode !== 'shiptest') return null;
+
+  const env = loadEnv(mode, process.cwd(), 'VITE_');
+  const url = env.VITE_SHIP_GATEWAY;
+  if (!url) {
+    throw new Error(
+      '--mode shiptest needs VITE_SHIP_GATEWAY set.\n'
+      + '  iOS simulator:    VITE_SHIP_GATEWAY=http://localhost:8899\n'
+      + '  Android emulator: VITE_SHIP_GATEWAY=http://10.0.2.2:8899'
+    );
   }
-});
+  // 10.0.2.2 is how an Android emulator reaches its host's loopback.
+  const allowed = /^http:\/\/(localhost|127\.0\.0\.1|10\.0\.2\.2)(:\d+)?$/;
+  if (!allowed.test(url.replace(/\/$/, ''))) {
+    throw new Error(
+      `VITE_SHIP_GATEWAY must be a loopback or emulator-host address, got "${url}".`
+    );
+  }
+  console.warn(`\n[shiptest] ship-time requests will go to ${url}, NOT api.rccl.com.\n`);
+  return url.replace(/\/$/, '');
+}
 
 /**
  * Substitutes the configured Worker origins into the page's CSP.

@@ -133,12 +133,27 @@ function loadAppKey(): Promise<string | null> {
   return appKeyPromise;
 }
 
+/**
+ * Onboard-simulation gateway, injected at build time and `null` in every build
+ * but `--mode shiptest`. See shipGateway() in vite.config.js for the guards.
+ */
+declare const __SHIP_GATEWAY__: string | null;
+
 function apiBase(): string {
   // Native talks to the real host through CapacitorHttp — it has to, since that
   // is the only thing that works from a ship. Dev goes same-origin through the
   // Vite proxy, which rewrites this prefix away. A production browser goes
   // through the Worker.
-  if (Capacitor.isNativePlatform()) return 'https://api.rccl.com';
+  if (Capacitor.isNativePlatform()) {
+    // The one way to exercise the aboard path on a real device: native cannot
+    // use the dev proxy's RCCL_SIM_SHIP, so a local stand-in for a ship's
+    // gateway takes its place. Compiled out of every ordinary build.
+    if (__SHIP_GATEWAY__) {
+      console.warn(`[shiptest] ship time via ${__SHIP_GATEWAY__} — NOT api.rccl.com`);
+      return __SHIP_GATEWAY__;
+    }
+    return 'https://api.rccl.com';
+  }
   if (import.meta.env.DEV) return '/rccl-api';
   return PROXY_BASE.replace(/\/$/, '');
 }
