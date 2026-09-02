@@ -5,7 +5,7 @@ import './style.css';
 import { Loader } from '@googlemaps/js-api-loader';
 import * as dom from './dom';
 import { state, persistTimezones, migrateStoredTimezones, setZoneLabel, syncWidget, addShipClock } from './state';
-import { initMaps, onLocationError, onLocationSuccess, selectTimezone, renderWorldClocks, addUniqueTimezoneToList, updateUserTimezoneDetails, showLocationUnavailable, loadTimezoneGeoJson } from './map';
+import { initMaps, onLocationError, onLocationSuccess, selectTimezone, selectShip, renderWorldClocks, addUniqueTimezoneToList, updateUserTimezoneDetails, showLocationUnavailable, loadTimezoneGeoJson } from './map';
 import { updateAllClocks, syncClock, getDisplayTimezoneName, startClocks } from './time';
 import { Capacitor } from '@capacitor/core';
 import { getDeviceTimezone, onDeviceTimezoneChanged } from './widget';
@@ -207,16 +207,32 @@ async function startApp() {
     } else {
         const clockDiv = target.closest<HTMLElement>('[data-clock-key]');
         const key = clockDiv?.dataset.clockKey;
-        // Tapping a ship row selects nothing: there is no region to highlight.
-        if (key && !key.startsWith('ship:')) {
-            selectTimezone(key);
-        }
+        if (!key) return;
+        // A ship highlights every zone keeping its time, without any zone being
+        // the ship. The "ship:" prefix exists only in the DOM, so it is stripped
+        // before the key reaches anything that stores or resolves it.
+        if (key.startsWith('ship:')) selectShip(key.slice('ship:'.length));
+        else selectTimezone(key);
     }
   });
 
   document.addEventListener('temporarytimezonechanged', () => {
     renderWorldClocks();
     updateAllClocks();
+  });
+
+  // Tapping a ship's marker is the same act as tapping its row. Routed through
+  // an event so ship-markers.ts does not have to import from map.ts, which
+  // already imports from it.
+  document.addEventListener('shipmarkerclick', (e) => {
+    selectShip((e as CustomEvent<{ key: string }>).detail.key);
+  });
+
+  // The ship we are aboard has no row to tap — it collapsed into this card — so
+  // the card itself is its affordance. Exactly the same act, just promoted.
+  dom.shipTimeSectionEl.addEventListener('click', () => {
+    const aboard = state.aboardShipKey;
+    if (aboard) selectShip(aboard);
   });
 
   // A ship that has just resolved needs the list rebuilt, because its offset is

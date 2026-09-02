@@ -28,6 +28,7 @@ import {
   FIX_MAX_AGE_MS,
   FIX_STALE_AGE_MS,
   type ShipFix,
+  type ShipVoyage,
 } from './shiptrack';
 
 /**
@@ -46,6 +47,9 @@ const UNDER_WAY_PATH = 'M 0,-9 L 5.5,7 L 0,3.5 L -5.5,7 Z';
 const HULL = '#F2F6FA';
 const HULL_STALE = '#9BAAB8';
 const OUTLINE = '#101922';
+// The same gold the zone layer paints a selected band with, so the marker and
+// the region it lit read as one answer rather than two.
+const SELECTED = '#FFD700';
 
 /** Live markers, keyed by "R/ST". */
 const markers = new Map<string, google.maps.Marker>();
@@ -60,21 +64,23 @@ let pollTimer: number | null = null;
  * going — and an arrow is a claim about direction. A dot makes no claim. Same
  * for a fix with neither course nor heading.
  */
-function symbolFor(fix: ShipFix, stale: boolean): google.maps.Symbol {
+function symbolFor(fix: ShipFix, stale: boolean, selected: boolean): google.maps.Symbol {
   const bearing = markerBearing(fix);
   const moving = (fix.sog ?? 0) > 0.5 && bearing !== null;
 
   return {
     path: moving ? UNDER_WAY_PATH : google.maps.SymbolPath.CIRCLE,
-    scale: moving ? 1 : 4.5,
+    // A touch larger when selected, on top of the colour change — the gold alone
+    // is hard to pick out against the gold band it just lit.
+    scale: (moving ? 1 : 4.5) * (selected ? 1.35 : 1),
     rotation: moving ? bearing! : 0,
-    fillColor: stale ? HULL_STALE : HULL,
+    fillColor: selected ? SELECTED : stale ? HULL_STALE : HULL,
     // Faded rather than hidden: an hour-old position is still worth seeing, it
     // just should not read as current.
-    fillOpacity: stale ? 0.55 : 1,
+    fillOpacity: stale && !selected ? 0.55 : 1,
     strokeColor: OUTLINE,
     strokeWeight: 1.5,
-    strokeOpacity: stale ? 0.55 : 0.9,
+    strokeOpacity: stale && !selected ? 0.55 : 0.9,
   };
 }
 
@@ -155,6 +161,8 @@ export function refreshShipMarkers(): void {
     const stale = age !== null && age > FIX_STALE_AGE_MS;
     const position = { lat: fix.lat, lng: fix.lon };
 
+    const selected = state.selectedShipKey === key;
+
     let marker = markers.get(key);
     if (!marker) {
       marker = new google.maps.Marker({
@@ -164,13 +172,21 @@ export function refreshShipMarkers(): void {
         // am I", which no ship marker should ever be mistaken for.
         zIndex: 50,
       });
+      // Announced rather than handled here, so this module does not have to
+      // import from map.ts, which imports from it. main.ts owns the wiring.
+      marker.addListener('click', () => {
+        document.dispatchEvent(new CustomEvent('shipmarkerclick', { detail: { key } }));
+      });
       markers.set(key, marker);
     } else {
       marker.setPosition(position);
     }
 
-    marker.setIcon(symbolFor(fix, stale));
+    marker.setIcon(symbolFor(fix, stale, selected));
     marker.setTitle(titleFor(ship, fix, age));
+    // Selected sits above its neighbours, which matters where ships cluster in
+    // the same port.
+    marker.setZIndex(selected ? 60 : 50);
     wanted.add(key);
   }
 
@@ -179,6 +195,48 @@ export function refreshShipMarkers(): void {
   for (const key of [...markers.keys()]) {
     if (!wanted.has(key)) removeMarker(key);
   }
+}
+
+/**
+ * Brings a ship into view: the whole cruise if we can, the ship itself if not.
+ *
+ * Takes the voyage as a promise rather than fetching it, so selection can be
+ * instant and the map settles a moment later — the highlight, the card and the
+ * marker do not wait on a network round trip.
+ *
+ * Fitting the ROUTE rather than the position is the difference between framing
+ * a cruise and framing a dot in an ocean. Where there is no route — a
+ * repositioning leg, a vessel between voyages — the position is the best
+ * available answer, and a modest zoom beats dropping the viewer at world scale
+ * onto a single marker.
+ */
+export async function fitToShip(key: string, voyage: Promise<ShipVoyage | null>): Promise<void> {
+  const map = state.timezoneMap;
+  if (!map) return;
+
+  const resolved = await voyage.catch(() => null);
+
+  // The user may have picked another ship, or deselected, while that was in
+  // flight. Moving the map now would be answering a question they stopped
+  // asking.
+  if (state.selectedShipKey !== key) return;
+
+  const extent = resolved?.extent;
+  if (extent && extent.length === 4 && extent.every((n) => Number.isFinite(n))) {
+    const [minLat, minLon, maxLat, maxLon] = extent;
+    map.fitBounds(
+      new google.maps.LatLngBounds({ lat: minLat, lng: minLon }, { lat: maxLat, lng: maxLon }),
+      // Enough margin that the route does not run into the edges, where the
+      // ports at each end of it would be half off the map.
+      48
+    );
+    return;
+  }
+
+  const fix = fixForShip(key);
+  if (!fix) return;
+  map.setCenter({ lat: fix.lat, lng: fix.lon });
+  map.setZoom(Math.max(map.getZoom() ?? 2, 4));
 }
 
 /** Drops every marker. For when ship features go away entirely. */

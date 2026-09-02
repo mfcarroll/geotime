@@ -36,8 +36,23 @@ export interface ZoneStyleInput {
   tzid: string;
   /** Current UTC offset of `tzid`, precomputed on the feature. */
   offset: number;
-  /** Zone the user has selected, or null. */
+  /**
+   * Zone the user has selected, or null.
+   *
+   * Null while a *ship* is selected, which is the whole reason this and
+   * `selectedOffset` are separate inputs: a ship keeps a time without occupying
+   * a zone, so it lights the band and no zone ever becomes the solid segment.
+   * Nothing on land *is* the ship.
+   */
   selectedTzid: string | null;
+  /**
+   * Offset the selection keeps time by, or null when nothing is selected.
+   *
+   * For a zone this is just that zone's current offset; for a ship it is the
+   * offset the crew set. Null for a ship whose offset has not resolved yet —
+   * without that, an unresolved ship would read as 0 and light up UTC.
+   */
+  selectedOffset: number | null;
   /** GPS-derived local zone, or null. */
   gpsTzid: string | null;
   /** Zone under the pointer, or null. */
@@ -47,7 +62,7 @@ export interface ZoneStyleInput {
 }
 
 export function resolveZoneStyle(input: ZoneStyleInput): ZoneStyle {
-  const { tzid, offset, selectedTzid, gpsTzid, hoveredTzid, offsetOf } = input;
+  const { tzid, offset, selectedTzid, selectedOffset, gpsTzid, hoveredTzid, offsetOf } = input;
 
   const sameOffsetAs = (other: string | null) =>
     other !== null && offsetOf(other) === offset;
@@ -63,7 +78,7 @@ export function resolveZoneStyle(input: ZoneStyleInput): ZoneStyle {
   // chosen zone goes gold. Gold spreads across a band only when that band is a
   // different time from yours.
   else if (sameOffsetAs(gpsTzid)) fill = FILLS.gpsBand;
-  else if (sameOffsetAs(selectedTzid)) fill = FILLS.selectedBand;
+  else if (selectedOffset === offset) fill = FILLS.selectedBand;
   else if (sameOffsetAs(hoveredTzid)) fill = FILLS.hoverBand; // covers the hovered zone itself
   else fill = FILLS.base;
 

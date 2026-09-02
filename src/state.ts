@@ -63,6 +63,15 @@ export interface AppState {
     selectedTzid: string | null;
     temporaryTimezone: string | null;
     gpsTimezoneSelected: boolean;
+    /**
+     * Ship whose band is highlighted, as a "R/ST" key, or null.
+     *
+     * Mutually exclusive with the zone selection above — selecting either clears
+     * the other, because the map paints one gold band and there is only one
+     * "selected" card to name it. Deliberately NOT persisted: a highlight is a
+     * question you are asking right now, not a preference.
+     */
+    selectedShipKey: string | null;
     timezonesFromUrl: string[] | null;
 }
 
@@ -179,6 +188,7 @@ export const state: AppState = {
     selectedTzid: null,
     temporaryTimezone: null,
     gpsTimezoneSelected: false,
+    selectedShipKey: null,
     timezonesFromUrl: null,
 };
 

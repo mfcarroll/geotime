@@ -2,12 +2,15 @@
 
 import * as dom from './dom';
 import { state, persistTimezones, setLocalPlaceName, syncWidget } from './state';
-import { timezoneForCoordinates, findTimezoneFromGeoJSON, startClocks, getTimezoneOffset, getFormattedTime, getUtcOffset, getDisplayTimezoneName, getZoneLabel, updateAllClocks } from './time';
+import { timezoneForCoordinates, findTimezoneFromGeoJSON, startClocks, getTimezoneOffset, getFormattedTime, getUtcOffset, getDisplayTimezoneName, getZoneLabel, updateAllClocks, formatOffsetDiff } from './time';
 import { locationMapStyles, worldTimezoneMapStyles } from './map-styles';
 import { distance, formatAccuracy, fold } from './utils';
 import { loadCityIndex, nearestPlace } from './cities';
 import { resolveZoneStyle } from './map-highlight';
 import { clockKey, clockLabel, clockSubLabel, visibleClocks, type ClockEntry } from './clocks';
+import { shipKey, type ShipClock } from './ships';
+import { voyageForShip } from './shiptrack';
+import { fitToShip, refreshShipMarkers } from './ship-markers';
 
 let userTimeInterval: number | null = null;
 const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
@@ -80,6 +83,9 @@ export function updateUserTimezoneDetails(tzid: string) {
 function selectZone(newTzid: string | null) {
     if (!newTzid) return;
 
+    // One gold band, one "selected" card: picking a zone drops any ship.
+    state.selectedShipKey = null;
+
     const isGpsTz = newTzid === state.gpsTzid;
     const isDeselecting = state.temporaryTimezone === newTzid;
 
@@ -105,11 +111,92 @@ function selectZone(newTzid: string | null) {
 
     if (isTouchDevice) setHoveredZone(null);
     refreshMapStyles();
+    // The ship selection was just cleared above; its marker has to stop looking
+    // selected, or the map shows two answers at once.
+    refreshShipMarkers();
     document.dispatchEvent(new CustomEvent('temporarytimezonechanged'));
 }
 
 export function selectTimezone(tzid: string) {
     selectZone(tzid);
+}
+
+/**
+ * Selects a ship, or toggles it off if it is already selected.
+ *
+ * The band this lights is "everywhere keeping the same time as this ship" —
+ * which is a genuinely different question from the one a zone answers, and the
+ * reason the feature exists. It is also why no zone goes solid gold: the ship
+ * keeps that time without being anywhere on land.
+ *
+ * Note what is NOT reachable here: the ship's band can coincide with your own,
+ * in which case the map does not change colour at all, because the GPS band
+ * outranks the selected band where they are the same band. That is the existing
+ * rule for zones and it is right for ships too — the ship keeps your time, so it
+ * is still your band. The row border, the card and the marker carry the
+ * selection in that case.
+ */
+export function selectShip(key: string): void {
+    const isDeselecting = state.selectedShipKey === key;
+
+    state.selectedShipKey = isDeselecting ? null : key;
+    // A ship and a zone cannot both be selected; clear the zone side, including
+    // the transient map pick, so the list does not keep showing a stray row.
+    if (!isDeselecting) {
+        state.selectedTzid = null;
+        state.temporaryTimezone = null;
+        if (state.gpsTimezoneSelected) {
+            state.gpsTimezoneSelected = false;
+            document.dispatchEvent(
+                new CustomEvent('gpstimezoneSelectionChanged', { detail: { selected: false } })
+            );
+        }
+    }
+
+    const ship = state.shipClocks.find((s) => shipKey(s) === key);
+    updateShipCard(isDeselecting ? null : ship ?? null);
+
+    if (isTouchDevice) setHoveredZone(null);
+    refreshMapStyles();
+    refreshShipMarkers();
+    document.dispatchEvent(new CustomEvent('temporarytimezonechanged'));
+
+    // Bring the ship into view, and fetch its voyage to do it properly: the
+    // route's own extent frames the whole cruise, where the position alone frames
+    // a dot in an ocean. Falls back to the position when there is no voyage —
+    // a repositioning leg has no route to fit.
+    if (!isDeselecting) void fitToShip(key, voyageForShip(key));
+}
+
+/**
+ * Names the selected ship on the map's detail card, or hides it.
+ *
+ * Reuses the zone card rather than adding a second one: it already means "the
+ * thing you picked", and a ship is a thing you picked. The value line is the
+ * offset from local time — the same reading the card gives for a zone, so the
+ * two are directly comparable.
+ */
+function updateShipCard(ship: ShipClock | null): void {
+    if (!ship) {
+        updateCard(
+            dom.selectedTimezoneDetailsEl, dom.selectedTimezoneNameEl,
+            dom.selectedTimezoneOffsetEl, null, 'offset'
+        );
+        return;
+    }
+
+    dom.selectedTimezoneNameEl.textContent = ship.name;
+    if (ship.offsetHours === null) {
+        // The same wording the clock row uses, for the same reason: no offset
+        // means nothing sensible to show, and the embark port's zone is the
+        // obvious wrong answer.
+        dom.selectedTimezoneOffsetEl.textContent = 'Finding ship time…';
+    } else {
+        const referenceTz = state.gpsTzid || Intl.DateTimeFormat().resolvedOptions().timeZone;
+        dom.selectedTimezoneOffsetEl.textContent =
+            formatOffsetDiff(ship.offsetHours - getUtcOffset(referenceTz));
+    }
+    dom.selectedTimezoneDetailsEl.classList.remove('hidden');
 }
 
 function createMyLocationButton(map: google.maps.Map) {
@@ -250,12 +337,29 @@ function bandOf(tzid: string | null): google.maps.Data.Feature[] {
   return featuresByOffset.get(getUtcOffset(tzid)) ?? [];
 }
 
+/**
+ * The zone id the gold *segment* belongs to, and the offset the gold *band*
+ * covers. A ship has the second without the first.
+ */
+function selectionFor(): { tzid: string | null; offset: number | null } {
+  if (state.selectedShipKey) {
+    const ship = state.shipClocks.find((s) => shipKey(s) === state.selectedShipKey);
+    // No tzid: nothing on land is the ship. And no offset until one resolves —
+    // otherwise an unresolved ship reads as 0 and lights up UTC.
+    return { tzid: null, offset: ship?.offsetHours ?? null };
+  }
+  // The GPS zone is shown as "selected" (gold) while it is the active choice.
+  const tzid = state.gpsTimezoneSelected ? state.gpsTzid : state.selectedTzid;
+  return { tzid, offset: tzid ? getUtcOffset(tzid) : null };
+}
+
 function styleFor(feature: google.maps.Data.Feature): google.maps.Data.StyleOptions {
+  const selection = selectionFor();
   return resolveZoneStyle({
     tzid: feature.getProperty('tzid') as string,
     offset: feature.getProperty('current_offset') as number,
-    // The GPS zone is shown as "selected" (gold) while it is the active choice.
-    selectedTzid: state.gpsTimezoneSelected ? state.gpsTzid : state.selectedTzid,
+    selectedTzid: selection.tzid,
+    selectedOffset: selection.offset,
     gpsTzid: state.gpsTzid,
     hoveredTzid: state.hoveredTzid,
     offsetOf: getUtcOffset,
@@ -503,11 +607,18 @@ function createClockElement(entry: ClockEntry): HTMLElement {
 
     clockDiv.classList.remove('border-transparent', 'border-blue-500', 'border-yellow-500');
 
+    const isSelectedShip =
+        entry.kind === 'ship' && shipKey(entry.ship) === state.selectedShipKey;
+
     if (tzid && tzid === state.gpsTzid && state.gpsTimezoneSelected) {
         clockDiv.classList.add('border-yellow-500');
     } else if (tzid && tzid === state.gpsTzid) {
         clockDiv.classList.add('border-blue-500');
     } else if (tzid && tzid === state.temporaryTimezone) {
+        clockDiv.classList.add('border-yellow-500');
+    } else if (isSelectedShip) {
+        // Same gold as a selected zone: the row, the band and the marker are one
+        // selection shown three ways, so they should not look like three states.
         clockDiv.classList.add('border-yellow-500');
     } else {
         clockDiv.classList.add('border-transparent');
