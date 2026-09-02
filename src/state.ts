@@ -8,6 +8,11 @@ import { syncWidgetTimezones } from './widget';
 import { loadShipRoster, newShipClock, shipKey, type ShipClock, type ShipRef } from './ships';
 import type { DeviceFix } from './ship-position';
 import { debugFlag } from './utils';
+import { seedForScreenshots } from './screenshot-seed';
+
+// Before the state below reads localStorage, and only in a screenshot build —
+// see screenshot-seed.ts, which compiles to nothing in a shipped app.
+seedForScreenshots();
 
 export interface AppState {
     timeOffset: number;

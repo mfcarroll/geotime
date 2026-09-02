@@ -82,6 +82,7 @@ export default defineConfig(({ mode }) => ({
     // Compiled to `null` in every mode but `shiptest`, so a release build has
     // no path to a test host at all — see shipGateway().
     __SHIP_GATEWAY__: JSON.stringify(shipGateway(mode)),
+    __SCREENSHOT_SEED__: JSON.stringify(screenshotSeed(mode)),
   },
 }));
 
@@ -124,6 +125,21 @@ function shipMarkerHeaders(mode) {
   if (mode !== 'shiptest' || process.env.SHIP_MARKER !== 'ship') return {};
   console.warn('\n[shiptest] preview reports ABOARD Star of the Seas (ST).\n');
   return { 'environment-marker': 'ship', 'environment-ship-code': 'ST' };
+}
+
+/**
+ * Whether to pre-populate the clock list for App Store screenshots.
+ *
+ * False for every ordinary build, which is what makes screenshot-seed.ts dead
+ * code the bundler drops. Opt in with `--mode screenshots`, or with
+ * VITE_SCREENSHOT_SEED=1 so it can ride along with `--mode shiptest` for the
+ * aboard shots.
+ */
+function screenshotSeed(mode) {
+  const on = mode === 'screenshots'
+    || loadEnv(mode, process.cwd(), 'VITE_').VITE_SCREENSHOT_SEED === '1';
+  if (on) console.warn('\n[screenshots] clock list will be pre-seeded. Do not ship this build.\n');
+  return on;
 }
 
 function shipGateway(mode) {
