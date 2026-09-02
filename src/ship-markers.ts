@@ -62,7 +62,7 @@ const OUTLINE = '#101922';
 const SELECTED = '#FFD700';
 
 /** Live markers, keyed by "R/ST". */
-const markers = new Map<string, google.maps.Marker>();
+const markers = new Map<string, google.maps.marker.AdvancedMarkerElement>();
 
 let pollTimer: number | null = null;
 
@@ -73,21 +73,43 @@ let pollTimer: number | null = null;
  * is rare — no vessel in the live fleet was missing both. An unrotated hull is a
  * weak claim in a way an unrotated arrow would not have been.
  */
-function symbolFor(fix: ShipFix, stale: boolean, selected: boolean): google.maps.Symbol {
-  return {
-    path: HULL_PATH,
-    // A touch larger when selected, on top of the colour change — the gold alone
-    // is hard to pick out against the gold band it just lit.
-    scale: selected ? 1.5 : 1.15,
-    rotation: markerBearing(fix) ?? 0,
-    fillColor: selected ? SELECTED : stale ? HULL_STALE : HULL,
-    // Faded rather than hidden: an hour-old position is still worth seeing, it
-    // just should not read as current.
-    fillOpacity: stale && !selected ? 0.55 : 1,
-    strokeColor: OUTLINE,
-    strokeWeight: 1.5,
-    strokeOpacity: stale && !selected ? 0.55 : 0.9,
-  };
+function hullElement(): HTMLElement {
+  const el = document.createElement('div');
+  el.className = 'ship-hull';
+  // The viewBox is symmetric about the origin, so the hull rotates about its own
+  // centre — the point the fix actually refers to — with no transform-origin to
+  // keep in step. The path is drawn in those same units.
+  el.innerHTML =
+    `<svg viewBox="-10 -10 20 20"><path d="${HULL_PATH}" stroke="${OUTLINE}" stroke-width="1.5"/></svg>`;
+  return el;
+}
+
+/**
+ * Restyles a hull in place, rather than rebuilding it.
+ *
+ * The Symbol this replaced was a fresh object handed to setIcon on every
+ * refresh. An element is retained and mutated, which is both cheaper and what
+ * lets the CSS transition on .ship-hull svg smooth a turning ship instead of
+ * snapping it — a Symbol could not be animated at all.
+ */
+function styleHull(el: HTMLElement, fix: ShipFix, stale: boolean, selected: boolean): void {
+  const svg = el.firstElementChild as SVGElement | null;
+  const path = svg?.firstElementChild as SVGElement | null;
+  if (!svg || !path) return;
+
+  // A touch larger when selected, on top of the colour change — the gold alone
+  // is hard to pick out against the gold band it just lit.
+  const scale = selected ? 1.5 : 1.15;
+  const size = 20 * scale;
+  svg.setAttribute('width', String(size));
+  svg.setAttribute('height', String(size));
+  svg.style.transform = `rotate(${markerBearing(fix) ?? 0}deg)`;
+
+  path.setAttribute('fill', selected ? SELECTED : stale ? HULL_STALE : HULL);
+  // Faded rather than hidden: an hour-old position is still worth seeing, it
+  // just should not read as current.
+  path.setAttribute('fill-opacity', stale && !selected ? '0.55' : '1');
+  path.setAttribute('stroke-opacity', stale && !selected ? '0.55' : '0.9');
 }
 
 /** "3 min ago", "2 hr ago" — relative, never a clock time. */
@@ -135,7 +157,7 @@ function markableShips(): ShipClock[] {
 function removeMarker(key: string): void {
   const marker = markers.get(key);
   if (!marker) return;
-  marker.setMap(null);
+  marker.map = null;
   markers.delete(key);
 }
 
@@ -171,28 +193,32 @@ export function refreshShipMarkers(): void {
 
     let marker = markers.get(key);
     if (!marker) {
-      marker = new google.maps.Marker({
+      marker = new google.maps.marker.AdvancedMarkerElement({
         map,
         position,
+        content: hullElement(),
         // Above the zone layer, below the blue GPS dot — that dot answers "where
         // am I", which no ship marker should ever be mistaken for.
         zIndex: 50,
+        // Off by default on an AdvancedMarkerElement, unlike the Marker this
+        // replaced, so the tap below would silently never fire without it.
+        gmpClickable: true,
       });
       // Announced rather than handled here, so this module does not have to
       // import from map.ts, which imports from it. main.ts owns the wiring.
-      marker.addListener('click', () => {
+      marker.addListener('gmp-click', () => {
         document.dispatchEvent(new CustomEvent('shipmarkerclick', { detail: { key } }));
       });
       markers.set(key, marker);
     } else {
-      marker.setPosition(position);
+      marker.position = position;
     }
 
-    marker.setIcon(symbolFor(fix, stale, selected));
-    marker.setTitle(titleFor(ship, fix, age));
+    styleHull(marker.content as HTMLElement, fix, stale, selected);
+    marker.title = titleFor(ship, fix, age);
     // Selected sits above its neighbours, which matters where ships cluster in
     // the same port.
-    marker.setZIndex(selected ? 60 : 50);
+    marker.zIndex = selected ? 60 : 50;
     wanted.add(key);
   }
 
@@ -231,12 +257,20 @@ const CASING = '#0B1219';
 const TRACK = '#E8EEF4';
 const PORT_RING = '#FFD700';
 
-/** Everything the chart owns, so it can be torn down without hunting. */
-let chart: google.maps.MVCObject[] = [];
+/**
+ * Everything the chart owns, so it can be torn down without hunting.
+ *
+ * A union rather than a common base type: AdvancedMarkerElement is not an
+ * MVCObject and detaches by assigning `map`, where a Polyline still wants
+ * setMap(null). Naming both is what keeps clearChart from having to guess.
+ */
+type ChartPiece = google.maps.Polyline | google.maps.marker.AdvancedMarkerElement;
+let chart: ChartPiece[] = [];
 
 function clearChart(): void {
-  for (const shape of chart) {
-    (shape as google.maps.Polyline | google.maps.Marker).setMap(null);
+  for (const piece of chart) {
+    if (piece instanceof google.maps.Polyline) piece.setMap(null);
+    else piece.map = null;
   }
   chart = [];
 }
@@ -340,19 +374,16 @@ export async function drawShipChart(key: string, voyage: Promise<ShipVoyage | nu
   }
 
   for (const port of resolved.ports) {
-    chart.push(new google.maps.Marker({
+    const ring = document.createElement('div');
+    ring.className = 'ship-port';
+    ring.innerHTML =
+      `<svg viewBox="-8 -8 16 16" width="16" height="16"><circle r="4" fill="${CASING}" ` +
+      `fill-opacity="0.9" stroke="${PORT_RING}" stroke-width="2" stroke-opacity="0.95"/></svg>`;
+    chart.push(new google.maps.marker.AdvancedMarkerElement({
       map,
       position: { lat: port.lat, lng: port.lon },
       title: portTitle(port, null),
-      icon: {
-        path: google.maps.SymbolPath.CIRCLE,
-        scale: 4,
-        fillColor: CASING,
-        fillOpacity: 0.9,
-        strokeColor: PORT_RING,
-        strokeWeight: 2,
-        strokeOpacity: 0.95,
-      },
+      content: ring,
       // Under the ship itself, over the lines.
       zIndex: 40,
     }));

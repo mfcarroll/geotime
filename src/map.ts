@@ -314,24 +314,67 @@ function setShipVoyageLine(voyage: ShipVoyage | null): void {
     dom.selectedShipVoyageEl.classList.toggle('hidden', parts.length === 0);
 }
 
+/**
+ * The blue GPS dot, as an element rather than a Symbol path.
+ *
+ * AdvancedMarkerElement anchors its content by the bottom centre, so the dot is
+ * nudged down half its own height to sit ON the coordinate rather than above it.
+ * That offset is the one thing a Symbol did for free and an element does not.
+ */
+function blueDot(): HTMLElement {
+  const el = document.createElement('div');
+  el.className = 'gps-dot';
+  el.innerHTML =
+    '<svg viewBox="-10 -10 20 20" width="20" height="20">' +
+    '<circle r="5" fill="#4285F4" stroke="#FFFFFF" stroke-width="2"/></svg>';
+  return el;
+}
+
+/**
+ * AdvancedMarkerElement has no setVisible. Detaching from the map would work but
+ * costs a re-add; hiding the content leaves the marker in place, which is what
+ * this is for — a dot with no fix yet, not a dot that has gone away.
+ */
+function setMarkerVisible(marker: google.maps.marker.AdvancedMarkerElement, visible: boolean): void {
+  const content = marker.content as HTMLElement | null;
+  if (content) content.style.visibility = visible ? 'visible' : 'hidden';
+}
+
+/**
+ * A crosshair that recentres the map on the last known position.
+ *
+ * The glyph is inline SVG rather than an <img src>. As a file it was one more
+ * request that could fail — and did, showing a broken-image icon — for a 500-byte
+ * shape that never changes. Inline it cannot 404, it inherits currentColor, and
+ * it stays sharp at any density.
+ *
+ * The button is 44x44 with a transparent frame around a smaller visible face.
+ * That is Apple's minimum touch target and this control had been 30, hard
+ * against the map edge. Undersizing it was not a quiet failure either: a near
+ * miss falls through to the zone layer underneath, so tapping at the compass and
+ * slightly missing SELECTS A TIMEZONE — the map appears to ignore the button and
+ * do something random instead. Whatever hit area this ends up with, it must stay
+ * larger than the face it draws.
+ */
 function createMyLocationButton(map: google.maps.Map) {
     const controlButton = document.createElement('button');
-    controlButton.style.backgroundColor = '#aaa';
-    controlButton.style.border = 'none';
-    controlButton.style.borderRadius = '2px';
-    controlButton.style.boxShadow = '0 2px 6px rgba(0,0,0,.3)';
-    controlButton.style.cursor = 'pointer';
-    controlButton.style.margin = '10px';
-    controlButton.style.padding = '3px';
-    controlButton.style.textAlign = 'center';
-    controlButton.title = 'Click to recenter the map on your location';
+    controlButton.type = 'button';
+    controlButton.className = 'map-recentre';
+    controlButton.title = 'Recentre the map on your location';
+    controlButton.setAttribute('aria-label', 'Recentre the map on your location');
+    controlButton.innerHTML = `
+      <span class="map-recentre-face" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+          <circle cx="12" cy="12" r="4"/>
+          <path d="M13 4.069V2h-2v2.069A8.01 8.01 0 0 0 4.069 11H2v2h2.069A8.008 8.008 0 0 0 11 19.931V22h2v-2.069A8.007 8.007 0 0 0 19.931 13H22v-2h-2.069A8.008 8.008 0 0 0 13 4.069zM12 18c-3.309 0-6-2.691-6-6s2.691-6 6-6 6 2.691 6 6-2.691 6-6 6z"/>
+        </svg>
+      </span>`;
     map.controls[google.maps.ControlPosition.TOP_RIGHT].push(controlButton);
 
-    const controlText = document.createElement('div');
-    controlText.innerHTML = '<img src="/current-location.svg" width="24" height="24"/>';
-    controlButton.appendChild(controlText);
-
-    controlButton.addEventListener('click', () => {
+    controlButton.addEventListener('click', (event) => {
+        // The zone layer is listening on the map underneath. A click that lands
+        // on the button is not also a click on the world.
+        event.stopPropagation();
         if (state.lastFetchedCoords) {
             map.setCenter({ lat: state.lastFetchedCoords.lat, lng: state.lastFetchedCoords.lon });
         }
@@ -340,7 +383,7 @@ function createMyLocationButton(map: google.maps.Map) {
 
 export async function initMaps() {
   const { Map } = await google.maps.importLibrary("maps") as google.maps.MapsLibrary;
-  const { Marker } = await google.maps.importLibrary("marker") as google.maps.MarkerLibrary;
+  const { AdvancedMarkerElement } = await google.maps.importLibrary("marker") as google.maps.MarkerLibrary;
   const { Circle } = await google.maps.importLibrary("maps") as google.maps.MapsLibrary;
 
   const locationMapOptions: google.maps.MapOptions = {
@@ -363,16 +406,12 @@ export async function initMaps() {
   state.locationMap = new Map(locationMapEl, locationMapOptions);
   createMyLocationButton(state.locationMap);
   
-  const blueDotIcon: google.maps.Symbol = {
-      path: google.maps.SymbolPath.CIRCLE,
-      scale: 5,
-      fillColor: '#4285F4',
-      fillOpacity: 1,
-      strokeColor: '#FFFFFF',
-      strokeWeight: 2,
-  };
-
-  state.locationMarker = new Marker({ map: state.locationMap, position: { lat: 0, lng: 0 }, icon: blueDotIcon, visible: false });
+  state.locationMarker = new AdvancedMarkerElement({
+    map: state.locationMap,
+    position: { lat: 0, lng: 0 },
+    content: blueDot(),
+  });
+  setMarkerVisible(state.locationMarker, false);
   state.accuracyCircle = new Circle({
     map: state.locationMap,
     radius: 0,
@@ -387,7 +426,12 @@ export async function initMaps() {
   const timezoneMapEl = document.getElementById('timezone-map') as HTMLElement;
   state.timezoneMap = new Map(timezoneMapEl, timezoneMapOptions);
   createMyLocationButton(state.timezoneMap);
-  state.timezoneMapMarker = new Marker({ map: state.timezoneMap, position: { lat: 0, lng: 0 }, icon: blueDotIcon, visible: false });
+  state.timezoneMapMarker = new AdvancedMarkerElement({
+    map: state.timezoneMap,
+    position: { lat: 0, lng: 0 },
+    content: blueDot(),
+  });
+  setMarkerVisible(state.timezoneMapMarker, false);
 
   await setupTimezoneMapListeners();
 
@@ -523,8 +567,8 @@ function updateLocationMap(lat: number, lon: number, accuracy: number) {
     if (state.locationMap && state.locationMarker && state.accuracyCircle) {
         const pos = { lat, lng: lon };
 
-        state.locationMarker.setPosition(pos);
-        state.locationMarker.setVisible(true);
+        state.locationMarker.position = pos;
+        setMarkerVisible(state.locationMarker, true);
         state.accuracyCircle.setCenter(pos);
         state.accuracyCircle.setRadius(accuracy);
 
@@ -553,8 +597,8 @@ function updateTimezoneMapMarker(lat: number, lon: number) {
     if (!state.initialLocationSet) {
         state.timezoneMap.setCenter(pos);
     }
-    state.timezoneMapMarker.setPosition(pos);
-    state.timezoneMapMarker.setVisible(true);
+    state.timezoneMapMarker.position = pos;
+    setMarkerVisible(state.timezoneMapMarker, true);
   }
 }
 
@@ -608,10 +652,10 @@ export async function onLocationSuccess(pos: GeolocationPosition) {
   } else if (state.mapsReady) {
     // For subsequent updates, just move the markers without re-centering.
     if (state.locationMarker) {
-      state.locationMarker.setPosition({ lat: latitude, lng: longitude });
+      state.locationMarker.position = { lat: latitude, lng: longitude };
     }
     if (state.timezoneMapMarker) {
-      state.timezoneMapMarker.setPosition({ lat: latitude, lng: longitude });
+      state.timezoneMapMarker.position = { lat: latitude, lng: longitude };
     }
     if (state.accuracyCircle) {
       const pos = { lat: latitude, lng: longitude };

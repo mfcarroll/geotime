@@ -46,8 +46,8 @@ export interface AppState {
     clocksInterval: number | null;
     locationMap: google.maps.Map | null;
     timezoneMap: google.maps.Map | null;
-    locationMarker: google.maps.Marker | null;
-    timezoneMapMarker: google.maps.Marker | null;
+    locationMarker: google.maps.marker.AdvancedMarkerElement | null;
+    timezoneMapMarker: google.maps.marker.AdvancedMarkerElement | null;
     accuracyCircle: google.maps.Circle | null;
     locationAvailable: boolean;
     initialLocationSet: boolean;

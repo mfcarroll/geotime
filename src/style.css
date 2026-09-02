@@ -159,3 +159,60 @@
   font-weight: 500;
 }
 .diagnostics-send:hover { background: #1d4ed8; }
+
+/* The map recentre control. The button is the touch target — 44x44, per
+   Apple's minimum — and .map-recentre-face is the smaller square it draws, so
+   the chrome stays the size it looked best at while the tappable area does
+   not. Shrinking the button to match the face would put a near miss through to
+   the zone layer below, which selects a timezone instead of doing nothing. */
+.map-recentre {
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.map-recentre-face {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 2px;
+  background: #aaa;
+  color: #000;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, .3);
+}
+.map-recentre:hover .map-recentre-face { background: #c4c4c4; }
+.map-recentre:active .map-recentre-face { background: #8f8f8f; }
+
+/* AdvancedMarkerElement anchors its content by the bottom centre, so anything
+   meant to sit ON its coordinate — rather than above it, like a pin — has to be
+   pushed down half its own height. Symbol markers centred themselves; elements
+   do not. line-height:0 keeps the box the size of the glyph. */
+.gps-dot,
+.ship-hull,
+.ship-port {
+  line-height: 0;
+  transform: translateY(50%);
+}
+.ship-hull svg,
+.ship-port svg,
+.gps-dot svg {
+  display: block;
+  overflow: visible;
+}
+/* A ship turns rather than snapping to its new heading. Only reachable now that
+   the hull is an element — a Symbol path could not be transitioned. */
+.ship-hull svg {
+  transition: transform 400ms ease;
+}
+@media (prefers-reduced-motion: reduce) {
+  .ship-hull svg { transition: none; }
+}
