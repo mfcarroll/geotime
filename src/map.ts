@@ -12,6 +12,70 @@ import { shipKey, type ShipClock } from './ships';
 import { voyageForShip, type ShipVoyage } from './shiptrack';
 import { clearShipChart, drawShipChart, fitToShip, refreshShipMarkers } from './ship-markers';
 
+/**
+ * Cloud-styled vector maps.
+ *
+ * The base map used to be raster tiles styled server-side from the arrays in
+ * map-styles.ts, which meant every label was baked pixels — upscaled on a 3x
+ * display and soft no matter what colours it was given. Measured on device:
+ * raster served 512px tiles into 256 CSS px in every configuration, so the
+ * softness was never something styling or resolution could fix. Vector draws
+ * labels client-side at device resolution instead.
+ *
+ * The trade is that a Map ID replaces inline `styles` — the API ignores them
+ * when one is present — so the palette now lives in Google Cloud console styling
+ * against these two IDs. They are public identifiers, not secrets: they travel
+ * in every tile request, and the API key is what carries the restrictions.
+ *
+ * Defaulted in code rather than required from the environment on purpose. As
+ * env-only they would be absent in CI, and the maps would quietly fall back to
+ * raster in exactly the builds nobody inspects by hand. Overriding to an empty
+ * string is the deliberate way back to the old path.
+ */
+/**
+ * Both maps go vector, each with its own style.
+ *
+ * This was one map for a while, on a finding that turned out to be wrong. Two
+ * vector maps really did fail in WKWebView — one rendered, the other stayed a
+ * flat beige — but the cause was not a WebGL context limit. It was our own CSP:
+ * no worker-src, so it fell back to script-src, which does not allow blob:, and
+ * the renderer's WebGL workers were blocked. See the comment on the policy in
+ * index.html. The measurements were real; the explanation was a guess, and it
+ * held for as long as it did because the failure names nothing.
+ *
+ * Re-measured on the simulator with the policy fixed: both maps render, styled,
+ * across six cold launches for the location map and three for the world map,
+ * pixel-identical each time, with no CSP violation reaching the device log.
+ *
+ * Confirmed on a real iPhone as well, which is the check that counts: the
+ * simulator's WebGL does not go through a phone's driver, and a context limit —
+ * the wrong answer here — is exactly the kind of thing that would have differed.
+ *
+ * Two Map IDs rather than one, because the small map wants more detail than the
+ * large one: locationMapStyles keeps the local roads the world map suppresses,
+ * which is the whole point of it being a separate style.
+ */
+const LOCATION_MAP_ID: string =
+  import.meta.env.VITE_MAP_ID_LOCATION ?? 'c75a3fdf244efe751e1f1767';
+const TIMEZONE_MAP_ID: string =
+  import.meta.env.VITE_MAP_ID_TIMEZONE ?? 'c75a3fdf244efe75fccc5434';
+
+/**
+ * Vector where there is a Map ID to render it, the old styled raster otherwise.
+ *
+ * `renderingType` is passed explicitly rather than left to the API. A Map ID
+ * configured for vector should select it unprompted, but a silent fall back to
+ * raster looks like nothing more than a slightly worse map — which is precisely
+ * the kind of failure that goes unnoticed for months.
+ */
+function renderingOptions(
+  mapId: string,
+  fallbackStyles: google.maps.MapTypeStyle[]
+): google.maps.MapOptions {
+  if (!mapId) return { styles: fallbackStyles };
+  return { mapId, renderingType: google.maps.RenderingType.VECTOR };
+}
+
 let userTimeInterval: number | null = null;
 const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
 
@@ -282,17 +346,17 @@ export async function initMaps() {
   const locationMapOptions: google.maps.MapOptions = {
     center: { lat: 0, lng: 0 },
     zoom: 2,
-    styles: locationMapStyles,
     disableDefaultUI: true,
     zoomControl: false,
+    ...renderingOptions(LOCATION_MAP_ID, locationMapStyles),
   };
 
   const timezoneMapOptions: google.maps.MapOptions = {
     center: { lat: 0, lng: 0 },
     zoom: 2,
-    styles: worldTimezoneMapStyles,
     disableDefaultUI: true,
     zoomControl: false,
+    ...renderingOptions(TIMEZONE_MAP_ID, worldTimezoneMapStyles),
   };
 
   const locationMapEl = document.getElementById('location-map') as HTMLElement;
@@ -504,10 +568,15 @@ export function onLocationError(error: GeolocationPositionError) {
 
 export async function onLocationSuccess(pos: GeolocationPosition) {
   state.locationAvailable = true;
-  console.log('Location success:', pos.coords);
   const { coords } = pos;
   const { latitude, longitude, accuracy, altitude, speed, heading } = coords;
 
+  // Whether the fix came from GPS or from wifi is not a detail at sea. A ship's
+  // wifi is Starlink, and a wifi-derived position can land on the other side of
+  // the world from the hull it was taken aboard — so the heading says which
+  // kind of fix this is, and the user gets to distrust it accordingly.
+  // Accuracy alone does not separate them: the tell is the sensor-only fields,
+  // which a network fix cannot supply.
   if (accuracy <= 15 && (altitude !== null || speed !== null || heading !== null)) {
     dom.locationTitleEl.innerHTML = `<i class="fas fa-satellite fa-fw mr-2 text-blue-400"></i>GPS Location`;
   } else if (accuracy <= 15) {

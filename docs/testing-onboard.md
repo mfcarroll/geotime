@@ -128,3 +128,35 @@ defeat detection no matter how correct everything downstream is. Everything
 after the names is exercised faithfully; the names themselves need one report
 from a real vessel. `src/diagnostics.ts` exists for that: six taps on the grey
 place name under **Device Time** dumps every live probe header.
+
+# The maps are cloud-styled vector maps
+
+`src/map.ts` passes a Map ID per map and asks for `RenderingType.VECTOR`. The
+base map used to be raster tiles styled server-side, which meant every label was
+baked pixels — upscaled on a 3x display and soft whatever colours it was given.
+Measured on device, raster served 512px tiles into 256 CSS px in every
+configuration, styled or not, so the softness was never something styling or
+resolution could fix. Vector draws labels client-side at device resolution.
+
+The trade is that the Maps API ignores inline `styles` when a Map ID is present,
+so the palette lives in Cloud console styling now. `src/map-styles.ts` is kept as
+the only version-controlled copy of it, and
+
+```
+node scripts/export-map-styles.mjs --out docs/map-styles
+```
+
+regenerates the JSON to paste into the console's style editor. One file per Map
+ID, named to match. Changing the TypeScript changes nothing until the cloud style
+is re-imported.
+
+Map IDs are public identifiers rather than secrets — they travel in every tile
+request, and the API key carries the restrictions — so they are defaulted in
+code. As environment-only values they would be absent in CI and the maps would
+quietly fall back to raster in exactly the builds nobody inspects by hand.
+Setting `VITE_MAP_ID_LOCATION` or `VITE_MAP_ID_TIMEZONE` to an empty string is
+the deliberate way back to the raster path.
+
+Verified on device: both maps report zero raster tiles and render to canvas, the
+444-feature timezone layer still draws and styles, and markers and polylines are
+unaffected. Building the layers was marginally faster than raster.
