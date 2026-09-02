@@ -568,7 +568,10 @@ export function onLocationError(error: GeolocationPositionError) {
 
 export async function onLocationSuccess(pos: GeolocationPosition) {
   state.locationAvailable = true;
-  console.log('Location success:', pos.coords);
+  // Dev only. These are the user's real coordinates to five decimal places,
+  // reprinted on every watchPosition tick, and a shipped console is a place
+  // other people's tooling reads.
+  if (import.meta.env.DEV) console.log('Location success:', pos.coords);
   const { coords } = pos;
   const { latitude, longitude, accuracy, altitude, speed, heading } = coords;
 

@@ -16,13 +16,24 @@
     <meta name="apple-mobile-web-app-title" content="GeoTime" />
     <link rel="manifest" href="/icons/site.webmanifest" />
     
+    <!-- Two directives here exist solely for Google's vector renderer, and both
+         fail in ways that name nothing: the map goes flat and featureless with
+         no error of its own.
+           worker-src blob:  — the renderer spawns its WebGL workers from blob:
+             URLs. Without this the directive falls back to script-src, which
+             does not allow blob:, and every worker is blocked.
+           connect-src data:  — its label worker fetch()es glyph atlases as data:
+             URIs. Workers inherit the document policy, so this must be granted
+             here rather than on the worker.
+         Neither widens network reach: blob: and data: are same-document sources
+         that cannot carry anything off the device. -->
     <meta http-equiv="Content-Security-Policy"
       content="default-src 'self' capacitor:;
                script-src 'self' 'unsafe-inline' 'unsafe-eval' https://maps.googleapis.com;
                style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
                img-src 'self' data: https://*.googleapis.com https://*.gstatic.com https://*.ggpht.com;
                font-src 'self' https://fonts.gstatic.com;
-               connect-src 'self' https://*.googleapis.com https://get-utc-time-100547663673.us-west1.run.app %WORKER_ORIGINS%;
+               connect-src 'self' data: https://*.googleapis.com https://get-utc-time-100547663673.us-west1.run.app %WORKER_ORIGINS%;
                worker-src 'self' blob:;
                frame-src 'self' capacitor:;">
   </head>
