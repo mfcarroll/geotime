@@ -23,6 +23,7 @@
                img-src 'self' data: https://*.googleapis.com https://*.gstatic.com https://*.ggpht.com;
                font-src 'self' https://fonts.gstatic.com;
                connect-src 'self' https://*.googleapis.com https://get-utc-time-100547663673.us-west1.run.app %WORKER_ORIGINS%;
+               worker-src 'self' blob:;
                frame-src 'self' capacitor:;">
   </head>
   <body class="h-full text-gray-200 antialiased">
