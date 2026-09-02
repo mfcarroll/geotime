@@ -11,7 +11,8 @@
     "sync-version": "capacitor-set-version",
     "deploy:utc-time": "wrangler deploy --config workers/utc-time/wrangler.jsonc",
     "deploy:rccl-proxy": "wrangler deploy --config workers/rccl-proxy/wrangler.jsonc",
-    "deploy:workers": "npm run deploy:utc-time && npm run deploy:rccl-proxy",
+    "deploy:ship-track": "wrangler deploy --config workers/ship-track/wrangler.jsonc",
+    "deploy:workers": "npm run deploy:utc-time && npm run deploy:rccl-proxy && npm run deploy:ship-track",
     "typecheck:workers": "tsc --noEmit -p workers/tsconfig.json"
   },
   "devDependencies": {

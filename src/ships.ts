@@ -28,6 +28,17 @@ export interface ShipRef {
   name: string;
   /** Name for a clock row: "Independence". See build-ship-index.mjs. */
   short: string;
+  /**
+   * IMO number — the permanent identifier for a hull, and the only key the
+   * position/track/route source accepts. Generated at build time; see
+   * build-ship-index.mjs and src/shiptrack.ts.
+   *
+   * Optional on purpose, and it must stay that way. A vessel too new to have
+   * been seen by the position feed has no IMO, and a roster stored by an earlier
+   * version has none for anybody — making this required would reject those
+   * entries wholesale and empty the ship list. Absent simply means no map layer.
+   */
+  imo?: string | null;
 }
 
 /** A ship on the user's clock list, with whatever we last learned about it. */
@@ -99,7 +110,47 @@ function isShipRef(value: any): value is ShipRef {
     && typeof value.code === 'string' && /^[A-Z]{2}$/.test(value.code)
     && (value.brand === 'R' || value.brand === 'C')
     && typeof value.name === 'string' && value.name.length > 0
-    && typeof value.short === 'string' && value.short.length > 0;
+    && typeof value.short === 'string' && value.short.length > 0
+    // Present-and-wrong is a bad record; absent is a ship without a map layer.
+    && (value.imo == null || /^[0-9]{7}$/.test(value.imo));
+}
+
+/**
+ * brand/code -> IMO, from the file bundled at build time.
+ *
+ * The bundle is the only runtime source of IMOs: the RCCL fleet endpoint the
+ * roster refresh calls does not carry them, so a refresh has to merge them back
+ * in from here or they are lost. Memoised — the asset is immutable per build.
+ */
+let bundledImoPromise: Promise<Map<string, string>> | null = null;
+
+function bundledImos(): Promise<Map<string, string>> {
+  bundledImoPromise ??= (async () => {
+    try {
+      const response = await fetch('ships.json');
+      if (!response.ok) throw new Error(`ships.json: ${response.status}`);
+      const parsed = (await response.json()) as ShipRoster;
+      const found = new Map<string, string>();
+      for (const ship of parsed?.ships ?? []) {
+        if (ship.imo) found.set(shipKey(ship), ship.imo);
+      }
+      return found;
+    } catch {
+      return new Map<string, string>();
+    }
+  })();
+  return bundledImoPromise;
+}
+
+/**
+ * A ship's IMO, resolved from the roster rather than from anything stored.
+ *
+ * Deliberately not read off a stored ShipClock. One source of truth means no
+ * store migration when a ship gains an IMO, and a clock saved before this
+ * feature existed picks one up the moment the roster has it.
+ */
+export function shipImo(key: string): string | null {
+  return roster.find((ship) => shipKey(ship) === key)?.imo ?? null;
 }
 
 function readCachedRoster(): ShipRef[] | null {
@@ -175,15 +226,27 @@ export async function refreshShipRoster(
   const result = await fetchFleet();
   if (!result?.ships) return result ?? null;
 
+  // The fleet endpoint carries no IMO, so without this merge every refresh would
+  // write an IMO-less roster over the bundled one — and since a cached roster
+  // wins unconditionally, the map layers would go dark a week after install with
+  // nothing in the logs. Bundle first, then whatever the previous cache knew, so
+  // neither a missing asset nor a missing bundle entry can strip the table.
+  const imos = await bundledImos();
+  const cachedImos = new Map(
+    (readCachedRoster() ?? []).filter((s) => s.imo).map((s) => [shipKey(s), s.imo!])
+  );
+
   const ships = result.ships
     .filter((s: any) => s.currentSailDate)     // not yet sailing: no clock to ask about
     .map((s: any) => {
       const name = String(s.name).trim().replace(/\s+/g, ' ');
+      const key = `${s.brand}/${String(s.shipCode).toUpperCase()}`;
       return {
         code: String(s.shipCode).toUpperCase(),
         brand: s.brand,
         name,
         short: name.replace(/\s+of\s+the\s+Seas$/i, '').replace(/^Celebrity\s+/i, '').trim() || name,
+        imo: imos.get(key) ?? cachedImos.get(key) ?? null,
       };
     })
     .filter(isShipRef)

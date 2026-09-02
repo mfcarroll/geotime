@@ -20,7 +20,7 @@ export default defineConfig({
     workerCsp(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['timezones.geojson', 'cities.json', 'ships.json', 'track.json', 'route.json'],
+      includeAssets: ['timezones.geojson', 'cities.json', 'ships.json'],
       manifest: {
         name: 'GeoTime Dashboard',
         short_name: 'GeoTime',
@@ -84,6 +84,7 @@ function workerCsp() {
       const origins = [
         env.VITE_RCCL_PROXY ?? 'https://geotime-rccl-proxy.matthew-carroll.workers.dev',
         env.VITE_UTC_TIME_URL ?? 'https://geotime-utc-time.matthew-carroll.workers.dev',
+        env.VITE_SHIP_TRACK ?? 'https://geotime-ship-track.matthew-carroll.workers.dev',
       ]
         .filter(Boolean)
         .map((value) => {
