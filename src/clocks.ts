@@ -120,12 +120,19 @@ export function visibleClocks(): ClockEntry[] {
   // Ships are withheld entirely when the feature is disabled — no key means no
   // offset can ever be resolved or refreshed, so a stored one would be a clock
   // slowly going wrong with no way to correct it.
+  // Including the ship we are aboard, which also has the Ship Time card above.
+  // Appearing in both places is not duplication, it is the same treatment the
+  // local zone already gets: a Local Time card AND a row labelled "Local time".
+  //
+  // It used to be withheld here, on the reasoning that it had collapsed into the
+  // card the way the GPS zone collapses into Local Time. The GPS zone does no
+  // such thing — it is auto-added to the list and keeps its row. So the aboard
+  // ship was the only thing in the app to get a card INSTEAD of a row, which
+  // read as "not saved" for the one clock in the app that cannot be re-derived
+  // offline and therefore most needs to look saved. It also made adding your own
+  // ship from the search box do nothing visible, which is indistinguishable from
+  // a bug.
   for (const ship of shipTimeAvailable() ? state.shipClocks : []) {
-    // The ship we are aboard collapses into the Ship Time section and does not
-    // also appear here — exactly as the GPS zone never gets a row of its own,
-    // because it already *is* the Local Time card. Step ashore and the marker
-    // stops arriving, so the same stored ship reappears in this list.
-    if (shipKey(ship) === state.aboardShipKey) continue;
     entries.push({ kind: 'ship', ship });
   }
 

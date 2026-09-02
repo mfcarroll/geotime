@@ -39,6 +39,7 @@ export const userTimezoneTimeEl = document.getElementById('user-timezone-time')!
 export const selectedTimezoneDetailsEl = document.getElementById('selected-timezone-details')!;
 export const selectedTimezoneNameEl = document.getElementById('selected-timezone-name')!;
 export const selectedTimezoneOffsetEl = document.getElementById('selected-timezone-offset')!;
+export const selectedShipVoyageEl = document.getElementById('selected-ship-voyage')!;
 
 export const hoveredTimezoneDetailsEl = document.getElementById('hovered-timezone-details')!;
 export const hoveredTimezoneNameEl = document.getElementById('hovered-timezone-name')!;

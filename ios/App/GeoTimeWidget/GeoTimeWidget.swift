@@ -165,8 +165,10 @@ struct GeoTimeWidgetView: View {
             var scale: CGFloat = 1
             for r in rows {
                 var reserved: CGFloat = 0
-                // The marker (pin/phone) sits on line 1 in every layout.
+                // The marker (pin/phone/ship) sits on line 1 in every layout, and
+                // a merged local+ship row carries two of them.
                 if r.isLocal || r.isDevice || r.isShip { reserved += pinSize + hGap }
+                if r.isShip && r.isLocal { reserved += pinSize + hGap * 0.5 }
                 // Offset + optional labels are on line 1 only in single-line rows;
                 // in rich rows they live on line 2 (free of the city's width).
                 if !rich {
@@ -365,10 +367,15 @@ private struct RowView: View {
         .fixedSize()   // never wrap the time; the city yields space instead
     }
 
-    // A merged row is both local and ship, and the ship mark is the one that
-    // carries the new information — the pin is implied by it being the base row.
+    // A merged row is both local and ship, and shows BOTH marks: the ship says
+    // what you are aboard, the pin says that it is also where you are. Dropping
+    // the pin there was tempting — "implied by it being the base row" — but the
+    // two answer different questions, and a row that means "this vessel is your
+    // local time" should say both things rather than leave one inferred.
     @ViewBuilder private func marker(for row: WidgetRow) -> some View {
-        if row.isShip { shipMark }
+        if row.isShip && row.isLocal {
+            HStack(spacing: metrics.hGap * 0.5) { shipMark; pin }
+        } else if row.isShip { shipMark }
         else if row.isLocal { pin }
         else if row.isDevice { phone }
     }
@@ -396,29 +403,87 @@ private struct RowView: View {
     }
 }
 
-/// Hull plus deckhouse, in a 24×24 box. Two chunky forms rather than a detailed
-/// silhouette, because this renders at about 10pt — funnels and masts turn to
-/// mud at that size.
+/// Font Awesome's "ship" (free, solid), in its native 640×512 box.
+///
+/// The same glyph the World Clock rows draw, so the widget and the app show one
+/// ship rather than two different ones. It replaces a hand-rolled trapezoid hull
+/// with a box on top, which at 4× magnification read unmistakably as a toy boat.
+///
+/// The old shape was chunky on the theory that a detailed silhouette would turn
+/// to mud at ~10pt. Worth testing rather than assuming, and it does not: rendered
+/// at 13px beside the alternatives, this stays recognisably a ship — a raked bow
+/// and a superstructure survive, which is all the read needs. Still drawn rather
+/// than an SF Symbol, because ferry.fill wants iOS 16 and this target is 15.0,
+/// and because drawing it keeps Android identical (res/drawable/ic_ship.xml).
 struct ShipShape: Shape {
     func path(in rect: CGRect) -> Path {
-        let s = min(rect.width, rect.height) / 24
-        let x = { (v: CGFloat) in rect.minX + v * s }
-        let y = { (v: CGFloat) in rect.minY + v * s }
+        // Fit the glyph's box into the frame without distorting it, and centre
+        // what is left over — the artwork is 1.25:1 in a square frame.
+        let s = min(rect.width / 640, rect.height / 512)
+        let ox = rect.minX + (rect.width - 640 * s) / 2
+        let oy = rect.minY + (rect.height - 512 * s) / 2
+        func P(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
+            CGPoint(x: ox + x * s, y: oy + y * s)
+        }
 
-        var path = Path()
-        // Hull: a wide trapezoid tapering to the keel.
-        path.move(to: CGPoint(x: x(2), y: y(14.5)))
-        path.addLine(to: CGPoint(x: x(22), y: y(14.5)))
-        path.addLine(to: CGPoint(x: x(18.5), y: y(21)))
-        path.addLine(to: CGPoint(x: x(5.5), y: y(21)))
-        path.closeSubpath()
-        // Deckhouse.
-        path.move(to: CGPoint(x: x(7.5), y: y(14.5)))
-        path.addLine(to: CGPoint(x: x(7.5), y: y(8)))
-        path.addLine(to: CGPoint(x: x(14), y: y(8)))
-        path.addLine(to: CGPoint(x: x(14), y: y(14.5)))
-        path.closeSubpath()
-        return path
+        var p = Path()
+        p.move(to: P(272, 0))
+        p.addCurve(to: P(224, 48), control1: P(245.5, 0), control2: P(224, 21.5))
+        p.addLine(to: P(224, 64))
+        p.addLine(to: P(208, 64))
+        p.addCurve(to: P(128, 144), control1: P(163.8, 64), control2: P(128, 99.8))
+        p.addLine(to: P(128, 252.8))
+        p.addLine(to: P(106.4, 261.4))
+        p.addCurve(to: P(89, 298.9), control1: P(91.6, 267.3), control2: P(83.9, 283.8))
+        p.addCurve(to: P(136.7, 382), control1: P(99.4, 330.2), control2: P(115.8, 358.2))
+        p.addCurve(to: P(200, 368), control1: P(156.8, 372.8), control2: P(178.4, 368.1))
+        p.addCurve(to: P(294.4, 399.4), control1: P(233.1, 367.8), control2: P(266.3, 378.2))
+        p.addLine(to: P(296, 400.6))
+        p.addLine(to: P(296, 185.6))
+        p.addLine(to: P(192, 227.2))
+        p.addLine(to: P(192, 144))
+        p.addCurve(to: P(208, 128), control1: P(192, 135.2), control2: P(199.2, 128))
+        p.addLine(to: P(432, 128))
+        p.addCurve(to: P(448, 144), control1: P(440.8, 128), control2: P(448, 135.2))
+        p.addLine(to: P(448, 227.2))
+        p.addLine(to: P(344, 185.6))
+        p.addLine(to: P(344, 400.6))
+        p.addLine(to: P(345.6, 399.4))
+        p.addCurve(to: P(438, 368), control1: P(373.1, 378.7), control2: P(405.5, 368.2))
+        p.addCurve(to: P(503.3, 382), control1: P(460.3, 367.9), control2: P(482.6, 372.5))
+        p.addCurve(to: P(551, 298.9), control1: P(524.2, 358.3), control2: P(540.6, 330.2))
+        p.addCurve(to: P(533.6, 261.4), control1: P(556, 283.7), control2: P(548.4, 267.3))
+        p.addLine(to: P(512, 252.8))
+        p.addLine(to: P(512, 144))
+        p.addCurve(to: P(432, 64), control1: P(512, 99.8), control2: P(476.2, 64))
+        p.addLine(to: P(416, 64))
+        p.addLine(to: P(416, 48))
+        p.addCurve(to: P(368, 0), control1: P(416, 21.5), control2: P(394.5, 0))
+        p.addLine(to: P(272, 0))
+        p.closeSubpath()
+        p.move(to: P(403.4, 476.1))
+        p.addCurve(to: P(474.6, 476.1), control1: P(424.7, 460), control2: P(453.3, 460))
+        p.addCurve(to: P(541.8, 509.4), control1: P(493.6, 490.5), control2: P(516.5, 504.3))
+        p.addCurve(to: P(622.5, 490.3), control1: P(568.3, 514.8), control2: P(596.1, 510.2))
+        p.addCurve(to: P(627.2, 456.7), control1: P(633.1, 482.3), control2: P(635.2, 467.3))
+        p.addCurve(to: P(593.6, 452), control1: P(619.2, 446.1), control2: P(604.2, 444))
+        p.addCurve(to: P(551.3, 462.3), control1: P(578.7, 463.2), control2: P(565, 465.1))
+        p.addCurve(to: P(503.5, 437.7), control1: P(536.4, 459.3), control2: P(520.4, 450.4))
+        p.addCurve(to: P(374.5, 437.7), control1: P(465.1, 408.7), control2: P(413, 408.7))
+        p.addCurve(to: P(320, 464), control1: P(350.5, 455.8), control2: P(333.8, 464))
+        p.addCurve(to: P(265.5, 437.7), control1: P(306.2, 464), control2: P(289.5, 455.8))
+        p.addCurve(to: P(136.5, 437.7), control1: P(227.1, 408.7), control2: P(175, 408.7))
+        p.addCurve(to: P(77.6, 463.4), control1: P(114.9, 454), control2: P(95.2, 463.5))
+        p.addCurve(to: P(46.4, 451.9), control1: P(68, 463.3), control2: P(57.7, 460.4))
+        p.addCurve(to: P(12.8, 456.6), control1: P(35.8, 443.9), control2: P(20.8, 446))
+        p.addCurve(to: P(17.6, 490.3), control1: P(4.8, 467.2), control2: P(7, 482.3))
+        p.addCurve(to: P(77.4, 511.4), control1: P(36.7, 504.7), control2: P(57, 511.3))
+        p.addCurve(to: P(165.5, 476.1), control1: P(111.3, 511.6), control2: P(141.7, 494))
+        p.addCurve(to: P(236.7, 476.1), control1: P(186.8, 460), control2: P(215.4, 460))
+        p.addCurve(to: P(320.1, 512), control1: P(260.9, 494.4), control2: P(289, 512))
+        p.addCurve(to: P(403.5, 476.1), control1: P(351.2, 512), control2: P(379.2, 494.3))
+        p.closeSubpath()
+        return p
     }
 }
 

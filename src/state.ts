@@ -63,6 +63,15 @@ export interface AppState {
     selectedTzid: string | null;
     temporaryTimezone: string | null;
     gpsTimezoneSelected: boolean;
+    /**
+     * Ship whose band is highlighted, as a "R/ST" key, or null.
+     *
+     * Mutually exclusive with the zone selection above — selecting either clears
+     * the other, because the map paints one gold band and there is only one
+     * "selected" card to name it. Deliberately NOT persisted: a highlight is a
+     * question you are asking right now, not a preference.
+     */
+    selectedShipKey: string | null;
     timezonesFromUrl: string[] | null;
 }
 
@@ -179,6 +188,7 @@ export const state: AppState = {
     selectedTzid: null,
     temporaryTimezone: null,
     gpsTimezoneSelected: false,
+    selectedShipKey: null,
     timezonesFromUrl: null,
 };
 
@@ -238,12 +248,28 @@ export function addShipClock(ship: ShipRef, autoAdded = false): ShipClock {
 
     const clock = newShipClock(ship, autoAdded);
     persistShipClocks([...state.shipClocks, clock]);
+    announceShipClocks();
     return clock;
 }
 
 /** Removes a ship by "brand/code" key. */
 export function removeShipClock(key: string): void {
     persistShipClocks(state.shipClocks.filter((s) => shipKey(s) !== key));
+    announceShipClocks();
+}
+
+/**
+ * Says the list changed, for anything drawing from it.
+ *
+ * Only membership, not offset writes — those already announce themselves from
+ * shiptime.ts once a resolve pass finishes, and announcing each one here would
+ * re-render the list per ship instead of once. The distinction matters because
+ * the map's marker layer needs the membership signal and had no way to hear it:
+ * adding a ship from the search box goes through here and nowhere near
+ * shiptime.ts.
+ */
+function announceShipClocks(): void {
+    document.dispatchEvent(new CustomEvent('shipclockschanged'));
 }
 
 /**

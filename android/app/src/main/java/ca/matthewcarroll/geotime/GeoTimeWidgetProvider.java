@@ -140,10 +140,12 @@ public class GeoTimeWidgetProvider extends AppWidgetProvider {
             row.setString(R.id.row_time, "setTimeZone", r.tzId);   // @RemotableViewMethod
             row.setString(R.id.row_period, "setTimeZone", r.tzId);
             row.setViewVisibility(R.id.row_period, is24 ? View.GONE : View.VISIBLE);
-            // A merged row is both local and ship; the ship mark is the one that
-            // carries new information, the pin being implied by it being base.
+            // A merged row is both local and ship, and shows BOTH marks: the ship
+            // says what you are aboard, the pin says it is also where you are.
+            // They answer different questions, so neither is left to inference.
+            // Mirrors marker(for:) in GeoTimeWidget.swift.
             row.setViewVisibility(R.id.row_ship, r.isShip ? View.VISIBLE : View.GONE);
-            row.setViewVisibility(R.id.row_pin, (r.isLocal && !r.isShip) ? View.VISIBLE : View.GONE);
+            row.setViewVisibility(R.id.row_pin, r.isLocal ? View.VISIBLE : View.GONE);
             row.setViewVisibility(R.id.row_local_label, (r.isLocal && showLocalLabel) ? View.VISIBLE : View.GONE);
             row.setViewVisibility(R.id.row_device, r.isDevice ? View.VISIBLE : View.GONE);
             if (r.dayLabel != null) {
@@ -476,6 +478,8 @@ public class GeoTimeWidgetProvider extends AppWidgetProvider {
             if (r.shortLabel == null) continue;
             float need = cityPaint.measureText(r.label) + gap;   // the FULL name
             need += 12 * dm.density + gap;                       // ship marker
+            // A merged local+ship row carries the pin as well.
+            if (r.isLocal) need += 12 * dm.density + gap;
             if (!r.isLocal) need += detailPaint.measureText(r.offset) + gap;
             if (r.dayLabel != null) need += detailPaint.measureText(r.dayLabel) + gap;
             need += cityPaint.measureText(is24 ? "88:88" : "8:88") + gap;

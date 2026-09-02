@@ -28,6 +28,17 @@ export interface ShipRef {
   name: string;
   /** Name for a clock row: "Independence". See build-ship-index.mjs. */
   short: string;
+  /**
+   * IMO number — the permanent identifier for a hull, and the only key the
+   * position/track/route source accepts. Generated at build time; see
+   * build-ship-index.mjs and src/shiptrack.ts.
+   *
+   * Optional on purpose, and it must stay that way. A vessel too new to have
+   * been seen by the position feed has no IMO, and a roster stored by an earlier
+   * version has none for anybody — making this required would reject those
+   * entries wholesale and empty the ship list. Absent simply means no map layer.
+   */
+  imo?: string | null;
 }
 
 /** A ship on the user's clock list, with whatever we last learned about it. */
@@ -99,7 +110,90 @@ function isShipRef(value: any): value is ShipRef {
     && typeof value.code === 'string' && /^[A-Z]{2}$/.test(value.code)
     && (value.brand === 'R' || value.brand === 'C')
     && typeof value.name === 'string' && value.name.length > 0
-    && typeof value.short === 'string' && value.short.length > 0;
+    && typeof value.short === 'string' && value.short.length > 0
+    // Present-and-wrong is a bad record; absent is a ship without a map layer.
+    && (value.imo == null || /^[0-9]{7}$/.test(value.imo));
+}
+
+/**
+ * brand/code -> IMO, from the file bundled at build time.
+ *
+ * The bundle is the only runtime source of IMOs: the RCCL fleet endpoint the
+ * roster refresh calls does not carry them, so a refresh has to merge them back
+ * in from here or they are lost. Memoised — the asset is immutable per build.
+ */
+let bundledImoPromise: Promise<Map<string, string>> | null = null;
+
+function bundledImos(): Promise<Map<string, string>> {
+  bundledImoPromise ??= (async () => {
+    try {
+      const response = await fetch('ships.json');
+      if (!response.ok) throw new Error(`ships.json: ${response.status}`);
+      const parsed = (await response.json()) as ShipRoster;
+      const found = new Map<string, string>();
+      for (const ship of parsed?.ships ?? []) {
+        if (ship.imo) found.set(shipKey(ship), ship.imo);
+      }
+      return found;
+    } catch {
+      return new Map<string, string>();
+    }
+  })();
+  return bundledImoPromise;
+}
+
+/**
+ * Fills in IMOs a cached roster is missing, from the bundle.
+ *
+ * The cached roster wins over the bundle on membership, because it came from the
+ * API and is newer by construction. But it is also the only copy that can be
+ * *missing* IMOs: every roster written before this feature existed has none, and
+ * one written by a build whose bundle lacked a new vessel has a gap.
+ *
+ * Without this the map layers fail in the quietest possible way. A device
+ * upgrading from a version with no IMOs holds a cache that is only hours old, so
+ * the weekly refresh — which does merge them — will not run for a week, and for
+ * that week every ship silently has no position. Nothing errors; the markers
+ * simply never appear.
+ *
+ * The healed roster is written back so the next launch starts consistent, but
+ * `shipRosterFetchedAt` is deliberately left alone: this is not a refresh, and
+ * stamping it would push the real one a week further out.
+ */
+async function healImos(ships: ShipRef[]): Promise<ShipRef[]> {
+  if (ships.every((ship) => ship.imo)) return ships;
+
+  const imos = await bundledImos();
+  if (imos.size === 0) return ships;
+
+  let healed = false;
+  const merged = ships.map((ship) => {
+    if (ship.imo) return ship;
+    const imo = imos.get(shipKey(ship));
+    if (!imo) return ship;
+    healed = true;
+    return { ...ship, imo };
+  });
+
+  if (healed) {
+    try {
+      localStorage.setItem(ROSTER_CACHE_KEY, JSON.stringify({ v: 1, ships: merged }));
+    } catch {
+      // In-memory copy is what this session uses; persistence is a nicety.
+    }
+  }
+  return merged;
+}
+
+/**
+ * A ship's IMO, resolved from the roster rather than from anything stored.
+ *
+ * Deliberately not read off a stored ShipClock. One source of truth means no
+ * store migration when a ship gains an IMO, and a clock saved before this
+ * feature existed picks one up the moment the roster has it.
+ */
+export function shipImo(key: string): string | null {
+  return roster.find((ship) => shipKey(ship) === key)?.imo ?? null;
 }
 
 function readCachedRoster(): ShipRef[] | null {
@@ -130,7 +224,7 @@ export function loadShipRoster(): Promise<ShipRef[]> {
     if (!shipTimeAvailable()) return [];
 
     const cached = readCachedRoster();
-    if (cached) return cached;
+    if (cached) return healImos(cached);
     try {
       const response = await fetch('ships.json');
       if (!response.ok) throw new Error(`ships.json: ${response.status}`);
@@ -175,15 +269,27 @@ export async function refreshShipRoster(
   const result = await fetchFleet();
   if (!result?.ships) return result ?? null;
 
+  // The fleet endpoint carries no IMO, so without this merge every refresh would
+  // write an IMO-less roster over the bundled one — and since a cached roster
+  // wins unconditionally, the map layers would go dark a week after install with
+  // nothing in the logs. Bundle first, then whatever the previous cache knew, so
+  // neither a missing asset nor a missing bundle entry can strip the table.
+  const imos = await bundledImos();
+  const cachedImos = new Map(
+    (readCachedRoster() ?? []).filter((s) => s.imo).map((s) => [shipKey(s), s.imo!])
+  );
+
   const ships = result.ships
     .filter((s: any) => s.currentSailDate)     // not yet sailing: no clock to ask about
     .map((s: any) => {
       const name = String(s.name).trim().replace(/\s+/g, ' ');
+      const key = `${s.brand}/${String(s.shipCode).toUpperCase()}`;
       return {
         code: String(s.shipCode).toUpperCase(),
         brand: s.brand,
         name,
         short: name.replace(/\s+of\s+the\s+Seas$/i, '').replace(/^Celebrity\s+/i, '').trim() || name,
+        imo: imos.get(key) ?? cachedImos.get(key) ?? null,
       };
     })
     .filter(isShipRef)

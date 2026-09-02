@@ -5,7 +5,7 @@ import './style.css';
 import { Loader } from '@googlemaps/js-api-loader';
 import * as dom from './dom';
 import { state, persistTimezones, migrateStoredTimezones, setZoneLabel, syncWidget, addShipClock } from './state';
-import { initMaps, onLocationError, onLocationSuccess, selectTimezone, renderWorldClocks, addUniqueTimezoneToList, updateUserTimezoneDetails, showLocationUnavailable, loadTimezoneGeoJson } from './map';
+import { initMaps, onLocationError, onLocationSuccess, selectTimezone, selectShip, renderWorldClocks, addUniqueTimezoneToList, updateUserTimezoneDetails, showLocationUnavailable, loadTimezoneGeoJson } from './map';
 import { updateAllClocks, syncClock, getDisplayTimezoneName, startClocks } from './time';
 import { Capacitor } from '@capacitor/core';
 import { getDeviceTimezone, onDeviceTimezoneChanged } from './widget';
@@ -14,11 +14,13 @@ import { createSearchCombobox } from './combobox';
 import { loadShipRoster, refreshShipRoster, shipRosterNow } from './ships';
 import { initShipTime } from './rccl';
 import { forgetShip, resolveAllShipClocks, startShipTimeWatch } from './shiptime';
+import { initShipTrack } from './shiptrack';
+import { refreshShipMarkers, startShipMarkerWatch } from './ship-markers';
 import { installDiagnostics } from './diagnostics';
 import { library, dom as faDom } from '@fortawesome/fontawesome-svg-core';
-import { faLocationDot, faWifi, faBullseye, faMobileAlt, faSatelliteDish, faShip } from '@fortawesome/free-solid-svg-icons';
+import { faLocationDot, faWifi, faBullseye, faMobileAlt, faSatellite, faShip } from '@fortawesome/free-solid-svg-icons';
 
-library.add(faLocationDot, faWifi, faBullseye, faMobileAlt, faSatelliteDish, faShip);
+library.add(faLocationDot, faWifi, faBullseye, faMobileAlt, faSatellite, faShip);
 faDom.watch();
 
 const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
@@ -73,6 +75,11 @@ async function startApp() {
   // Heal the native home-screen widget on every launch, in case a previous
   // write was missed (app killed mid-write, data predating the widget, etc).
   syncWidget();
+
+  // Last known ship positions, from storage, before anything touches the
+  // network. A launch with no connection — in a port, or aboard, where the
+  // position source is unreachable — still draws where the ships were.
+  initShipTrack();
 
   // Ship offsets are the one thing in this app that cannot be derived on
   // device, so they are re-asked for on launch. Failure is silent and leaves the
@@ -143,6 +150,12 @@ async function startApp() {
   await initShipTime();
   await loadShipRoster();
 
+  // Positions come after the roster, not before: a marker is looked up by the
+  // ship's IMO, and the IMO lives on the roster. Started here rather than beside
+  // the other ship work above because it also needs the map to exist.
+  refreshShipMarkers();
+  startShipMarkerWatch();
+
   createSearchCombobox({
     input: dom.timezoneInput,
     listbox: dom.timezoneResults,
@@ -194,16 +207,32 @@ async function startApp() {
     } else {
         const clockDiv = target.closest<HTMLElement>('[data-clock-key]');
         const key = clockDiv?.dataset.clockKey;
-        // Tapping a ship row selects nothing: there is no region to highlight.
-        if (key && !key.startsWith('ship:')) {
-            selectTimezone(key);
-        }
+        if (!key) return;
+        // A ship highlights every zone keeping its time, without any zone being
+        // the ship. The "ship:" prefix exists only in the DOM, so it is stripped
+        // before the key reaches anything that stores or resolves it.
+        if (key.startsWith('ship:')) selectShip(key.slice('ship:'.length));
+        else selectTimezone(key);
     }
   });
 
   document.addEventListener('temporarytimezonechanged', () => {
     renderWorldClocks();
     updateAllClocks();
+  });
+
+  // Tapping a ship's marker is the same act as tapping its row. Routed through
+  // an event so ship-markers.ts does not have to import from map.ts, which
+  // already imports from it.
+  document.addEventListener('shipmarkerclick', (e) => {
+    selectShip((e as CustomEvent<{ key: string }>).detail.key);
+  });
+
+  // The ship we are aboard has no row to tap — it collapsed into this card — so
+  // the card itself is its affordance. Exactly the same act, just promoted.
+  dom.shipTimeSectionEl.addEventListener('click', () => {
+    const aboard = state.aboardShipKey;
+    if (aboard) selectShip(aboard);
   });
 
   // A ship that has just resolved needs the list rebuilt, because its offset is

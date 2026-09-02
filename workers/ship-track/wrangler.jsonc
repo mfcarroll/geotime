@@ -1,0 +1,45 @@
+// Deploy: npm run deploy:ship-track  (from the repo root)
+//
+// No secrets. Unlike the RCCL proxy, the upstream here needs no API key — which
+// is also why this is a SEPARATE Worker rather than another route on that one:
+// geotime-rccl-proxy attaches RCCL_APPKEY to everything it forwards, and adding
+// a third-party upstream there would put our key one editing mistake away from
+// being sent to somebody else's origin.
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "geotime-ship-track",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-02",
+  "vars": {
+    // Same reasoning as the RCCL proxy: not a security boundary, just a way to
+    // keep a browser on someone else's site from spending our upstream budget
+    // against an endpoint we are already treating as a guest.
+    //
+    // The app's own origin is here too, which the RCCL proxy does not need —
+    // native goes direct to api.rccl.com and never touches that Worker, but it
+    // DOES call this one. Today those requests come from CapacitorHttp, which
+    // performs them natively and so is not subject to CORS at all; listing the
+    // origin anyway means a switch to plain fetch() cannot break the app
+    // silently. geotime.local with an https scheme is what capacitor.config.ts
+    // sets for both platforms; the capacitor:// form is iOS's default if
+    // iosScheme is ever removed.
+    "ALLOWED_ORIGINS": "https://geotime.matthewcarroll.ca,https://geotime.local,capacitor://geotime.local,https://localhost:5173,http://localhost:5173"
+  },
+  // Last known good track per voyage. The upstream `track` array goes empty
+  // intermittently — observed on a vessel that had 720 points hours earlier
+  // while its route and position kept working — and no request recovers it, so
+  // the only remedy is to have kept a copy. Kept HERE rather than only on each
+  // device because a device can retain solely what it has already seen: someone
+  // opening the app for the first time during a drop would otherwise get no
+  // history at all, which is precisely when they have no copy to fall back on.
+  "kv_namespaces": [
+    { "binding": "SHIP_TRACKS", "id": "2ec2fe8de9c9439f93b3c289dab89cce" }
+  ],
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1,
+    // An IMO identifies a vessel, not a person, but there is nothing to gain by
+    // retaining which ones get looked up.
+    "redact_query_string": true
+  }
+}
