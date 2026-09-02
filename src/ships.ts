@@ -143,6 +143,49 @@ function bundledImos(): Promise<Map<string, string>> {
 }
 
 /**
+ * Fills in IMOs a cached roster is missing, from the bundle.
+ *
+ * The cached roster wins over the bundle on membership, because it came from the
+ * API and is newer by construction. But it is also the only copy that can be
+ * *missing* IMOs: every roster written before this feature existed has none, and
+ * one written by a build whose bundle lacked a new vessel has a gap.
+ *
+ * Without this the map layers fail in the quietest possible way. A device
+ * upgrading from a version with no IMOs holds a cache that is only hours old, so
+ * the weekly refresh — which does merge them — will not run for a week, and for
+ * that week every ship silently has no position. Nothing errors; the markers
+ * simply never appear.
+ *
+ * The healed roster is written back so the next launch starts consistent, but
+ * `shipRosterFetchedAt` is deliberately left alone: this is not a refresh, and
+ * stamping it would push the real one a week further out.
+ */
+async function healImos(ships: ShipRef[]): Promise<ShipRef[]> {
+  if (ships.every((ship) => ship.imo)) return ships;
+
+  const imos = await bundledImos();
+  if (imos.size === 0) return ships;
+
+  let healed = false;
+  const merged = ships.map((ship) => {
+    if (ship.imo) return ship;
+    const imo = imos.get(shipKey(ship));
+    if (!imo) return ship;
+    healed = true;
+    return { ...ship, imo };
+  });
+
+  if (healed) {
+    try {
+      localStorage.setItem(ROSTER_CACHE_KEY, JSON.stringify({ v: 1, ships: merged }));
+    } catch {
+      // In-memory copy is what this session uses; persistence is a nicety.
+    }
+  }
+  return merged;
+}
+
+/**
  * A ship's IMO, resolved from the roster rather than from anything stored.
  *
  * Deliberately not read off a stored ShipClock. One source of truth means no
@@ -181,7 +224,7 @@ export function loadShipRoster(): Promise<ShipRef[]> {
     if (!shipTimeAvailable()) return [];
 
     const cached = readCachedRoster();
-    if (cached) return cached;
+    if (cached) return healImos(cached);
     try {
       const response = await fetch('ships.json');
       if (!response.ok) throw new Error(`ships.json: ${response.status}`);

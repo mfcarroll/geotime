@@ -14,6 +14,8 @@ import { createSearchCombobox } from './combobox';
 import { loadShipRoster, refreshShipRoster, shipRosterNow } from './ships';
 import { initShipTime } from './rccl';
 import { forgetShip, resolveAllShipClocks, startShipTimeWatch } from './shiptime';
+import { initShipTrack } from './shiptrack';
+import { refreshShipMarkers, startShipMarkerWatch } from './ship-markers';
 import { installDiagnostics } from './diagnostics';
 import { library, dom as faDom } from '@fortawesome/fontawesome-svg-core';
 import { faLocationDot, faWifi, faBullseye, faMobileAlt, faSatelliteDish, faShip } from '@fortawesome/free-solid-svg-icons';
@@ -73,6 +75,11 @@ async function startApp() {
   // Heal the native home-screen widget on every launch, in case a previous
   // write was missed (app killed mid-write, data predating the widget, etc).
   syncWidget();
+
+  // Last known ship positions, from storage, before anything touches the
+  // network. A launch with no connection — in a port, or aboard, where the
+  // position source is unreachable — still draws where the ships were.
+  initShipTrack();
 
   // Ship offsets are the one thing in this app that cannot be derived on
   // device, so they are re-asked for on launch. Failure is silent and leaves the
@@ -142,6 +149,12 @@ async function startApp() {
   // when ship features are disabled, which removes ships from search.
   await initShipTime();
   await loadShipRoster();
+
+  // Positions come after the roster, not before: a marker is looked up by the
+  // ship's IMO, and the IMO lives on the roster. Started here rather than beside
+  // the other ship work above because it also needs the map to exist.
+  refreshShipMarkers();
+  startShipMarkerWatch();
 
   createSearchCombobox({
     input: dom.timezoneInput,

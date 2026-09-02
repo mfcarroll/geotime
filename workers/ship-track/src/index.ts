@@ -170,6 +170,40 @@ function portNamesByPoi(itinerary: unknown): Map<string, string> {
   return names;
 }
 
+/**
+ * Tidies the crew-typed destination, or drops it.
+ *
+ * `destination` is free text an officer enters into the AIS set, and across the
+ * live fleet it arrives in four shapes: real names ("Nassau", "Coco Cay"), bare
+ * UN/LOCODEs ("USBYE", "USAOU", "USPCN"), split country-port codes ("MX COZ",
+ * "MX CMM"), and shouting ("WILLEMSTAD, CURACAO"). The detail endpoint is no
+ * better — it reports the same raw string.
+ *
+ * A code tells a reader nothing, so it is dropped rather than displayed:
+ * "→ USBYE" is worse than showing no destination at all. Shouting is title-cased.
+ * Done here rather than in the app so both the map tooltip and anything added
+ * later share one answer, and so a new bad shape is a deploy rather than a
+ * release.
+ */
+function tidyDestination(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const text = value.trim().replace(/\s+/g, ' ');
+  if (!text) return null;
+
+  // A bare LOCODE, or a country code split from a port code.
+  if (/^[A-Z]{2,6}$/.test(text)) return null;
+  if (/^[A-Z]{2}[\s-][A-Z]{2,4}$/.test(text)) return null;
+
+  // Uppercase throughout: title-case it. Anything already mixed case is left
+  // exactly as typed, so "Victoria BC" keeps its initials.
+  if (text === text.toUpperCase() && /[A-Z]/.test(text)) {
+    return text.toLowerCase().replace(/(^|[\s(\/-])([a-z])/g, (_, before, letter) =>
+      before + letter.toUpperCase()
+    );
+  }
+  return text;
+}
+
 /** A `[lon, lat]` pair, or null when either value is not a finite number. */
 function coord(lon: unknown, lat: unknown): [number, number] | null {
   const x = Number(lon);
@@ -203,7 +237,7 @@ function shapeFleet(markers: unknown): unknown {
       heading: Number(marker?.heading) >= 0 && Number(marker?.heading) < 360
         ? Number(marker.heading)
         : null,
-      destination: typeof marker?.destination === 'string' ? marker.destination : null,
+      destination: tidyDestination(marker?.destination),
       /** Unix seconds of the AIS fix. The client shows its age; some are hours old. */
       tst: Number.isFinite(Number(marker?.tst)) ? Number(marker.tst) : null,
     }];
@@ -257,7 +291,7 @@ function shapeDetail(imo: string, payload: any): unknown {
   return {
     imo,
     name: typeof payload?.name === 'string' ? payload.name : null,
-    destination: typeof payload?.destination === 'string' ? payload.destination : null,
+    destination: tidyDestination(payload?.destination),
     eta: typeof payload?.eta === 'string' ? payload.eta : null,
     voyage: {
       name: payload?.cruise?.name ?? null,
