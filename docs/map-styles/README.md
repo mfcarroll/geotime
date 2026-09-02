@@ -77,6 +77,44 @@ still the default beige right after publishing is usually propagation rather
 than anything wrong — wait a few minutes and hard-refresh before changing
 anything.
 
+## UNRESOLVED: vector maps sometimes render blank
+
+Left deliberately undecided, pending whether it settles on Google's end. The
+styles had been published only minutes before the first sightings, and style
+propagation had already caused one false alarm the same day.
+
+What was actually observed:
+
+| Where | Result |
+| --- | --- |
+| WKWebView, two vector maps | fails reproducibly — one map flat beige across three builds, pixel unchanged over 50s |
+| WKWebView, one vector map | works |
+| A Chromium browser, two vector maps | four consecutive reloads fine, no context loss, 32 spare WebGL contexts |
+| Chrome, in ordinary use | intermittent — fine for a while, then beige again |
+
+The failure is **silent**: no error, no console output, no `webglcontextlost`
+event, and `getRenderingType()` still reports `VECTOR`. Nothing distinguishes a
+working map from a blank one programmatically, which is what makes it hard both
+to diagnose and to guard against.
+
+The gain from vector is crisper labels, and nothing else — the base map is
+deliberately muted, and the bands are what the map is for.
+
+Three ways out, if it does not settle:
+
+1. **Back to raster.** Slightly soft labels, never blank. The cloud styles and
+   Map IDs cost nothing sitting idle, and `VITE_MAP_ID_TIMEZONE` re-enables
+   vector whenever it is worth retrying.
+2. **Ship as it stands** — world map vector, location map raster — accepting an
+   occasional blank world map that cannot be detected or reported.
+3. **A runtime fallback**, swapping to raster when a map never finishes loading.
+   `tilesloaded` may be a usable signal. Real complexity, and a new silent
+   failure surface of its own, for an aesthetic gain.
+
+Worth knowing that this is the second time vector has been abandoned here; it
+was tried once before and dropped, and the reason had been forgotten until the
+same wall turned up from the other side.
+
 ## Getting it wrong is cheap
 
 Nothing here ships in the app, so a bad style is fixed in the console without a
