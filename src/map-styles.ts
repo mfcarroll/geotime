@@ -1,4 +1,16 @@
 // src/map-styles.ts
+//
+// NOT APPLIED AT RUNTIME. The maps are cloud-styled vector maps now, and the
+// Maps API ignores inline `styles` whenever a Map ID is present — see
+// renderingOptions() in map.ts.
+//
+// Kept because these arrays are what was imported into the Cloud console styles
+// behind those Map IDs, and they are the only copy under source control.
+// Reconstructing the palette from the console is far harder than reading it
+// here. They are also still the fallback if a Map ID is ever unset, which is the
+// documented way back to the raster path.
+//
+// Change them and nothing happens until the cloud style is updated to match.
 
 export const worldTimezoneMapStyles: google.maps.MapTypeStyle[] = [
   {

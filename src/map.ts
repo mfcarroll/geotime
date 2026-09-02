@@ -12,6 +12,47 @@ import { shipKey, type ShipClock } from './ships';
 import { voyageForShip, type ShipVoyage } from './shiptrack';
 import { clearShipChart, drawShipChart, fitToShip, refreshShipMarkers } from './ship-markers';
 
+/**
+ * Cloud-styled vector maps.
+ *
+ * The base map used to be raster tiles styled server-side from the arrays in
+ * map-styles.ts, which meant every label was baked pixels — upscaled on a 3x
+ * display and soft no matter what colours it was given. Measured on device:
+ * raster served 512px tiles into 256 CSS px in every configuration, so the
+ * softness was never something styling or resolution could fix. Vector draws
+ * labels client-side at device resolution instead.
+ *
+ * The trade is that a Map ID replaces inline `styles` — the API ignores them
+ * when one is present — so the palette now lives in Google Cloud console styling
+ * against these two IDs. They are public identifiers, not secrets: they travel
+ * in every tile request, and the API key is what carries the restrictions.
+ *
+ * Defaulted in code rather than required from the environment on purpose. As
+ * env-only they would be absent in CI, and the maps would quietly fall back to
+ * raster in exactly the builds nobody inspects by hand. Overriding to an empty
+ * string is the deliberate way back to the old path.
+ */
+const LOCATION_MAP_ID: string =
+  import.meta.env.VITE_MAP_ID_LOCATION ?? 'c75a3fdf244efe751e1f1767';
+const TIMEZONE_MAP_ID: string =
+  import.meta.env.VITE_MAP_ID_TIMEZONE ?? 'c75a3fdf244efe75fccc5434';
+
+/**
+ * Vector where there is a Map ID to render it, the old styled raster otherwise.
+ *
+ * `renderingType` is passed explicitly rather than left to the API. A Map ID
+ * configured for vector should select it unprompted, but a silent fall back to
+ * raster looks like nothing more than a slightly worse map — which is precisely
+ * the kind of failure that goes unnoticed for months.
+ */
+function renderingOptions(
+  mapId: string,
+  fallbackStyles: google.maps.MapTypeStyle[]
+): google.maps.MapOptions {
+  if (!mapId) return { styles: fallbackStyles };
+  return { mapId, renderingType: google.maps.RenderingType.VECTOR };
+}
+
 let userTimeInterval: number | null = null;
 const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
 
@@ -282,17 +323,17 @@ export async function initMaps() {
   const locationMapOptions: google.maps.MapOptions = {
     center: { lat: 0, lng: 0 },
     zoom: 2,
-    styles: locationMapStyles,
     disableDefaultUI: true,
     zoomControl: false,
+    ...renderingOptions(LOCATION_MAP_ID, locationMapStyles),
   };
 
   const timezoneMapOptions: google.maps.MapOptions = {
     center: { lat: 0, lng: 0 },
     zoom: 2,
-    styles: worldTimezoneMapStyles,
     disableDefaultUI: true,
     zoomControl: false,
+    ...renderingOptions(TIMEZONE_MAP_ID, worldTimezoneMapStyles),
   };
 
   const locationMapEl = document.getElementById('location-map') as HTMLElement;
