@@ -1,0 +1,1 @@
+../../../App/Shared/WidgetSharedStore.swift

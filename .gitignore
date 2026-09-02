@@ -15,3 +15,11 @@ keystore.jks
 # Miniflare's local dev state: sqlite caches and observability trace stores,
 # regenerated on every `wrangler dev`.
 .wrangler/
+
+# App Store screenshots. Release assets, ~22MB, and regenerated from
+# distribution/screenshots/README.md — the repo tracks how to make them
+# rather than the images themselves.
+distribution/screenshots/*/*.png
+
+# SwiftPM build output for the widget-logic test package
+ios/SharedKit/.build/
