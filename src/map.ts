@@ -509,7 +509,7 @@ export async function onLocationSuccess(pos: GeolocationPosition) {
   const { latitude, longitude, accuracy, altitude, speed, heading } = coords;
 
   if (accuracy <= 15 && (altitude !== null || speed !== null || heading !== null)) {
-    dom.locationTitleEl.innerHTML = `<i class="fas fa-satellite-dish fa-fw mr-2 text-blue-400"></i>GPS Location`;
+    dom.locationTitleEl.innerHTML = `<i class="fas fa-satellite fa-fw mr-2 text-blue-400"></i>GPS Location`;
   } else if (accuracy <= 15) {
     dom.locationTitleEl.innerHTML = `<i class="fas fa-location-dot fa-fw mr-2 text-blue-400"></i>Location`;
   } else {
@@ -701,13 +701,19 @@ function createClockElement(entry: ClockEntry): HTMLElement {
     removeBtn.dataset.clockTarget = key;
     pinBtn.dataset.clockTarget = key;
 
+    // The ship you are currently aboard cannot be removed. Detection would put
+    // it straight back on the next response, so the button would appear to do
+    // nothing — and while aboard it is not really a choice, any more than your
+    // own local time is. Step ashore and it becomes an ordinary removable row.
+    const isAboard = entry.kind === 'ship' && shipKey(entry.ship) === state.aboardShipKey;
+
     // Only a zone can be transient — it is the map's unsaved selection. A ship
-    // is saved the moment it is added, so it always offers removal.
+    // is saved the moment it is added, so it otherwise always offers removal.
     if (isTransient) {
         removeBtn.classList.add('hidden');
         pinBtn.classList.remove('hidden');
     } else {
-        removeBtn.classList.remove('hidden');
+        removeBtn.classList.toggle('hidden', isAboard);
         pinBtn.classList.add('hidden');
     }
 

@@ -18,9 +18,9 @@ import { initShipTrack } from './shiptrack';
 import { refreshShipMarkers, startShipMarkerWatch } from './ship-markers';
 import { installDiagnostics } from './diagnostics';
 import { library, dom as faDom } from '@fortawesome/fontawesome-svg-core';
-import { faLocationDot, faWifi, faBullseye, faMobileAlt, faSatelliteDish, faShip } from '@fortawesome/free-solid-svg-icons';
+import { faLocationDot, faWifi, faBullseye, faMobileAlt, faSatellite, faShip } from '@fortawesome/free-solid-svg-icons';
 
-library.add(faLocationDot, faWifi, faBullseye, faMobileAlt, faSatelliteDish, faShip);
+library.add(faLocationDot, faWifi, faBullseye, faMobileAlt, faSatellite, faShip);
 faDom.watch();
 
 const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
