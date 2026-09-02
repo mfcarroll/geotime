@@ -381,18 +381,82 @@ function createMyLocationButton(map: google.maps.Map) {
     });
 }
 
-export async function initMaps() {
-  const { Map } = await google.maps.importLibrary("maps") as google.maps.MapsLibrary;
-  const { AdvancedMarkerElement } = await google.maps.importLibrary("marker") as google.maps.MarkerLibrary;
-  const { Circle } = await google.maps.importLibrary("maps") as google.maps.MapsLibrary;
+/**
+ * Two maps is one too many on a phone.
+ *
+ * The location map is a small high-zoom view of the streets around a blue dot.
+ * On a wide layout it sits beside the world map and costs nothing; in a single
+ * column it sits *above* the World Clock list and pushes it a screen further
+ * down, so the price of it is a scroll past a map you were not looking at.
+ *
+ * So it is a layout question, and the breakpoint is where a phone ends rather
+ * than where this app's columns split. The columns break at lg (1024px), which
+ * would take the map away from an iPad held upright — where there is plenty of
+ * room for it. md (768px) keeps it on tablets and desktops and drops it on
+ * phones, which is the case actually worth fixing. A large phone in landscape
+ * clears 768 and will keep the map; that is the edge this trade accepts.
+ *
+ * Below the breakpoint the map is not merely hidden, it is never constructed —
+ * which spares the device least able to afford it a second vector map, its
+ * WebGL context and its tile traffic. Everything that touches state.locationMap
+ * is already null-guarded, so absence is an ordinary state rather than a
+ * special case.
+ */
+const TWO_MAP_LAYOUT = window.matchMedia('(min-width: 768px)');
 
-  const locationMapOptions: google.maps.MapOptions = {
+function createLocationMap(): void {
+  if (state.locationMap) return;
+  const el = document.getElementById('location-map');
+  if (!el) return;
+
+  state.locationMap = new google.maps.Map(el, {
     center: { lat: 0, lng: 0 },
     zoom: 2,
     disableDefaultUI: true,
     zoomControl: false,
     ...renderingOptions(LOCATION_MAP_ID, locationMapStyles),
-  };
+  });
+  createMyLocationButton(state.locationMap);
+
+  state.locationMarker = new google.maps.marker.AdvancedMarkerElement({
+    map: state.locationMap,
+    position: { lat: 0, lng: 0 },
+    content: blueDot(),
+  });
+  setMarkerVisible(state.locationMarker, false);
+
+  state.accuracyCircle = new google.maps.Circle({
+    map: state.locationMap,
+    radius: 0,
+    fillColor: '#4285F4',
+    fillOpacity: 0.2,
+    strokeColor: '#4285F4',
+    strokeOpacity: 0.5,
+    strokeWeight: 1,
+    center: { lat: 0, lng: 0 },
+  });
+
+  // Built late, on a resize, this map has missed every fix so far — and
+  // updateLocationMap only frames the view on the first one, so left alone it
+  // would sit at zoom 2 over the Atlantic with a marker somewhere off-screen.
+  // The accuracy radius is not recoverable here (only the position is kept), so
+  // the circle stays empty and a plain street zoom stands in until the next fix
+  // arrives and sizes it properly.
+  const fix = state.lastFetchedCoords;
+  if (fix) {
+    const pos = { lat: fix.lat, lng: fix.lon };
+    state.locationMarker.position = pos;
+    setMarkerVisible(state.locationMarker, true);
+    state.locationMap.setCenter(pos);
+    state.locationMap.setZoom(14);
+  }
+}
+
+export async function initMaps() {
+  const { Map } = await google.maps.importLibrary("maps") as google.maps.MapsLibrary;
+  // Imported for its side effect: AdvancedMarkerElement is reached through the
+  // google.maps.marker namespace below, which the library populates.
+  await google.maps.importLibrary("marker");
 
   const timezoneMapOptions: google.maps.MapOptions = {
     center: { lat: 0, lng: 0 },
@@ -402,36 +466,25 @@ export async function initMaps() {
     ...renderingOptions(TIMEZONE_MAP_ID, worldTimezoneMapStyles),
   };
 
-  const locationMapEl = document.getElementById('location-map') as HTMLElement;
-  state.locationMap = new Map(locationMapEl, locationMapOptions);
-  createMyLocationButton(state.locationMap);
-  
-  state.locationMarker = new AdvancedMarkerElement({
-    map: state.locationMap,
-    position: { lat: 0, lng: 0 },
-    content: blueDot(),
-  });
-  setMarkerVisible(state.locationMarker, false);
-  state.accuracyCircle = new Circle({
-    map: state.locationMap,
-    radius: 0,
-    fillColor: '#4285F4',
-    fillOpacity: 0.2,
-    strokeColor: '#4285F4',
-    strokeOpacity: 0.5,
-    strokeWeight: 1,
-    center: { lat: 0, lng: 0 }
+  if (TWO_MAP_LAYOUT.matches) createLocationMap();
+  // A window being widened, or a phone turned on its side, should get the map it
+  // did not have. Not removed again on the way back: once it exists the CSS
+  // hides it, and tearing a map down to save a hidden container is not worth the
+  // teardown path it would need.
+  TWO_MAP_LAYOUT.addEventListener('change', () => {
+    if (TWO_MAP_LAYOUT.matches) createLocationMap();
   });
 
   const timezoneMapEl = document.getElementById('timezone-map') as HTMLElement;
   state.timezoneMap = new Map(timezoneMapEl, timezoneMapOptions);
   createMyLocationButton(state.timezoneMap);
-  state.timezoneMapMarker = new AdvancedMarkerElement({
+  const timezoneDot = new google.maps.marker.AdvancedMarkerElement({
     map: state.timezoneMap,
     position: { lat: 0, lng: 0 },
     content: blueDot(),
   });
-  setMarkerVisible(state.timezoneMapMarker, false);
+  setMarkerVisible(timezoneDot, false);
+  state.timezoneMapMarker = timezoneDot;
 
   await setupTimezoneMapListeners();
 
