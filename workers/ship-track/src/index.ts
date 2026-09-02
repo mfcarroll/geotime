@@ -79,6 +79,28 @@ const TTL = {
   detail: 30 * 60,
 } as const;
 
+/**
+ * Bumped whenever the shape of a cached response changes.
+ *
+ * The cache key is built here rather than taken from the request, so nothing a
+ * caller sends can vary it and there is no way to ask for a fresh copy — which
+ * is exactly what keeps our load on someone else's endpoint to about a request
+ * a minute, and exactly what makes a deploy appear not to work for up to the
+ * TTL. Entries under an old version are orphaned the moment this changes and
+ * expire quietly on their own, so deploying a change now makes the change
+ * visible. Cheaper than the alternatives: a bypass parameter hands strangers a
+ * way to force upstream traffic, and a delete route means a secret and a write
+ * endpoint on a public Worker for something needed a few times a year.
+ *
+ * The hostname is deliberately not a real one. The Cache API treats the key as
+ * an identifier and never fetches it, so a made-up host makes it self-evidently
+ * internal and cannot collide with anything genuinely cached.
+ *
+ *   v2 — track retention from KV; entries from v1 hold a pre-retention shape.
+ */
+const CACHE_VERSION = 'v2';
+const cacheKey = (path: string) => `https://ship-track.geotime/${CACHE_VERSION}${path}`;
+
 /** Response headers the browser is allowed to read. Nothing custom is needed. */
 const EXPOSED = 'content-type';
 
@@ -467,7 +489,7 @@ export default {
     // the number of users makes no difference to how often upstream is asked.
     if (url.pathname === '/fleet') {
       const { body, status } = await fetchShaped(
-        'https://ship-track.geotime/fleet',
+        cacheKey('/fleet'),
         `${ORIGIN}/map/ships.json${FLEET_QUERY}`,
         shapeFleet,
         TTL.fleet
@@ -487,7 +509,7 @@ export default {
     if (detail && validImo(detail[1])) {
       const imo = detail[1];
       const { body, status } = await fetchShaped(
-        `https://ship-track.geotime/ship/${imo}`,
+        cacheKey(`/ship/${imo}`),
         `${ORIGIN}/map/ship.json?imo=${imo}`,
         async (payload) => {
           const shaped = shapeDetail(imo, payload);
