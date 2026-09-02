@@ -41,12 +41,20 @@ import { clearShipChart, drawShipChart, fitToShip, refreshShipMarkers } from './
  * both happily, which is why this is invisible in a browser and why it looked
  * like a styling fault. A WebGL context limit is the likely cause.
  *
- * The world map is the one that earns it: it is large, it is read at a glance,
- * and its labels sit under the timezone bands. The location map is a small
- * high-zoom view of a few streets around a blue dot, where raster tiles are
- * indistinguishable. So it keeps the styled raster path, and its Map ID —
- * c75a3fdf244efe751e1f1767, styled and ready — waits for the day WKWebView
- * stops caring. Set VITE_MAP_ID_LOCATION to it to try again.
+ * Sharing one Map ID between the two does not help — tested, and the second map
+ * is beige just the same. The limit is on vector map instances, not on distinct
+ * styles.
+ *
+ * The world map is the one that earns the slot: it is large, it is read at a
+ * glance, and its labels sit under the timezone bands. The location map is a
+ * small high-zoom view of a few streets around a blue dot, where raster tiles
+ * are indistinguishable — and where the deliberately more detailed
+ * locationMapStyles, which keeps the local roads the world map suppresses, is
+ * the point of it being a separate style at all.
+ *
+ * Its Map ID — c75a3fdf244efe751e1f1767, styled and ready — waits for the day
+ * WKWebView stops caring. Set VITE_MAP_ID_LOCATION to it to try again, and
+ * check on a device, since a browser renders both regardless.
  */
 const LOCATION_MAP_ID: string = import.meta.env.VITE_MAP_ID_LOCATION ?? '';
 const TIMEZONE_MAP_ID: string =

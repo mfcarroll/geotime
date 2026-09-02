@@ -59,6 +59,13 @@ right way round: the world map is large, read at a glance, and its labels sit
 under the timezone bands, while the location map is a small high-zoom view of a
 few streets around a blue dot where raster tiles are indistinguishable.
 
+Sharing a single Map ID between the two does not dodge it — tested, and the
+second map is beige just the same. The limit is on vector map instances, not on
+distinct styles, so there is nothing to gain by merging the styles. Keep them
+separate: the location map's is deliberately the more detailed of the two, since
+local roads are the whole point of a map showing where you are standing, and the
+world map suppresses exactly those.
+
 The Location Map ID stays styled and ready in case WKWebView stops caring —
 building with `VITE_MAP_ID_LOCATION=c75a3fdf244efe751e1f1767` turns it on, and
 the way to check is the app on a device, not a browser.
