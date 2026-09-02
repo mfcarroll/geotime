@@ -27,19 +27,28 @@ import {
   shipTrackAvailable,
   FIX_MAX_AGE_MS,
   FIX_STALE_AGE_MS,
+  voyageTrack,
   type ShipFix,
+  type ShipPort,
   type ShipVoyage,
 } from './shiptrack';
 
 /**
- * A vessel under way: an arrow, rotated to its course.
+ * A hull seen from above: pointed bow, flared sides, square stern.
  *
- * The concave tail is the convention every AIS plot uses, and it earns its
- * keep — it makes the pointed end unambiguous at a size where a plain triangle
- * reads equally well in either direction, which for a heading marker is the
- * whole point.
+ * Plan view rather than the side profile the clock rows and the widget use, and
+ * that is the one thing worth explaining. A side-on ship is the more obvious
+ * "ship icon", but it cannot be turned — rotate a silhouette of a ship you are
+ * looking at broadside and it reads as a ship falling over. A hull from above
+ * rotates the way the vessel actually does, which is what lets one icon serve
+ * both "this is a ship" and "this is the way it is pointing".
+ *
+ * It also replaces what used to be two shapes, an arrow under way and a dot at
+ * rest. A hull needs no such split: a moored ship is still a hull lying at some
+ * orientation, where an arrow at rest would have been claiming a direction of
+ * travel it did not have.
  */
-const UNDER_WAY_PATH = 'M 0,-9 L 5.5,7 L 0,3.5 L -5.5,7 Z';
+const HULL_PATH = 'M 0,-9 Q 4.5,-4.5 4.5,-1 L 4.5,6.5 L -4.5,6.5 L -4.5,-1 Q -4.5,-4.5 0,-9 Z';
 
 // Distinct from the blue GPS dot on the same map, and legible on all four
 // grounds it has to sit on: dark water, slate land, and the blue and gold band
@@ -57,23 +66,19 @@ const markers = new Map<string, google.maps.Marker>();
 let pollTimer: number | null = null;
 
 /**
- * Course-up arrow, or a dot when there is no course to point.
+ * The hull, turned to the way the vessel is lying.
  *
- * A vessel alongside or at anchor reports `sog` 0 and whatever heading it
- * happens to be lying at, which is real but says nothing about where it is
- * going — and an arrow is a claim about direction. A dot makes no claim. Same
- * for a fix with neither course nor heading.
+ * Falls back to north-up when the fix carries neither heading nor course, which
+ * is rare — no vessel in the live fleet was missing both. An unrotated hull is a
+ * weak claim in a way an unrotated arrow would not have been.
  */
 function symbolFor(fix: ShipFix, stale: boolean, selected: boolean): google.maps.Symbol {
-  const bearing = markerBearing(fix);
-  const moving = (fix.sog ?? 0) > 0.5 && bearing !== null;
-
   return {
-    path: moving ? UNDER_WAY_PATH : google.maps.SymbolPath.CIRCLE,
+    path: HULL_PATH,
     // A touch larger when selected, on top of the colour change — the gold alone
     // is hard to pick out against the gold band it just lit.
-    scale: (moving ? 1 : 4.5) * (selected ? 1.35 : 1),
-    rotation: moving ? bearing! : 0,
+    scale: selected ? 1.5 : 1.15,
+    rotation: markerBearing(fix) ?? 0,
     fillColor: selected ? SELECTED : stale ? HULL_STALE : HULL,
     // Faded rather than hidden: an hour-old position is still worth seeing, it
     // just should not read as current.
@@ -195,6 +200,165 @@ export function refreshShipMarkers(): void {
   for (const key of [...markers.keys()]) {
     if (!wanted.has(key)) removeMarker(key);
   }
+}
+
+// ---------------------------------------------------------------------------
+// The chart: one ship's wake, the route ahead, and the ports along it.
+//
+// Only ever the selected ship. Forty-four overlapping tracks would be noise
+// even if they were free, and they are not — the track and route come from a
+// per-ship request where positions come from one shared one.
+// ---------------------------------------------------------------------------
+
+/**
+ * Every line is drawn twice: a dark wider casing underneath, the real line on
+ * top.
+ *
+ * Not decoration. A single light line has to stay legible over dark ocean,
+ * slate land, the blue GPS band and the gold band the selection itself just
+ * painted — and the gold is the problem, because a pale line on a pale wash
+ * disappears exactly when the user has asked to look at it. The casing gives
+ * every segment its own contrast regardless of what it crosses.
+ */
+const CASING = '#0B1219';
+
+// One colour for the whole track, solid behind and dashed ahead. Solid for
+// travelled and dashed for planned is a convention that needs no legend, and
+// spending a second hue on it would put the route in competition with the gold —
+// which on this map means one thing only: the thing you selected. Gold is
+// therefore left to the band, the ship and its ports.
+const TRACK = '#E8EEF4';
+const PORT_RING = '#FFD700';
+
+/** Everything the chart owns, so it can be torn down without hunting. */
+let chart: google.maps.MVCObject[] = [];
+
+function clearChart(): void {
+  for (const shape of chart) {
+    (shape as google.maps.Polyline | google.maps.Marker).setMap(null);
+  }
+  chart = [];
+}
+
+function polyline(
+  map: google.maps.Map,
+  path: google.maps.LatLngLiteral[],
+  options: google.maps.PolylineOptions
+): void {
+  // Casing first, so it sits under its own line.
+  chart.push(new google.maps.Polyline({
+    map,
+    path,
+    clickable: false,
+    strokeColor: CASING,
+    strokeOpacity: 0.55,
+    strokeWeight: (options.strokeWeight ?? 2) + 3,
+    zIndex: (options.zIndex ?? 10) - 1,
+    icons: options.icons,
+  }));
+  chart.push(new google.maps.Polyline({ map, path, clickable: false, ...options }));
+}
+
+/** "Coco Cay · day 2 · departs 17:00", as much of it as we actually know. */
+function portTitle(port: ShipPort, fallbackName: string | null): string {
+  const parts = [port.name ?? fallbackName ?? 'Port of call'];
+  if (port.day !== null) parts.push(`day ${port.day}`);
+  if (port.depart) {
+    // The upstream string is "2026-08-31 17:00:00" in the port's own local time.
+    // Only the clock part is shown, and deliberately without a zone: this is a
+    // scheduled departure as the itinerary states it, not a moment converted
+    // into anybody's timezone. Naming a zone we have not established would be
+    // the one mistake this app exists to avoid.
+    const clock = port.depart.slice(11, 16);
+    if (clock) parts.push(`departs ${clock}`);
+  }
+  return parts.join(' · ');
+}
+
+/**
+ * Draws the selected ship's chart. Safe to call repeatedly; replaces itself.
+ *
+ * The wake is clipped to the voyage in progress — see voyageTrack(). Drawing the
+ * raw window would reach back through previous sailings, which answers a
+ * question nobody asked.
+ */
+export async function drawShipChart(key: string, voyage: Promise<ShipVoyage | null>): Promise<void> {
+  const map = state.timezoneMap;
+  if (!map) return;
+
+  const resolved = await voyage.catch(() => null);
+
+  // The selection may have moved on while that was in flight. Drawing now would
+  // put one ship's route under another ship's highlight.
+  if (state.selectedShipKey !== key) return;
+
+  clearChart();
+  if (!resolved) return;
+
+  const toLatLng = (p: [number, number]) => ({ lat: p[1], lng: p[0] });
+
+  // Route first, so the wake draws over it where they overlap: where the ship
+  // has already been is a fact, and the plan for the same water is not.
+  if (resolved.route.length >= 2) {
+    polyline(map, resolved.route.map(toLatLng), {
+      // strokeOpacity 0 with a repeating icon is how the Maps API draws a dashed
+      // line — the stroke itself is invisible and the dashes are the symbols.
+      strokeOpacity: 0,
+      strokeWeight: 2,
+      zIndex: 15,
+      icons: [{
+        icon: {
+          path: 'M 0,-1 0,1',
+          strokeColor: TRACK,
+          strokeOpacity: 0.85,
+          strokeWeight: 2,
+          scale: 2.5,
+        },
+        offset: '0',
+        repeat: '13px',
+      }],
+    });
+  }
+
+  // The wake is the least reliable of the three layers, and silently so: the
+  // upstream `track` array can come back EMPTY for a ship that had 720 points a
+  // few hours earlier, while its route and position keep working. Observed on
+  // Star of the Seas within a single day, with two other vessels unaffected. So
+  // no wake is a normal state, not a failure to report — the route still frames
+  // the cruise and the marker still says where the ship is.
+  const wake = voyageTrack(resolved);
+  if (wake.length >= 2) {
+    polyline(map, wake.map(toLatLng), {
+      strokeColor: TRACK,
+      strokeOpacity: 0.95,
+      strokeWeight: 2.5,
+      zIndex: 20,
+    });
+  }
+
+  for (const port of resolved.ports) {
+    chart.push(new google.maps.Marker({
+      map,
+      position: { lat: port.lat, lng: port.lon },
+      title: portTitle(port, null),
+      icon: {
+        path: google.maps.SymbolPath.CIRCLE,
+        scale: 4,
+        fillColor: CASING,
+        fillOpacity: 0.9,
+        strokeColor: PORT_RING,
+        strokeWeight: 2,
+        strokeOpacity: 0.95,
+      },
+      // Under the ship itself, over the lines.
+      zIndex: 40,
+    }));
+  }
+}
+
+/** Removes the chart. For deselection, and for selecting a zone instead. */
+export function clearShipChart(): void {
+  clearChart();
 }
 
 /**

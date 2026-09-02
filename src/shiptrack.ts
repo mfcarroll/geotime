@@ -321,7 +321,14 @@ export function voyageTrack(voyage: ShipVoyage): Array<[number, number]> {
   return clipped.length >= 2 ? clipped : voyage.track;
 }
 
-/** Degrees to rotate a ship marker by, or null when the feed has neither value. */
+/**
+ * Degrees to rotate a ship marker by, or null when the feed has neither value.
+ *
+ * Heading before course, because the marker is a picture of the hull and heading
+ * is the direction the hull is pointing. Course over ground is where it is
+ * *going*, which differs in a current or a crosswind and differs completely at
+ * anchor, where a vessel lies to the tide while making no way at all.
+ */
 export function markerBearing(fix: ShipFix): number | null {
-  return fix.cog ?? fix.heading;
+  return fix.heading ?? fix.cog;
 }

@@ -9,8 +9,8 @@ import { loadCityIndex, nearestPlace } from './cities';
 import { resolveZoneStyle } from './map-highlight';
 import { clockKey, clockLabel, clockSubLabel, visibleClocks, type ClockEntry } from './clocks';
 import { shipKey, type ShipClock } from './ships';
-import { voyageForShip } from './shiptrack';
-import { fitToShip, refreshShipMarkers } from './ship-markers';
+import { voyageForShip, type ShipVoyage } from './shiptrack';
+import { clearShipChart, drawShipChart, fitToShip, refreshShipMarkers } from './ship-markers';
 
 let userTimeInterval: number | null = null;
 const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
@@ -112,8 +112,12 @@ function selectZone(newTzid: string | null) {
     if (isTouchDevice) setHoveredZone(null);
     refreshMapStyles();
     // The ship selection was just cleared above; its marker has to stop looking
-    // selected, or the map shows two answers at once.
+    // selected and its chart has to go, or the map shows two answers at once.
     refreshShipMarkers();
+    clearShipChart();
+    // Cleared, not just hidden: leaving one ship's ETA in a hidden element is a
+    // trap for whoever next changes when this line is shown.
+    setShipVoyageLine(null);
     document.dispatchEvent(new CustomEvent('temporarytimezonechanged'));
 }
 
@@ -161,11 +165,27 @@ export function selectShip(key: string): void {
     refreshShipMarkers();
     document.dispatchEvent(new CustomEvent('temporarytimezonechanged'));
 
-    // Bring the ship into view, and fetch its voyage to do it properly: the
-    // route's own extent frames the whole cruise, where the position alone frames
-    // a dot in an ocean. Falls back to the position when there is no voyage —
-    // a repositioning leg has no route to fit.
-    if (!isDeselecting) void fitToShip(key, voyageForShip(key));
+    if (isDeselecting) {
+        clearShipChart();
+        return;
+    }
+
+    // One request, two consumers: the extent frames the map and the track, route
+    // and ports draw the chart. Fetched once here and shared, rather than each
+    // asking for the same thing.
+    const voyage = voyageForShip(key);
+    // Framing the ROUTE rather than the position is the difference between
+    // framing a cruise and framing a dot in an ocean — which is also why the
+    // ship lands off-centre, and looks right only once the route is drawn under
+    // it. Falls back to the position when there is no route: a repositioning leg
+    // has none.
+    void fitToShip(key, voyage);
+    void drawShipChart(key, voyage);
+    void voyage.then((resolved) => {
+        // Same guard as the map's: the user may have moved on, and a stale
+        // destination under a new ship's name is worse than none.
+        if (state.selectedShipKey === key) setShipVoyageLine(resolved);
+    }).catch(() => {});
 }
 
 /**
@@ -182,10 +202,19 @@ function updateShipCard(ship: ShipClock | null): void {
             dom.selectedTimezoneDetailsEl, dom.selectedTimezoneNameEl,
             dom.selectedTimezoneOffsetEl, null, 'offset'
         );
+        setShipVoyageLine(null);
         return;
     }
+    // Cleared until the voyage arrives, so a previous ship's destination cannot
+    // sit under a new ship's name.
+    setShipVoyageLine(null);
 
-    dom.selectedTimezoneNameEl.textContent = ship.name;
+    // The short name, not the full one. This card is a compact overlay, and
+    // "Independence of the Seas" truncates to "Independence of the S…" in it —
+    // where `short` was built for exactly this: the same name with the words
+    // that distinguish nothing removed. Ambiguity is not a risk here, since the
+    // user just picked this row.
+    dom.selectedTimezoneNameEl.textContent = ship.short;
     if (ship.offsetHours === null) {
         // The same wording the clock row uses, for the same reason: no offset
         // means nothing sensible to show, and the embark port's zone is the
@@ -197,6 +226,28 @@ function updateShipCard(ship: ShipClock | null): void {
             formatOffsetDiff(ship.offsetHours - getUtcOffset(referenceTz));
     }
     dom.selectedTimezoneDetailsEl.classList.remove('hidden');
+}
+
+/**
+ * The third line of the card: where she is headed, and when she is due.
+ *
+ * Both come from the operator's own AIS and itinerary rather than from us, and
+ * the ETA is quoted as they state it — a scheduled arrival at that port, in that
+ * port's time. That is the conventional reading of an ETA and the only one it
+ * can have, but it is the reason this line is small and subordinate: an
+ * unqualified time is exactly what this app spends the rest of its surface
+ * avoiding, so it should not compete with the clock above it.
+ *
+ * Hidden entirely when there is nothing to say, which is common — a third of
+ * the fleet reports no usable destination.
+ */
+function setShipVoyageLine(voyage: ShipVoyage | null): void {
+    const parts: string[] = [];
+    if (voyage?.destination) parts.push(`→ ${voyage.destination}`);
+    if (voyage?.eta) parts.push(`ETA ${voyage.eta}`);
+
+    dom.selectedShipVoyageEl.textContent = parts.join(' · ');
+    dom.selectedShipVoyageEl.classList.toggle('hidden', parts.length === 0);
 }
 
 function createMyLocationButton(map: google.maps.Map) {
