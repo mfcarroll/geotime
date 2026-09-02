@@ -11,40 +11,12 @@ only.
 | `c75a3fdf244efe751e1f1767` | Location Map | The small map under GPS Location |
 | `c75a3fdf244efe75fccc5434` | World Clock Map | The big timezone map |
 
-## If the JSON import will not take
+## Map styles
 
-The `.json` files here are **legacy JSON styling** — the format the old raster
-styled maps used. The newer vector style editor does not reliably accept it, and
-the suppression rules (`administrative.land_parcel`, `poi`, `transit`,
-`road.labels`) are the sort that get rejected.
+The `google-maps-styles.json` file here is **modern JSON styling** and can be imported directly into
+the maps styles editor.
 
-Worth one try: the import option is usually offered when a style is **created**
-("Create your own style" → import JSON), not when editing an existing one. If a
-fresh style takes the import, associate that style with the Map ID and stop
-reading here.
-
-## Otherwise, do it by hand — it is shorter than it looks
-
-Start from the console's **dark** preset, which gets most of the way, then set
-only what follows. The base map's whole job is to be a quiet backdrop: the
-timezone bands and the ship layers are what the user is looking at, and anything
-loud in the base competes with them.
-
-| What | Value |
-| --- | --- |
-| Landscape / geometry | `#3b4a5a` |
-| Water / geometry | `#1d2c3a` |
-| All labels / text fill | `#8a99a8` |
-| All labels / text stroke | `#3b4a5a` |
-| Administrative / borders | `#4a6078` |
-| Road / geometry | `#4a6078` |
-
-Then hide: **points of interest**, **transit**, **road labels**, **land
-parcels**, **neighbourhoods**, and man-made landscape. Keep **localities**
-visible — city names are the only labels that earn their place on a world map.
-
-Both Map IDs take the same treatment; the two styles differ only in details that
-do not matter much at the sizes these render.
+Both Map IDs now share the same set of styles.
 
 ## Both maps are vector, with a style each
 
