@@ -27,6 +27,7 @@ import {
   shipTrackAvailable,
   FIX_MAX_AGE_MS,
   FIX_STALE_AGE_MS,
+  routeAhead,
   voyageTrack,
   type ShipFix,
   type ShipPort,
@@ -297,10 +298,12 @@ export async function drawShipChart(key: string, voyage: Promise<ShipVoyage | nu
 
   const toLatLng = (p: [number, number]) => ({ lat: p[1], lng: p[0] });
 
-  // Route first, so the wake draws over it where they overlap: where the ship
-  // has already been is a fact, and the plan for the same water is not.
-  if (resolved.route.length >= 2) {
-    polyline(map, resolved.route.map(toLatLng), {
+  // Only the part still to come, starting at the vessel. The wake covers where
+  // it has been, so the two meet at the ship and neither repeats the other.
+  const fix = fixForShip(key);
+  const ahead = routeAhead(resolved, fix ? [fix.lon, fix.lat] : null);
+  if (ahead.length >= 2) {
+    polyline(map, ahead.map(toLatLng), {
       // strokeOpacity 0 with a repeating icon is how the Maps API draws a dashed
       // line — the stroke itself is invisible and the dashes are the symbols.
       strokeOpacity: 0,

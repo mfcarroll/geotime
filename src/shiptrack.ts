@@ -94,6 +94,11 @@ export interface ShipVoyage {
   ports: ShipPort[];
   /** `[minLat, minLon, maxLat, maxLon]` — what the map fits to on selection. */
   extent: [number, number, number, number] | null;
+  /**
+   * True when some of `track` is history we kept rather than history upstream
+   * just sent. Diagnostics only — the points are equally real either way.
+   */
+  trackRetained?: boolean;
 }
 
 /** Anything cached carries when it was fetched, because age is displayed. */
@@ -115,6 +120,18 @@ const FLEET_MAX_AGE_MS = 60 * 1000;
 
 /** Ditto, matched to the Worker's detail TTL. */
 const VOYAGE_MAX_AGE_MS = 30 * 60 * 1000;
+
+/**
+ * How many ships' voyages to keep.
+ *
+ * Each holds a track of up to MAX_RETAINED_TRACK points, so this is the bound
+ * that actually matters for storage: six of them is a couple of hundred
+ * kilobytes at worst, against a localStorage budget this app shares with a
+ * 1.8 MB city index. Six is also comfortably more than anyone keeps on a clock
+ * list, so in practice nothing is ever evicted — this only stops a user who has
+ * browsed many ships from filling the quota and silently losing all of it.
+ */
+const MAX_CACHED_VOYAGES = 6;
 
 /**
  * Beyond this, a fix is withheld rather than drawn.
@@ -250,9 +267,25 @@ export async function voyageForShip(shipKey: string, force = false): Promise<Shi
   const payload = await get<ShipVoyage>(`/ship/${imo}`);
   if (!payload?.imo) return cached?.value ?? null;
 
-  voyages.set(imo, { at: Date.now(), value: payload });
+  // Never let a successful response with no track erase a track we already had.
+  const merged = withRetainedTrack(payload, cached?.value);
+  voyages.set(imo, { at: Date.now(), value: merged });
+  pruneVoyages();
   writeCache(VOYAGE_CACHE_KEY, Object.fromEntries(voyages));
-  return payload;
+  return merged;
+}
+
+/**
+ * Drops the least recently fetched voyages beyond the cap.
+ *
+ * Least *recently fetched* rather than oldest data, because a voyage is
+ * re-fetched whenever its ship is selected — so recency of fetch is recency of
+ * interest, and the ships someone actually watches keep their history.
+ */
+function pruneVoyages(): void {
+  if (voyages.size <= MAX_CACHED_VOYAGES) return;
+  const byAge = [...voyages.entries()].sort((a, b) => b[1].at - a[1].at);
+  for (const [imo] of byAge.slice(MAX_CACHED_VOYAGES)) voyages.delete(imo);
 }
 
 /**
@@ -319,6 +352,170 @@ export function voyageTrack(voyage: ShipVoyage): Array<[number, number]> {
   // Embarkation day: the ship has barely moved, and a two-point line looks like
   // a rendering bug rather than a short track.
   return clipped.length >= 2 ? clipped : voyage.track;
+}
+
+/**
+ * How many track points we are willing to remember for one voyage.
+ *
+ * The upstream window is 720. A fortnight-long cruise reporting every half hour
+ * exceeds that, so retaining more than the window is the point — but not
+ * without a bound, since this ends up in localStorage.
+ */
+const MAX_RETAINED_TRACK = 2000;
+
+/** Two fixes are the same fix if they agree to about a decimetre. */
+function samePoint(a: [number, number], b: [number, number]): boolean {
+  return Math.abs(a[0] - b[0]) < 1e-6 && Math.abs(a[1] - b[1]) < 1e-6;
+}
+
+/**
+ * Length of the overlap between the end of `retained` and the start of `fresh`.
+ *
+ * The two arrays are windows onto the *same* underlying sequence of fixes, so
+ * the join can be found exactly rather than estimated: the largest k where the
+ * last k of one equals the first k of the other. That matters because the
+ * geometric alternatives are both wrong on these itineraries. Matching the
+ * nearest point discards the whole voyage when a round trip brings the ship back
+ * past its start; matching the last point within a radius overshoots whenever
+ * the vessel is barely moving, and duplicates the overlap. Neither can tell
+ * "here again" from "here still", and the identical coordinates can.
+ */
+function overlapLength(
+  retained: Array<[number, number]>,
+  fresh: Array<[number, number]>
+): number {
+  for (let k = Math.min(retained.length, fresh.length); k > 0; k--) {
+    let matched = true;
+    for (let i = 0; i < k; i++) {
+      if (!samePoint(retained[retained.length - k + i], fresh[i])) {
+        matched = false;
+        break;
+      }
+    }
+    if (matched) return k;
+  }
+  return 0;
+}
+
+/**
+ * Combines the history we already had with the window upstream just sent.
+ *
+ * Three things make this worth doing rather than simply taking the fresh copy:
+ *
+ * 1. The track comes back EMPTY intermittently — observed on a vessel that had
+ *    720 points hours earlier, while its route and position kept working. Taking
+ *    the fresh copy would erase good history on a response that was, by every
+ *    other measure, a success.
+ * 2. The window is a fixed 720 points, so on a long cruise the earliest part of
+ *    the voyage falls off the end. Those points are still this voyage's history.
+ * 3. The wake is the one layer that cannot be re-derived later. A position we
+ *    miss is gone; a route we can always re-ask for.
+ */
+export function mergeTrack(
+  retained: Array<[number, number]>,
+  fresh: Array<[number, number]>
+): Array<[number, number]> {
+  if (fresh.length === 0) return retained;
+  if (retained.length === 0) return fresh;
+
+  // No overlap means the window has slid entirely past our copy, so the fresh
+  // points belong after everything we hold rather than instead of it.
+  const overlap = overlapLength(retained, fresh);
+  const merged = [...retained, ...fresh.slice(overlap)];
+
+  // Keep the newest, which is the part the map draws up to the ship.
+  return merged.length > MAX_RETAINED_TRACK
+    ? merged.slice(merged.length - MAX_RETAINED_TRACK)
+    : merged;
+}
+
+/**
+ * The fresh voyage, carrying whatever history is worth keeping from the old one.
+ *
+ * Guarded on the voyage being the same sailing. A retained track from the
+ * previous cruise would draw somebody else's wake under this one's route, which
+ * is precisely the confusion clipping the track was meant to remove.
+ */
+function withRetainedTrack(fresh: ShipVoyage, previous: ShipVoyage | undefined): ShipVoyage {
+  if (!previous || previous.track.length === 0) return fresh;
+  if (previous.voyage.startDate !== fresh.voyage.startDate) return fresh;
+
+  const track = mergeTrack(previous.track, fresh.track);
+  if (track.length === fresh.track.length) return fresh;
+  return { ...fresh, track, trackRetained: true };
+}
+
+/**
+ * Index of the route vertex closest to a point, searching from `from` onward.
+ *
+ * Longitude is scaled by cos(latitude) so a degree of longitude is compared
+ * against a degree of latitude at roughly its true length. Without it, two
+ * vertices equally far away in miles compare unequally at high latitude, and the
+ * nearest vertex to a ship off Norway is not the one it looks like on the map.
+ */
+function nearestIndex(
+  route: Array<[number, number]>,
+  target: [number, number],
+  from: number
+): number {
+  const scale = Math.cos((target[1] * Math.PI) / 180) || 1;
+  let best = from;
+  let bestDistance = Infinity;
+  for (let i = from; i < route.length; i++) {
+    const dx = (route[i][0] - target[0]) * scale;
+    const dy = route[i][1] - target[1];
+    const distance = dx * dx + dy * dy;
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      best = i;
+    }
+  }
+  return best;
+}
+
+/**
+ * The part of the planned route still to come: from where the ship is now, to
+ * the last port.
+ *
+ * Needed because `route` is the whole voyage, including the water already
+ * covered. Drawing it entire and letting the wake cover the sailed part looks
+ * right only while there IS a wake — and the upstream track goes empty often
+ * enough that the fallback matters, where the full route would then claim the
+ * ship had not left yet.
+ *
+ * The hard part is that a nearest-vertex search is ambiguous on a round trip:
+ * these itineraries come back through water they went out through, so the vertex
+ * closest to the ship may belong to the leg it has not sailed yet. The
+ * itinerary breaks the tie — no part of the route before the last port the ship
+ * has already left can still be ahead of it — so the search is floored at that
+ * port and geometry only decides the rest.
+ */
+export function routeAhead(
+  voyage: ShipVoyage,
+  position: [number, number] | null
+): Array<[number, number]> {
+  const route = voyage.route;
+  if (route.length < 2) return route;
+
+  // Departure times are stated in each port's own local time with no zone. That
+  // is fine here: this only has to decide which ports are behind us, and being
+  // a few hours out cannot change the answer on a schedule measured in days.
+  const now = Date.now();
+  let floor = 0;
+  for (const port of voyage.ports) {
+    if (!port.depart) continue;   // the last call has no departure
+    const departed = Date.parse(port.depart.replace(' ', 'T'));
+    if (!Number.isFinite(departed) || departed > now) continue;
+    floor = Math.max(floor, nearestIndex(route, [port.lon, port.lat], 0));
+  }
+
+  if (!position) return route.slice(floor);
+
+  const at = nearestIndex(route, position, floor);
+  // Begins at the vessel rather than at the nearest vertex: on a 10-point
+  // polyline across an ocean, that vertex can be a hundred miles away, and the
+  // gap between the ship and its own route reads as a rendering fault.
+  return [position, ...route.slice(at)];
 }
 
 /**
