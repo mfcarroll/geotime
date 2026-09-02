@@ -18,15 +18,20 @@ the maps styles editor.
 
 Both Map IDs now share the same set of styles.
 
-## Both maps are vector, with a style each
+## Both maps are vector, sharing one style
 
 The **World Clock Map** (`c75a3fdf244efe75fccc5434`) and the **Location Map**
 (`c75a3fdf244efe751e1f1767`) are both vector, both defaulted in `src/map.ts`.
 
-They keep separate styles on purpose. The location map's is deliberately the
-more detailed of the two: local roads are the whole point of a map showing where
-you are standing, and the world map suppresses exactly those so its labels do
-not fight the timezone bands. There is nothing to gain by merging them.
+They now share one style — `google-maps-styles.json`, imported against both Map
+IDs. An earlier version of this section said they were deliberately different,
+the location map carrying local roads the world map suppressed. That is no
+longer true, and the two IDs are kept only so the styles *can* diverge again
+without a code change; nothing today requires two.
+
+Local roads being visible in the shared style costs the world map nothing,
+because Google does not draw them at the zoom it sits at. If the two ever do
+need to differ, this is the line that would drive it.
 
 This section used to say only one map could be vector, on the strength of a
 WKWebView failure that was real but misdiagnosed — see the resolved section

@@ -51,9 +51,10 @@ import { clearShipChart, drawShipChart, fitToShip, refreshShipMarkers } from './
  * simulator's WebGL does not go through a phone's driver, and a context limit —
  * the wrong answer here — is exactly the kind of thing that would have differed.
  *
- * Two Map IDs rather than one, because the small map wants more detail than the
- * large one: locationMapStyles keeps the local roads the world map suppresses,
- * which is the whole point of it being a separate style.
+ * Two Map IDs, one style. They were meant to differ — the small map carrying
+ * local roads the large one suppressed — and for a while they did; both now
+ * point at the same cloud style. The second ID is kept so they can diverge
+ * again without a code change, not because anything needs it today.
  */
 const LOCATION_MAP_ID: string =
   import.meta.env.VITE_MAP_ID_LOCATION ?? 'c75a3fdf244efe751e1f1767';
