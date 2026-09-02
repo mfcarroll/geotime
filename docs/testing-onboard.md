@@ -74,6 +74,52 @@ Android needs cleartext to reach the gateway on `10.0.2.2`, which is granted by
 a debug-only manifest overlay in `android/app/src/debug/`. Gradle merges it into
 debug builds only; the release manifest has no such permission.
 
+## Track history, and why the Worker holds some
+
+`ship.json`'s `track` array goes empty intermittently — observed on a vessel
+that had 720 points hours earlier while its route and position kept working, and
+confirmed from an unrelated network, so it is upstream's data rather than us
+being throttled. No request recovers it; the only remedy is to have kept a copy.
+
+Two layers do that, and they cover different cases:
+
+- **The Worker**, in KV, keyed `track:<imo>:<voyage start>`. Serves the stored
+  track when upstream sends an empty one. Shared, so the first person to look
+  after a drop still gets history.
+- **The client**, in localStorage, which keeps the last voyage it saw. Covers
+  being offline, which the Worker cannot.
+
+The key carries the sailing so a retained track can never appear under a
+different cruise. Writes happen only when nothing is stored for that voyage yet
+or what is stored is empty — upstream re-decimates the whole span on every
+request, so a fresh non-empty response is never worse than a stored one. That is
+about one write per vessel per sailing; entries expire after 30 days.
+
+A track can also be seeded by hand, which is how one vessel's lost history was
+restored from a capture taken before the drop:
+
+```
+wrangler kv key put "track:9829942:30Aug2026" --path track.json \
+  --binding SHIP_TRACKS --config workers/ship-track/wrangler.jsonc --remote
+```
+
+The value is the bare `[[lon, lat], ...]` array, shaped as the Worker would
+return it. Worth checking a hand-made value against a live response for the same
+vessel first — everything but the track should be identical.
+
+## Why a deploy might look like it did nothing
+
+The Worker builds its cache key itself rather than taking it from the request,
+so nothing a caller sends can vary it and there is no way to ask for a fresh
+copy. That is deliberate — it is what holds our load on someone else's endpoint
+to roughly a request a minute — but it means a change to the response shape is
+invisible until the entry expires, up to 30 minutes for the detail bundle.
+
+`CACHE_VERSION` in the Worker is the lever. Bump it when the response shape
+changes: old entries are orphaned immediately and expire on their own. There is
+deliberately no bypass parameter and no delete route, since either would hand a
+stranger a way to force upstream traffic.
+
 ## What this does not simulate
 
 The header *names*. They come from the API write-up rather than from the wire —
