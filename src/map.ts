@@ -568,13 +568,15 @@ export function onLocationError(error: GeolocationPositionError) {
 
 export async function onLocationSuccess(pos: GeolocationPosition) {
   state.locationAvailable = true;
-  // Dev only. These are the user's real coordinates to five decimal places,
-  // reprinted on every watchPosition tick, and a shipped console is a place
-  // other people's tooling reads.
-  if (import.meta.env.DEV) console.log('Location success:', pos.coords);
   const { coords } = pos;
   const { latitude, longitude, accuracy, altitude, speed, heading } = coords;
 
+  // Whether the fix came from GPS or from wifi is not a detail at sea. A ship's
+  // wifi is Starlink, and a wifi-derived position can land on the other side of
+  // the world from the hull it was taken aboard — so the heading says which
+  // kind of fix this is, and the user gets to distrust it accordingly.
+  // Accuracy alone does not separate them: the tell is the sensor-only fields,
+  // which a network fix cannot supply.
   if (accuracy <= 15 && (altitude !== null || speed !== null || heading !== null)) {
     dom.locationTitleEl.innerHTML = `<i class="fas fa-satellite fa-fw mr-2 text-blue-400"></i>GPS Location`;
   } else if (accuracy <= 15) {
