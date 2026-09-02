@@ -46,29 +46,20 @@ visible — city names are the only labels that earn their place on a world map.
 Both Map IDs take the same treatment; the two styles differ only in details that
 do not matter much at the sizes these render.
 
-## Only one map is vector
+## Both maps are vector, with a style each
 
-Two vector maps on a page do not both work in WKWebView. Measured in the app on
-iOS: one renders and the other stays a flat beige — no error, no console output,
-and unchanged after a minute, so not a loading state. Chromium runs both without
-complaint, which is why this is invisible in a browser and why it first looked
-like a styling fault. A WebGL context limit is the likely cause.
+The **World Clock Map** (`c75a3fdf244efe75fccc5434`) and the **Location Map**
+(`c75a3fdf244efe751e1f1767`) are both vector, both defaulted in `src/map.ts`.
 
-So the **World Clock Map** is vector and the **Location Map** is not. That is the
-right way round: the world map is large, read at a glance, and its labels sit
-under the timezone bands, while the location map is a small high-zoom view of a
-few streets around a blue dot where raster tiles are indistinguishable.
+They keep separate styles on purpose. The location map's is deliberately the
+more detailed of the two: local roads are the whole point of a map showing where
+you are standing, and the world map suppresses exactly those so its labels do
+not fight the timezone bands. There is nothing to gain by merging them.
 
-Sharing a single Map ID between the two does not dodge it — tested, and the
-second map is beige just the same. The limit is on vector map instances, not on
-distinct styles, so there is nothing to gain by merging the styles. Keep them
-separate: the location map's is deliberately the more detailed of the two, since
-local roads are the whole point of a map showing where you are standing, and the
-world map suppresses exactly those.
-
-The Location Map ID stays styled and ready in case WKWebView stops caring —
-building with `VITE_MAP_ID_LOCATION=c75a3fdf244efe751e1f1767` turns it on, and
-the way to check is the app on a device, not a browser.
+This section used to say only one map could be vector, on the strength of a
+WKWebView failure that was real but misdiagnosed — see the resolved section
+below. The cause was a missing `worker-src` in our own CSP, not a limit on
+vector map instances.
 
 ## Styles take a few minutes to appear
 
