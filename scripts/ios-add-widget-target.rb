@@ -47,7 +47,7 @@ end
 # New app-target sources + entitlements live in the existing App/ group.
 app_group = project.main_group.find_subpath('App', true)
 app_group.set_path('App') if app_group.path.nil?
-%w[MainViewController.swift WidgetBridgePlugin.swift].each do |f|
+%w[MainViewController.swift WidgetBridgePlugin.swift ShipTimePlugin.swift].each do |f|
   app.add_file_references([app_group.new_reference(f)])
 end
 app_group.new_reference('App.entitlements')

@@ -1,18 +1,23 @@
 {
   "name": "geotime-dashboard",
   "private": true,
-  "version": "1.3.1",
+  "version": "1.4.0",
   "type": "module",
   "scripts": {
     "dev": "vite --host",
     "build": "vite build",
     "build:prod": "op run --env-file=\".env.1password\" -- vite build --mode production",
     "preview": "vite preview --host",
-    "sync-version": "capacitor-set-version"
+    "sync-version": "capacitor-set-version",
+    "deploy:utc-time": "wrangler deploy --config workers/utc-time/wrangler.jsonc",
+    "deploy:rccl-proxy": "wrangler deploy --config workers/rccl-proxy/wrangler.jsonc",
+    "deploy:workers": "npm run deploy:utc-time && npm run deploy:rccl-proxy",
+    "typecheck:workers": "tsc --noEmit -p workers/tsconfig.json"
   },
   "devDependencies": {
     "@capacitor/assets": "^3.0.5",
     "@capacitor/cli": "^8.0.0",
+    "@cloudflare/workers-types": "^5.20260902.1",
     "@googlemaps/js-api-loader": "^1.16.10",
     "@types/google.maps": "^3.55.10",
     "@vitejs/plugin-basic-ssl": "^2.3.0",
@@ -21,13 +26,15 @@
     "tailwindcss": "^3.4.4",
     "typescript": "^5.2.2",
     "vite": "^8.1.4",
-    "vite-plugin-pwa": "^1.3.0"
+    "vite-plugin-pwa": "^1.3.0",
+    "wrangler": "^4.128.0"
   },
   "dependencies": {
     "@capacitor/android": "^8.0.0",
     "@capacitor/core": "^8.0.0",
     "@capacitor/geolocation": "^8.0.0",
     "@capacitor/ios": "^8.0.0",
+    "@capacitor/network": "^8.0.1",
     "@fortawesome/fontawesome-svg-core": "^7.1.0",
     "@fortawesome/free-solid-svg-icons": "^7.1.0",
     "@turf/boolean-point-in-polygon": "^7.2.0",

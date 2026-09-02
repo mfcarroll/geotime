@@ -33,6 +33,7 @@ private struct RowMetrics {
     let rich: Bool             // two-line row (offset under the city name)
     let inlineOffset: Bool     // offset inline after the city (compact medium/large)
     let useFullDay: Bool       // full weekday name ("Tuesday") vs short ("Tue")
+    let useFullShipName: Bool  // "Star of the Seas" vs "Star"
     let showLocalLabel: Bool   // "Local time" tag on the local row (single-line only)
     let showDeviceLabel: Bool  // "· Device time" tag on the device row (single-line only)
     let dayUnderTime: Bool     // small two-line: day label under the time, not beside it
@@ -159,12 +160,13 @@ struct GeoTimeWidgetView: View {
         // Computed twice (short vs full day names): full names are used only when
         // they don't shrink the city — city size wins the trade-off.
         let clusterW = usableW - timeColW - (hGap * 2 + 4)
-        func cityScale(fullDay: Bool, localLabel: Bool, deviceLabel: Bool) -> CGFloat {
+        func cityScale(fullDay: Bool, localLabel: Bool, deviceLabel: Bool,
+                       fullShipName: Bool) -> CGFloat {
             var scale: CGFloat = 1
             for r in rows {
                 var reserved: CGFloat = 0
                 // The marker (pin/phone) sits on line 1 in every layout.
-                if r.isLocal || r.isDevice { reserved += pinSize + hGap }
+                if r.isLocal || r.isDevice || r.isShip { reserved += pinSize + hGap }
                 // Offset + optional labels are on line 1 only in single-line rows;
                 // in rich rows they live on line 2 (free of the city's width).
                 if !rich {
@@ -180,25 +182,48 @@ struct GeoTimeWidgetView: View {
                     reserved += width(day, detailFont) + dayTimeGap
                 }
                 let availName = clusterW - reserved
-                let nameW = width(r.name, cityBase)
+                // A ship is the one row with two forms of its own name. The full
+                // one is preferred and the short one is the fallback, so the
+                // abbreviation is a response to running out of width rather than
+                // a permanent choice.
+                let name = fullShipName ? r.name : (r.shortName ?? r.name)
+                let nameW = width(name, cityBase)
                 if nameW > 0 { scale = min(scale, availName / nameW) }
             }
             return scale
         }
+        // Names are decided BEFORE the optional labels, because a name is content
+        // and a label is garnish: it would be wrong to keep "Tuesday" at the cost
+        // of abbreviating a vessel. The floor is the short-name scale — the form
+        // guaranteed to fit — and the full name is used whenever it holds that
+        // same scale, which it does whenever some other row is the binding
+        // constraint. In practice that means full names on medium and large, and
+        // "Star" only on the small widget where width really has run out.
+        let shortNameBase = min(1, cityScale(fullDay: false, localLabel: false,
+                                             deviceLabel: false, fullShipName: false))
+        let useFullShipName = min(1, cityScale(fullDay: false, localLabel: false,
+                                               deviceLabel: false, fullShipName: true))
+            >= shortNameBase - 0.001
+
         // Optional labels (full day names, "Local time" / "Device time") are added
         // only when they don't shrink the city — city size wins the trade-off.
-        let clampedBase = min(1, cityScale(fullDay: false, localLabel: false, deviceLabel: false))
-        let useFullDay = min(1, cityScale(fullDay: true, localLabel: false, deviceLabel: false)) >= clampedBase - 0.001
-        let showLocalLabel = !rich && min(1, cityScale(fullDay: false, localLabel: true, deviceLabel: false)) >= clampedBase - 0.001
+        let clampedBase = min(1, cityScale(fullDay: false, localLabel: false,
+                                           deviceLabel: false, fullShipName: useFullShipName))
+        let useFullDay = min(1, cityScale(fullDay: true, localLabel: false,
+                                          deviceLabel: false, fullShipName: useFullShipName)) >= clampedBase - 0.001
+        let showLocalLabel = !rich && min(1, cityScale(fullDay: false, localLabel: true,
+                                                       deviceLabel: false, fullShipName: useFullShipName)) >= clampedBase - 0.001
         // In rich, the label lives on line 2: fine on large, too narrow on small.
         let showDeviceLabel = rich
             ? !isSmall
-            : min(1, cityScale(fullDay: false, localLabel: false, deviceLabel: true)) >= clampedBase - 0.001
+            : min(1, cityScale(fullDay: false, localLabel: false,
+                               deviceLabel: true, fullShipName: useFullShipName)) >= clampedBase - 0.001
         let cityFont = max(9, min(cityBase, cityBase * clampedBase))
 
         return RowMetrics(cityFont: cityFont, timeFont: timeFont, detailFont: detailFont,
                           subtitleFont: subtitleFont, pinSize: pinSize, rich: rich,
                           inlineOffset: inlineOffset, useFullDay: useFullDay,
+                          useFullShipName: useFullShipName,
                           showLocalLabel: showLocalLabel, showDeviceLabel: showDeviceLabel,
                           dayUnderTime: dayUnderTime, dayTimeGap: dayTimeGap, hGap: hGap,
                           timeColW: timeColW, periodColW: periodColW)
@@ -282,18 +307,23 @@ private struct RowView: View {
         }
     }
 
+    /// The full name unless the layout could not afford it; see metrics.
+    private var displayName: String {
+        metrics.useFullShipName ? row.name : (row.shortName ?? row.name)
+    }
+
     // City name, then either the location pin (local row) or the inline offset
     // ("Vancouver −8 hrs"). The offset reads as a lighter span on the name.
     private var cityLine: some View {
         HStack(alignment: .firstTextBaseline, spacing: metrics.hGap) {
-            Text(row.name)
+            Text(displayName)
                 .font(.system(size: metrics.cityFont, weight: metrics.rich ? .medium : .regular))
                 .foregroundColor(.white)
                 .lineLimit(1)
                 .minimumScaleFactor(0.85)   // backstop against measurement rounding
             if metrics.rich {
                 // Two-line: marker sits on line 1 after the city; labels on line 2.
-                if row.isLocal { pin } else if row.isDevice { phone }
+                marker(for: row)
             } else {
                 // Single-line: city – offset/label(s) – marker (at the end).
                 if row.isLocal {
@@ -302,7 +332,7 @@ private struct RowView: View {
                     detailText(row.relativeText)
                     if row.isDevice && metrics.showDeviceLabel { detailText("· Device time") }
                 }
-                if row.isLocal { pin } else if row.isDevice { phone }
+                marker(for: row)
             }
         }
     }
@@ -335,6 +365,14 @@ private struct RowView: View {
         .fixedSize()   // never wrap the time; the city yields space instead
     }
 
+    // A merged row is both local and ship, and the ship mark is the one that
+    // carries the new information — the pin is implied by it being the base row.
+    @ViewBuilder private func marker(for row: WidgetRow) -> some View {
+        if row.isShip { shipMark }
+        else if row.isLocal { pin }
+        else if row.isDevice { phone }
+    }
+
     @ViewBuilder private var pin: some View {
         Image(systemName: "location.fill")
             .font(.system(size: metrics.pinSize))
@@ -344,6 +382,43 @@ private struct RowView: View {
     // Phone emoji marking the device's own timezone.
     @ViewBuilder private var phone: some View {
         Text("📱").font(.system(size: metrics.pinSize))
+    }
+
+    // Ship mark. A custom shape rather than an SF Symbol: `ferry.fill` and
+    // `sailboat.fill` both arrived with SF Symbols 4 on iOS 16, and this target
+    // is 15.0 — raising the deployment target for one glyph would be the tail
+    // wagging the dog. Drawing it also guarantees it matches Android exactly,
+    // where the same path ships as ic_ship.xml.
+    @ViewBuilder private var shipMark: some View {
+        ShipShape()
+            .fill(Color.widgetAccent)
+            .frame(width: metrics.pinSize * 1.2, height: metrics.pinSize * 1.2)
+    }
+}
+
+/// Hull plus deckhouse, in a 24×24 box. Two chunky forms rather than a detailed
+/// silhouette, because this renders at about 10pt — funnels and masts turn to
+/// mud at that size.
+struct ShipShape: Shape {
+    func path(in rect: CGRect) -> Path {
+        let s = min(rect.width, rect.height) / 24
+        let x = { (v: CGFloat) in rect.minX + v * s }
+        let y = { (v: CGFloat) in rect.minY + v * s }
+
+        var path = Path()
+        // Hull: a wide trapezoid tapering to the keel.
+        path.move(to: CGPoint(x: x(2), y: y(14.5)))
+        path.addLine(to: CGPoint(x: x(22), y: y(14.5)))
+        path.addLine(to: CGPoint(x: x(18.5), y: y(21)))
+        path.addLine(to: CGPoint(x: x(5.5), y: y(21)))
+        path.closeSubpath()
+        // Deckhouse.
+        path.move(to: CGPoint(x: x(7.5), y: y(14.5)))
+        path.addLine(to: CGPoint(x: x(7.5), y: y(8)))
+        path.addLine(to: CGPoint(x: x(14), y: y(8)))
+        path.addLine(to: CGPoint(x: x(14), y: y(14.5)))
+        path.closeSubpath()
+        return path
     }
 }
 

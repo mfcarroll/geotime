@@ -4,17 +4,21 @@
 import './style.css';
 import { Loader } from '@googlemaps/js-api-loader';
 import * as dom from './dom';
-import { state, persistTimezones, migrateStoredTimezones, setZoneLabel } from './state';
+import { state, persistTimezones, migrateStoredTimezones, setZoneLabel, syncWidget, addShipClock } from './state';
 import { initMaps, onLocationError, onLocationSuccess, selectTimezone, renderWorldClocks, addUniqueTimezoneToList, updateUserTimezoneDetails, showLocationUnavailable, loadTimezoneGeoJson } from './map';
 import { updateAllClocks, syncClock, getDisplayTimezoneName, startClocks } from './time';
 import { Capacitor } from '@capacitor/core';
-import { syncWidgetTimezones, getDeviceTimezone, onDeviceTimezoneChanged } from './widget';
+import { getDeviceTimezone, onDeviceTimezoneChanged } from './widget';
 import { Geolocation, PositionOptions } from '@capacitor/geolocation';
 import { createSearchCombobox } from './combobox';
+import { loadShipRoster, refreshShipRoster, shipRosterNow } from './ships';
+import { initShipTime } from './rccl';
+import { forgetShip, resolveAllShipClocks, startShipTimeWatch } from './shiptime';
+import { installDiagnostics } from './diagnostics';
 import { library, dom as faDom } from '@fortawesome/fontawesome-svg-core';
-import { faLocationDot, faWifi, faBullseye, faMobileAlt, faSatelliteDish } from '@fortawesome/free-solid-svg-icons';
+import { faLocationDot, faWifi, faBullseye, faMobileAlt, faSatelliteDish, faShip } from '@fortawesome/free-solid-svg-icons';
 
-library.add(faLocationDot, faWifi, faBullseye, faMobileAlt, faSatelliteDish);
+library.add(faLocationDot, faWifi, faBullseye, faMobileAlt, faSatelliteDish, faShip);
 faDom.watch();
 
 const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
@@ -68,7 +72,22 @@ async function startApp() {
 
   // Heal the native home-screen widget on every launch, in case a previous
   // write was missed (app killed mid-write, data predating the widget, etc).
-  syncWidgetTimezones(state.addedTimezones, state.localTimezone, state.localPlaceName, state.zoneLabels);
+  syncWidget();
+
+  // Ship offsets are the one thing in this app that cannot be derived on
+  // device, so they are re-asked for on launch. Failure is silent and leaves the
+  // stored offset in place — which is what keeps a ship readable in a port with
+  // no data.
+  // Resolved before anything renders, because it decides whether ship features
+  // exist at all: an un-injected build has no key, and a ship that can never
+  // tell the time is worse than no ship.
+  void initShipTime().then((on) => {
+    if (!on) return;
+    void resolveAllShipClocks();
+    void refreshShipRoster();
+    startShipTimeWatch();
+  });
+  installDiagnostics(dom.deviceTimezoneEl);
 
   // Start watching for location immediately.
   if (Capacitor.isNativePlatform()) {
@@ -118,6 +137,12 @@ async function startApp() {
 
   await geoJsonReady;
 
+  // The roster is tiny (44 vessels, ~3 KB) and bundled, so it is simply awaited
+  // rather than warmed lazily the way the 1.8 MB city index is. Returns empty
+  // when ship features are disabled, which removes ships from search.
+  await initShipTime();
+  await loadShipRoster();
+
   createSearchCombobox({
     input: dom.timezoneInput,
     listbox: dom.timezoneResults,
@@ -125,7 +150,19 @@ async function startApp() {
     origin: () => state.lastFetchedCoords
       ? { lat: state.lastFetchedCoords.lat, lon: state.lastFetchedCoords.lon }
       : null,
+    // A getter, not the awaited array: a weekly roster refresh can land while
+    // the search box is open, and capturing it would freeze that out.
+    ships: () => shipRosterNow(),
     onSelect: (place) => {
+      if (place.kind === 'ship') {
+        // No map selection: a ship has no position on it, and its clock is set
+        // by the crew rather than by where it happens to be floating.
+        addShipClock(place.ship);
+        renderWorldClocks();
+        updateAllClocks();
+        void resolveAllShipClocks();
+        return;
+      }
       setZoneLabel(place.tzid, place.kind === 'city' ? place.label : undefined);
       addUniqueTimezoneToList(place.tzid);
       selectTimezone(place.tzid);
@@ -139,24 +176,47 @@ async function startApp() {
     const pinBtn = target.closest('.pin-btn');
 
     if (removeBtn) {
-      const timezoneToRemove = (removeBtn as HTMLElement).dataset.timezone!;
-      persistTimezones(state.addedTimezones.filter((tz: string) => tz !== timezoneToRemove));
+      const key = (removeBtn as HTMLElement).dataset.clockTarget!;
+      if (key.startsWith('ship:')) {
+        forgetShip(key.slice('ship:'.length));
+      } else {
+        persistTimezones(state.addedTimezones.filter((tz: string) => tz !== key));
+      }
       renderWorldClocks();
       updateAllClocks();
     } else if (pinBtn) {
-      const timezoneToPin = (pinBtn as HTMLElement).dataset.timezone!;
+      // Only zones are ever transient — the pin button promotes the map's
+      // temporary selection into the saved list, and ships are saved on add.
+      const timezoneToPin = (pinBtn as HTMLElement).dataset.clockTarget!;
       addUniqueTimezoneToList(timezoneToPin);
       renderWorldClocks();
       updateAllClocks();
     } else {
-        const clockDiv = target.closest<HTMLElement>('[data-clock-tz]');
-        if (clockDiv?.dataset.clockTz) {
-            selectTimezone(clockDiv.dataset.clockTz);
+        const clockDiv = target.closest<HTMLElement>('[data-clock-key]');
+        const key = clockDiv?.dataset.clockKey;
+        // Tapping a ship row selects nothing: there is no region to highlight.
+        if (key && !key.startsWith('ship:')) {
+            selectTimezone(key);
         }
     }
   });
 
   document.addEventListener('temporarytimezonechanged', () => {
+    renderWorldClocks();
+    updateAllClocks();
+  });
+
+  // A ship that has just resolved needs the list rebuilt, because its offset is
+  // what decides where it sorts — until then it sits at the end, having no
+  // offset to place it by.
+  document.addEventListener('shipclockschanged', () => {
+    renderWorldClocks();
+    updateAllClocks();
+  });
+
+  // Stepping aboard or ashore changes which surface the ship appears on: the
+  // Ship Time section while detected, an ordinary World Clock row otherwise.
+  document.addEventListener('aboardshipchanged', () => {
     renderWorldClocks();
     updateAllClocks();
   });

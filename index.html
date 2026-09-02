@@ -22,7 +22,7 @@
                style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
                img-src 'self' data: https://*.googleapis.com https://*.gstatic.com https://*.ggpht.com;
                font-src 'self' https://fonts.gstatic.com;
-               connect-src 'self' https://*.googleapis.com https://get-utc-time-100547663673.us-west1.run.app;
+               connect-src 'self' https://*.googleapis.com https://get-utc-time-100547663673.us-west1.run.app %WORKER_ORIGINS%;
                frame-src 'self' capacitor:;">
   </head>
   <body class="h-full text-gray-200 antialiased">
@@ -44,6 +44,21 @@
               <p id="local-time" class="text-4xl font-bold text-white tracking-wider font-mono">--:--:--</p>
               <p id="local-timezone" class="text-lg text-gray-400 mt-1">-- / --</p>
               <p id="local-date" class="text-md text-gray-400">---, --- --, ----</p>
+              <!-- Ship Time keeps its own section even when it reads the same as
+                   Local Time. Unlike the widget, which folds an agreeing ship
+                   into the base row to save a line, this card has room — and a
+                   heading that always means one thing beats one that sometimes
+                   means two. Shown only while aboard; ashore the ship becomes an
+                   ordinary World Clock row instead. -->
+              <div id="ship-time-section" class="hidden">
+                <hr class="border-gray-600 my-4">
+                <h2 class="text-xl font-semibold text-white mb-2 flex items-center justify-center">
+                  <i class="fas fa-ship fa-fw mr-2 text-amber-400"></i>
+                  Ship Time
+                </h2>
+                <p id="ship-time" class="text-3xl font-medium text-gray-300 font-mono">--:--:--</p>
+                <p id="ship-name" class="text-md text-gray-500">--</p>
+              </div>
               <hr class="border-gray-600 my-4">
               <h2 class="text-xl font-semibold text-white mb-2 flex items-center justify-center">
                 <i class="fas fa-mobile-alt fa-fw mr-1 text-purple-400"></i>
@@ -110,7 +125,7 @@
               <input id="timezone-input" type="search" class="w-full bg-gray-700 border border-gray-600 text-white placeholder-gray-400 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:outline-none" placeholder="Search a city or timezone">
               <ul id="timezone-results" class="combobox-listbox hidden"></ul>
             </div>
-            <div id="world-clocks-container" class="space-y-4 pr-2"></div>
+            <div id="world-clocks-container" class="space-y-4"></div>
           </div>
         </div>
       </div>
@@ -123,7 +138,22 @@
            space. min-w-0 is what lets the name actually shrink and ellipsize. -->
       <div class="clock-row relative flex items-center gap-3 bg-gray-700/50 p-3 pr-10 rounded-lg border-2 border-transparent">
         <div class="min-w-0 flex-1">
-          <p class="city text-lg font-medium text-white truncate"></p>
+          <!-- Wraps rather than truncates. A ship name is long enough that
+               clipping it produces "Independence of the S…", which is worse
+               than a second line; and wrapping means the full name always
+               shows, so nothing has to measure or abbreviate here. The widget
+               still does, because a widget cannot grow. -->
+          <p class="text-lg font-medium text-white">
+            <!-- Ships carry a mark, because a ship name is often also a real
+                 town: "Independence" is a vessel and six places, one of them
+                 120,000 people. The icon is what disambiguates a row; ordering
+                 alone would leave the user guessing.
+                 Trailing the name, not leading it: these names wrap, and a
+                 leading icon leaves the second line hanging under it with
+                 nothing beside the mark. The search dropdown keeps it on the
+                 left, where every row is a single line. -->
+            <span class="city"></span><i class="ship-icon fas fa-ship fa-fw ml-1 text-sm text-gray-300 hidden"></i>
+          </p>
           <p class="region text-sm text-gray-400 truncate"></p>
         </div>
         <div class="flex-none text-right">

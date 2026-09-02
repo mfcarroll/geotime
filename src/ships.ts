@@ -1,0 +1,278 @@
+// src/ships.ts
+//
+// The ship roster, and the clock records built from it.
+//
+// A ship is deliberately NOT modelled as a timezone id. The 1.3.0 restructure
+// existed to establish one invariant — every entry in `addedTimezones` is a real
+// IANA zone, with no hand-written offset parser between the id and the platform
+// — and a synthetic `ship:R/ST` id would walk straight back into the
+// `Etc/GMT±N.N` trap it removed (Intl throws, Swift returns nil, Java silently
+// returns GMT+0). It would also solve nothing: a ship id carries no offset, so a
+// sidecar table would be needed anyway, with three parsers on top.
+//
+// So ships live in their own collection, with the fields a ship actually has.
+// The offset only becomes a timezone at the very edge — the widget bridge turns
+// it into a fixed-offset zone, which is correct for a vessel in any case, since
+// a ship's clock has no DST rules.
+
+import { fold } from './utils';
+import { fetchFleet, fetchShipTime, shipTimeAvailable, type Environment } from './rccl';
+
+/** A vessel, as the roster knows it. */
+export interface ShipRef {
+  /** 2-letter RCCL code, unique only within a brand. */
+  code: string;
+  /** 'R' Royal Caribbean, 'C' Celebrity. */
+  brand: 'R' | 'C';
+  /** Full name, as people search for it: "Independence of the Seas". */
+  name: string;
+  /** Name for a clock row: "Independence". See build-ship-index.mjs. */
+  short: string;
+}
+
+/** A ship on the user's clock list, with whatever we last learned about it. */
+export interface ShipClock extends ShipRef {
+  /** Hours from UTC; null until first resolved. */
+  offsetHours: number | null;
+  /**
+   * When the offset was last confirmed, epoch ms.
+   *
+   * Never displayed. An app whose subject is times already shows three clocks on
+   * one card, and a fourth number that is not a current time invites exactly the
+   * misreading you least want. Kept so the behaviour stays diagnosable without a
+   * data migration, and because staleness — if it is ever signalled at all — is
+   * signalled non-numerically.
+   */
+  fetchedAt: number | null;
+  /** Origin of the value, e.g. "EFC", "DMT". Diagnostics only. */
+  source: string | null;
+  /** True when the crew has manually forced the clock. */
+  overrideActive: boolean;
+  /** True when detection added this, rather than the user searching for it. */
+  autoAdded: boolean;
+  /**
+   * Last day of the voyage that was active when this ship was detected,
+   * `yyyyMMdd`. Null for a ship the user added by hand.
+   *
+   * Bounds the background offset re-check. Pinning the *specific* voyage matters
+   * because ships sail continuously — "this ship has an active voyage" is true
+   * essentially forever, while "the voyage you boarded" ends. A manually added
+   * ship has no such bound: adding it is a standing request to keep it right,
+   * and removing the row is the off switch.
+   */
+  voyageEnd: string | null;
+}
+
+/** Ships are keyed by brand and code together: "R/ST". */
+export function shipKey(ship: { brand: string; code: string }): string {
+  return `${ship.brand}/${ship.code}`;
+}
+
+/** The stored shape of the roster asset. */
+interface ShipRoster {
+  v: number;
+  ships: ShipRef[];
+}
+
+const ROSTER_CACHE_KEY = 'shipRoster';
+const ROSTER_FETCHED_KEY = 'shipRosterFetchedAt';
+const ROSTER_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+
+let rosterPromise: Promise<ShipRef[]> | null = null;
+
+/**
+ * The roster as last resolved, readable synchronously.
+ *
+ * Exists because the search box takes getters rather than values — a GPS fix or
+ * a roster refresh can land after the box is already open. Handing it a captured
+ * array would quietly turn that late binding into a snapshot.
+ */
+let roster: ShipRef[] = [];
+
+/** The loaded roster, or [] before it arrives. See `roster`. */
+export function shipRosterNow(): ShipRef[] {
+  return roster;
+}
+
+function isShipRef(value: any): value is ShipRef {
+  return value
+    && typeof value.code === 'string' && /^[A-Z]{2}$/.test(value.code)
+    && (value.brand === 'R' || value.brand === 'C')
+    && typeof value.name === 'string' && value.name.length > 0
+    && typeof value.short === 'string' && value.short.length > 0;
+}
+
+function readCachedRoster(): ShipRef[] | null {
+  try {
+    const raw = localStorage.getItem(ROSTER_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    const ships = Array.isArray(parsed?.ships) ? parsed.ships.filter(isShipRef) : [];
+    return ships.length > 0 ? ships : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The roster: cached copy if there is one, else the copy bundled at build time.
+ *
+ * A cached copy always wins, with no version comparison, because it was fetched
+ * from the API and is therefore newer than the build by construction. That also
+ * means the bundled file needs no timestamp — see build-ship-index.mjs.
+ */
+export function loadShipRoster(): Promise<ShipRef[]> {
+  rosterPromise ??= (async () => {
+    // Ship features are hidden entirely where their offsets cannot be resolved
+    // — the production web build, per finding 01. Offering a searchable ship
+    // that then shows no time is worse than not offering it: it looks broken
+    // rather than absent.
+    if (!shipTimeAvailable()) return [];
+
+    const cached = readCachedRoster();
+    if (cached) return cached;
+    try {
+      const response = await fetch('ships.json');
+      if (!response.ok) throw new Error(`ships.json: ${response.status}`);
+      const roster = (await response.json()) as ShipRoster;
+      const ships = Array.isArray(roster?.ships) ? roster.ships.filter(isShipRef) : [];
+      if (ships.length === 0) throw new Error('ships.json had no usable entries');
+      return ships;
+    } catch (err) {
+      // Ship search stops working; nothing else does.
+      console.warn('Could not load the ship roster:', err);
+      return [];
+    }
+  })().then((ships) => {
+    roster = ships;
+    return ships;
+  });
+  return rosterPromise;
+}
+
+/**
+ * Refreshes the roster from the API when the cached copy is a week old.
+ *
+ * New vessels arrive perhaps twice a year, so this is not about freshness so
+ * much as not needing an app release to support a ship that launched. Silent on
+ * failure: the bundled copy is the floor, so a user who is never online is no
+ * worse off than the last release left them.
+ *
+ * Returns the environment that came back with the request, since detection rides
+ * whatever call is being made anyway.
+ */
+export async function refreshShipRoster(
+  force = false
+): Promise<{ ships: any[] | null; env: Environment } | null> {
+  if (!shipTimeAvailable()) return null;
+
+  // `force` is for the cold probe, which needs a stamped response *now* rather
+  // than a fresh roster. It bypasses the weekly cache age only — the caller
+  // applies its own, much shorter throttle, so the two concerns stay separate.
+  const fetchedAt = Number(localStorage.getItem(ROSTER_FETCHED_KEY) || 0);
+  if (!force && Date.now() - fetchedAt < ROSTER_MAX_AGE_MS) return null;
+
+  const result = await fetchFleet();
+  if (!result?.ships) return result ?? null;
+
+  const ships = result.ships
+    .filter((s: any) => s.currentSailDate)     // not yet sailing: no clock to ask about
+    .map((s: any) => {
+      const name = String(s.name).trim().replace(/\s+/g, ' ');
+      return {
+        code: String(s.shipCode).toUpperCase(),
+        brand: s.brand,
+        name,
+        short: name.replace(/\s+of\s+the\s+Seas$/i, '').replace(/^Celebrity\s+/i, '').trim() || name,
+      };
+    })
+    .filter(isShipRef)
+    .sort((a, b) => a.brand.localeCompare(b.brand) || a.name.localeCompare(b.name));
+
+  // Guard against a shape change turning the roster into a stub. The bundled
+  // file asserts at least 30; anything far below that is a bad payload, not a
+  // shrinking fleet.
+  if (ships.length < 30) {
+    console.warn(`Ignoring ship roster refresh: only ${ships.length} usable entries`);
+    return result;
+  }
+
+  localStorage.setItem(ROSTER_CACHE_KEY, JSON.stringify({ v: 1, ships }));
+  localStorage.setItem(ROSTER_FETCHED_KEY, String(Date.now()));
+  rosterPromise = Promise.resolve(ships);
+  roster = ships;
+  return result;
+}
+
+/**
+ * Ship name matches, split into the same three tiers the place search uses:
+ * whole-string equality, then prefix, then anywhere.
+ *
+ * Ships are matched on the short name, the full name and the 2-letter code, so
+ * "independence", "independence of the seas" and "ID" all find the same vessel.
+ * Tiering matters because ship names collide with real cities — "Independence"
+ * matches six of them, including one of 120,000 people — and the collision has
+ * to be visible rather than silently resolved. The caller interleaves these with
+ * city and zone tiers, and always renders a ship with its own icon.
+ *
+ * Ordered alphabetically within a tier. There is deliberately no distance
+ * ranking: ships move, so the roster has no position to rank by.
+ */
+export function matchShipTiers(query: string, roster: ShipRef[]): ShipRef[][] {
+  const q = fold(query.trim());
+  const tiers: ShipRef[][] = [[], [], []];
+  if (!q) return tiers;
+
+  for (const ship of roster) {
+    const short = fold(ship.short);
+    const full = fold(ship.name);
+
+    if (short === q || full === q || fold(ship.code) === q) tiers[0].push(ship);
+    else if (short.startsWith(q) || full.startsWith(q)) tiers[1].push(ship);
+    else if (full.includes(q)) tiers[2].push(ship);
+  }
+
+  for (const tier of tiers) tier.sort((a, b) => a.name.localeCompare(b.name));
+  return tiers;
+}
+
+/** Builds a fresh clock record for a ship the user just picked. */
+export function newShipClock(ship: ShipRef, autoAdded = false): ShipClock {
+  return {
+    ...ship,
+    offsetHours: null,
+    fetchedAt: null,
+    source: null,
+    overrideActive: false,
+    autoAdded,
+    voyageEnd: null,
+  };
+}
+
+/**
+ * Asks the API for a ship's current offset and returns an updated record.
+ *
+ * On failure the existing record is returned untouched, so a stored offset
+ * survives being offline — which is the whole point of storing it. Ashore in a
+ * port with no data, the last known offset is what tells someone when to be back
+ * aboard, and it is almost always still correct: clocks shift overnight, and the
+ * device is on the ship's wi-fi daily.
+ */
+export async function resolveShipClock(
+  clock: ShipClock
+): Promise<{ clock: ShipClock; env: Environment } | null> {
+  const result = await fetchShipTime(clock);
+  if (!result) return null;
+  if (!result.time) return { clock, env: result.env };
+
+  return {
+    clock: {
+      ...clock,
+      offsetHours: result.time.offsetHours,
+      fetchedAt: Date.now(),
+      source: result.time.source,
+      overrideActive: result.time.overrideActive,
+    },
+    env: result.env,
+  };
+}

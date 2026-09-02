@@ -7,3 +7,11 @@ dist/
 keystore.jks
 .notes/
 .idea/
+
+# wrangler
+# Local secrets, never committed — the deployed value is a Worker secret.
+.dev.vars
+**/.dev.vars
+# Miniflare's local dev state: sqlite caches and observability trace stores,
+# regenerated on every `wrangler dev`.
+.wrangler/

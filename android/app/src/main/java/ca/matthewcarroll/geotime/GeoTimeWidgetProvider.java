@@ -12,6 +12,8 @@ import android.view.View;
 import android.widget.RemoteViews;
 
 import org.json.JSONArray;
+import org.json.JSONException;
+import org.json.JSONObject;
 
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
@@ -34,6 +36,7 @@ public class GeoTimeWidgetProvider extends AppWidgetProvider {
 
     @Override
     public void onUpdate(Context ctx, AppWidgetManager mgr, int[] ids) {
+
         for (int id : ids) updateOne(ctx, mgr, id);
     }
 
@@ -44,13 +47,45 @@ public class GeoTimeWidgetProvider extends AppWidgetProvider {
 
     @Override
     public void onReceive(Context ctx, Intent intent) {
+
         super.onReceive(ctx, intent); // dispatches APPWIDGET_UPDATE -> onUpdate
+        maybeRefreshShipTime(ctx, intent);
         String action = intent.getAction();
         if (Intent.ACTION_TIMEZONE_CHANGED.equals(action)
                 || Intent.ACTION_TIME_CHANGED.equals(action)
                 || Intent.ACTION_DATE_CHANGED.equals(action)) {
             refreshAll(ctx);
         }
+    }
+
+    /**
+     * Re-asks the API for stale ship offsets, then redraws if anything moved.
+     *
+     * This is what makes the widget follow a mid-cruise clock change when nobody
+     * opens the app. The wake-up itself was already happening every 30 minutes
+     * for the clock (updatePeriodMillis), so riding it costs no extra alarms.
+     *
+     * goAsync(), NOT a bare thread. A broadcast receiver's process is only
+     * guaranteed to stay alive for the duration of onReceive, so a thread
+     * started and left running can be killed mid-request — which is exactly what
+     * happened the first time this was written: the fetch silently never
+     * completed. goAsync() holds the process for the work and finish() releases
+     * it. There is roughly a ten-second budget, which one small GET fits inside.
+     *
+     * Deliberately after super.onReceive: the widget draws immediately from the
+     * cached offset and only redraws if the network had something new to say.
+     */
+    private void maybeRefreshShipTime(Context ctx, Intent intent) {
+        if (!AppWidgetManager.ACTION_APPWIDGET_UPDATE.equals(intent.getAction())) return;
+
+        final PendingResult pending = goAsync();
+        new Thread(() -> {
+            try {
+                if (ShipTimeFetcher.refreshStaleShips(ctx)) refreshAll(ctx);
+            } finally {
+                pending.finish();
+            }
+        }).start();
     }
 
     public static void refreshAll(Context ctx) {
@@ -74,11 +109,16 @@ public class GeoTimeWidgetProvider extends AppWidgetProvider {
         RemoteViews root = new RemoteViews(ctx.getPackageName(), R.layout.widget_geotime);
         root.removeAllViews(R.id.widget_rows); // rows accumulate across updates otherwise
 
-        // Always keep the special rows (local + device); fill the rest by offset.
+        // Always keep the special rows (local, device, ship); fill the rest by
+        // offset. A ship is special because aboard it is the most important row
+        // on the screen — and it only stops being special once a definite
+        // "shore" marker arrives, which needs connectivity and therefore means
+        // the guest really is ashore. A dead phone in a port yields no marker,
+        // so the ship keeps its slot exactly when it matters most.
         List<Row> specials = new ArrayList<>();
         List<Row> others = new ArrayList<>();
         for (Row r : rows) {
-            if (r.isLocal || r.isDevice) specials.add(r); else others.add(r);
+            if (r.isLocal || r.isDevice || r.isShip) specials.add(r); else others.add(r);
         }
         List<Row> visible = new ArrayList<>(specials);
         for (Row r : others) {
@@ -89,16 +129,21 @@ public class GeoTimeWidgetProvider extends AppWidgetProvider {
         int overflow = rows.size() - visible.size();
 
         boolean is24 = android.text.format.DateFormat.is24HourFormat(ctx);
+        boolean useFullShipName = decideFullShipName(ctx, visible, opts);
         boolean useFullDay = decideFullDay(ctx, visible, opts);
         boolean showLocalLabel = decideLocalLabel(ctx, visible, opts);
         boolean showDeviceLabel = decideDeviceLabel(ctx, visible, opts);
         for (Row r : visible) {
             RemoteViews row = new RemoteViews(ctx.getPackageName(), R.layout.widget_row);
-            row.setTextViewText(R.id.row_city, r.label);
+            row.setTextViewText(R.id.row_city,
+                    (!useFullShipName && r.shortLabel != null) ? r.shortLabel : r.label);
             row.setString(R.id.row_time, "setTimeZone", r.tzId);   // @RemotableViewMethod
             row.setString(R.id.row_period, "setTimeZone", r.tzId);
             row.setViewVisibility(R.id.row_period, is24 ? View.GONE : View.VISIBLE);
-            row.setViewVisibility(R.id.row_pin, r.isLocal ? View.VISIBLE : View.GONE);
+            // A merged row is both local and ship; the ship mark is the one that
+            // carries new information, the pin being implied by it being base.
+            row.setViewVisibility(R.id.row_ship, r.isShip ? View.VISIBLE : View.GONE);
+            row.setViewVisibility(R.id.row_pin, (r.isLocal && !r.isShip) ? View.VISIBLE : View.GONE);
             row.setViewVisibility(R.id.row_local_label, (r.isLocal && showLocalLabel) ? View.VISIBLE : View.GONE);
             row.setViewVisibility(R.id.row_device, r.isDevice ? View.VISIBLE : View.GONE);
             if (r.dayLabel != null) {
@@ -151,21 +196,31 @@ public class GeoTimeWidgetProvider extends AppWidgetProvider {
 
     private static class Row {
         final String label;
+        /** Shorter form of `label` where one exists (ships); null otherwise. */
+        final String shortLabel;
         final String tzId;         // id passed to TextClock.setTimeZone
         final long offsetMin;
         final boolean isLocal;     // GPS-derived base zone (green pin)
         final boolean isDevice;    // device OS zone when it differs from local (phone)
+        final boolean isShip;      // a cruise ship's crew-set clock (ship mark)
         final String dayLabel;     // "Tue" — null unless the calendar day differs
         final String dayLabelFull; // "Tuesday" — used when there's room
         final String offset;       // "+3 hrs" relative to local; "" for local
 
         Row(String label, String tzId, long offsetMin, boolean isLocal, boolean isDevice,
             String dayLabel, String dayLabelFull, String offset) {
+            this(label, null, tzId, offsetMin, isLocal, isDevice, false, dayLabel, dayLabelFull, offset);
+        }
+
+        Row(String label, String shortLabel, String tzId, long offsetMin, boolean isLocal,
+            boolean isDevice, boolean isShip, String dayLabel, String dayLabelFull, String offset) {
             this.label = label;
+            this.shortLabel = shortLabel;
             this.tzId = tzId;
             this.offsetMin = offsetMin;
             this.isLocal = isLocal;
             this.isDevice = isDevice;
+            this.isShip = isShip;
             this.dayLabel = dayLabel;
             this.dayLabelFull = dayLabelFull;
             this.offset = offset;
@@ -188,10 +243,29 @@ public class GeoTimeWidgetProvider extends AppWidgetProvider {
         Set<String> seen = new HashSet<>();
         seen.add(baseId); // local pre-claims its slot
 
+        // ONE RULE for every special row: the base always shows, and device and
+        // ship each appear only when they add information — when their offset
+        // differs from the base. Kept identical to iOS ZoneRowResolver.resolve.
+        //
+        // The deliberate asymmetry is how "agreeing" resolves. An agreeing
+        // device is hidden: knowing your phone concurs is not worth a row. An
+        // agreeing ship is folded INTO the base row, because it brings what a
+        // device cannot — a name. Mid-ocean the base row would otherwise read
+        // "UTC-5", the nearest-town lookup being capped at 150 km and correctly
+        // finding nothing, so lending it "Star" is the difference between naming
+        // where you are and naming a number.
+        List<Ship> ships = readShips(ctx);
+        Ship agreeingShip = null;
+        for (Ship ship : ships) {
+            if (ship.offsetMin == baseOffset) { agreeingShip = ship; break; }
+        }
+
         // The town the app last placed you in ("Nelson"), else the zone's own name.
         String localPlace = localPlaceName(ctx);
-        String baseLabel = localPlace != null ? localPlace : cityLabel(baseId);
-        rows.add(new Row(baseLabel, baseId, baseOffset, true, false, null, null, ""));
+        String baseLabel = agreeingShip != null ? agreeingShip.name
+                : (localPlace != null ? localPlace : cityLabel(baseId));
+        rows.add(new Row(baseLabel, agreeingShip != null ? agreeingShip.shortName : null,
+                baseId, baseOffset, true, false, agreeingShip != null, null, null, ""));
 
         // Device OS zone, shown separately when it differs from the GPS-local zone.
         TimeZone osTz = TimeZone.getDefault();
@@ -223,8 +297,77 @@ public class GeoTimeWidgetProvider extends AppWidgetProvider {
                     dayShort, dayFull, relativeOffset(off, baseOffset)));
         }
 
+        // Ships that do NOT match the base offset get their own row; the one
+        // that does was folded in above, so a detected ship appears exactly once.
+        for (Ship ship : ships) {
+            if (ship.offsetMin == baseOffset) continue;
+            TimeZone tz = TimeZone.getTimeZone(ship.tzId());
+            boolean differs = dayDiffers(tz, baseTz, now);
+            rows.add(new Row(ship.name, ship.shortName, ship.tzId(), ship.offsetMin, false, false, true,
+                    differs ? formatDay(tz, now, false) : null,
+                    differs ? formatDay(tz, now, true) : null,
+                    relativeOffset(ship.offsetMin, baseOffset)));
+        }
+
         Collections.sort(rows, OFFSET_ORDER);
         return rows;
+    }
+
+    /**
+     * A ship as the widget needs it: a name and a fixed offset.
+     *
+     * Deliberately not an IANA id. A crew-set clock has no rules for a tzdb
+     * entry to describe, and a synthetic id would need hand-written parsing on
+     * every platform — the exact thing the 1.3.0 restructure removed. A
+     * "GMT+HH:MM" id is a real fixed-offset zone with no DST, which is right for
+     * a vessel, and TextClock accepts it directly.
+     */
+    private static class Ship {
+        /** Full name, used wherever the layout has room. */
+        final String name;
+        /** Abbreviated form, used only when the full name will not fit. */
+        final String shortName;
+        final long offsetMin;
+
+        Ship(String name, String shortName, long offsetMin) {
+            this.name = name;
+            this.shortName = shortName;
+            this.offsetMin = offsetMin;
+        }
+
+        String tzId() {
+            long abs = Math.abs(offsetMin);
+            return String.format(java.util.Locale.US, "GMT%s%02d:%02d",
+                    offsetMin < 0 ? "-" : "+", abs / 60, abs % 60);
+        }
+    }
+
+    /**
+     * Ships written by the web layer. An entry without a usable offset is
+     * dropped: the web layer already withholds unresolved ships, and a ship with
+     * no offset has no time to show — a missing row is honest, where a zero
+     * offset would be a confident wrong clock.
+     */
+    private static List<Ship> readShips(Context ctx) {
+        List<Ship> out = new ArrayList<>();
+        String json = ctx.getSharedPreferences(WidgetBridgePlugin.PREFS_NAME, Context.MODE_PRIVATE)
+                .getString(WidgetBridgePlugin.PREFS_SHIPS_KEY, "[]");
+        try {
+            JSONArray arr = new JSONArray(json);
+            for (int i = 0; i < arr.length(); i++) {
+                JSONObject o = arr.optJSONObject(i);
+                if (o == null) continue;
+                String name = o.optString("name", "");
+                if (name.isEmpty() || !o.has("offsetMinutes")) continue;
+                // Falls back to the full name so a store written by an older
+                // build still renders, just without the ability to abbreviate.
+                String shortName = o.optString("short", name);
+                out.add(new Ship(name, shortName, o.optLong("offsetMinutes")));
+            }
+        } catch (JSONException e) {
+            // Malformed store: no ships rather than a wrong clock.
+        }
+        return out;
     }
 
     private static class Resolved {
@@ -304,6 +447,44 @@ public class GeoTimeWidgetProvider extends AppWidgetProvider {
 
     // Full weekday names ("Tuesday") only if every day-labeled row still fits the
     // widget width without truncating its city — city size/legibility wins.
+    /**
+     * Whether a ship's full name fits, or the abbreviation is needed.
+     *
+     * Mirrors the iOS metrics decision, and is checked BEFORE the optional
+     * labels: a name is content where a label is garnish, so it would be wrong
+     * to keep "Tuesday" at the cost of abbreviating a vessel. In practice the
+     * full name fits on medium and large and only the small widget falls back
+     * to "Star".
+     */
+    private static boolean decideFullShipName(Context ctx, List<Row> rows, Bundle opts) {
+        boolean anyShip = false;
+        for (Row r : rows) if (r.shortLabel != null) { anyShip = true; break; }
+        if (!anyShip) return true;
+
+        android.util.DisplayMetrics dm = ctx.getResources().getDisplayMetrics();
+        int widthDp = opts.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, 180);
+        float usable = (widthDp - 24) * dm.density;          // inside the 12dp root padding
+        float gap = 6 * dm.density;
+
+        boolean is24 = android.text.format.DateFormat.is24HourFormat(ctx);
+        android.graphics.Paint cityPaint = new android.graphics.Paint();
+        cityPaint.setTextSize(15 * dm.scaledDensity);
+        android.graphics.Paint detailPaint = new android.graphics.Paint();
+        detailPaint.setTextSize(11 * dm.scaledDensity);
+
+        for (Row r : rows) {
+            if (r.shortLabel == null) continue;
+            float need = cityPaint.measureText(r.label) + gap;   // the FULL name
+            need += 12 * dm.density + gap;                       // ship marker
+            if (!r.isLocal) need += detailPaint.measureText(r.offset) + gap;
+            if (r.dayLabel != null) need += detailPaint.measureText(r.dayLabel) + gap;
+            need += cityPaint.measureText(is24 ? "88:88" : "8:88") + gap;
+            if (!is24) need += detailPaint.measureText("PM") + gap;
+            if (need > usable) return false;
+        }
+        return true;
+    }
+
     private static boolean decideFullDay(Context ctx, List<Row> rows, Bundle opts) {
         boolean anyDay = false;
         for (Row r : rows) if (r.dayLabelFull != null) { anyDay = true; break; }

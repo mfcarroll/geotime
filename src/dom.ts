@@ -17,6 +17,11 @@ export const timeContent = document.getElementById('time-content')!;
 export const localTimeEl = document.getElementById('local-time')!;
 export const localTimezoneEl = document.getElementById('local-timezone')!;
 export const localDateEl = document.getElementById('local-date')!;
+// Ship Time — present in the DOM always, revealed only while aboard.
+export const shipTimeSectionEl = document.getElementById('ship-time-section')!;
+export const shipTimeEl = document.getElementById('ship-time')!;
+export const shipNameEl = document.getElementById('ship-name')!;
+
 export const deviceTimeEl = document.getElementById('device-time')!;
 export const deviceTimezoneEl = document.getElementById('device-timezone')!;
 

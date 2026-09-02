@@ -32,10 +32,38 @@ public class WidgetBridgePlugin: CAPPlugin, CAPBridgedPlugin {
         WidgetSharedStore.saveLabels(call.getArray("labels", String.self) ?? [])
         WidgetSharedStore.saveLocalTimezone(call.getString("localTimezone"))
         WidgetSharedStore.saveLocalPlaceName(call.getString("localPlaceName"))
+        WidgetSharedStore.saveShips(Self.decodeShips(call.getArray("ships")))
         if #available(iOS 14.0, *) {
             WidgetCenter.shared.reloadAllTimelines()
         }
         call.resolve()
+    }
+
+    /// Ships arrive as plain JS objects, so they are read field by field rather
+    /// than decoded. An entry missing its offset is dropped: the web layer
+    /// already withholds unresolved ships, and a ship with no offset has no
+    /// time to show — a missing row is honest, a zero offset would be a
+    /// confident wrong clock.
+    private static func decodeShips(_ raw: [JSValue]?) -> [WidgetSharedStore.Ship] {
+        guard let raw = raw else { return [] }
+        return raw.compactMap { entry in
+            guard let dict = entry as? JSObject,
+                  let key = dict["key"] as? String,
+                  let name = dict["name"] as? String,
+                  let offset = dict["offsetMinutes"] as? Int else { return nil }
+            let fetchedAt = (dict["fetchedAt"] as? Double)
+                ?? (dict["fetchedAt"] as? Int).map(Double.init)
+                ?? 0
+            // Falls back to the full name so a store written by an older build
+            // still renders, just without the ability to abbreviate.
+            let short = (dict["short"] as? String) ?? name
+            let refreshUntil = (dict["refreshUntil"] as? Double)
+                ?? (dict["refreshUntil"] as? Int).map(Double.init)
+            return WidgetSharedStore.Ship(
+                key: key, name: name, short: short,
+                offsetMinutes: offset, fetchedAt: fetchedAt,
+                refreshUntil: refreshUntil)
+        }
     }
 
     @objc func getDeviceTimezone(_ call: CAPPluginCall) {

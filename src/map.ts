@@ -1,13 +1,13 @@
 // src/map.ts
 
 import * as dom from './dom';
-import { state, persistTimezones, setLocalPlaceName } from './state';
+import { state, persistTimezones, setLocalPlaceName, syncWidget } from './state';
 import { timezoneForCoordinates, findTimezoneFromGeoJSON, startClocks, getTimezoneOffset, getFormattedTime, getUtcOffset, getDisplayTimezoneName, getZoneLabel, updateAllClocks } from './time';
 import { locationMapStyles, worldTimezoneMapStyles } from './map-styles';
-import { syncWidgetTimezones } from './widget';
 import { distance, formatAccuracy, fold } from './utils';
 import { loadCityIndex, nearestPlace } from './cities';
 import { resolveZoneStyle } from './map-highlight';
+import { clockKey, clockLabel, clockSubLabel, visibleClocks, type ClockEntry } from './clocks';
 
 let userTimeInterval: number | null = null;
 const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
@@ -416,7 +416,7 @@ export async function onLocationSuccess(pos: GeolocationPosition) {
       updateUserTimezoneDetails(tzid);
 
       // The widget bases its pin/offsets on the GPS-derived local zone.
-      syncWidgetTimezones(state.addedTimezones, state.localTimezone, state.localPlaceName, state.zoneLabels);
+      syncWidget();
 
       refreshMapStyles();
 
@@ -463,7 +463,7 @@ async function refreshLocalPlaceName(lat: number, lon: number): Promise<void> {
 
   setLocalPlaceName(name);
   updateAllClocks();
-  syncWidgetTimezones(state.addedTimezones, state.localTimezone, state.localPlaceName, state.zoneLabels);
+  syncWidget();
 }
 
 export function addUniqueTimezoneToList(tz: string) {
@@ -476,68 +476,72 @@ export function addUniqueTimezoneToList(tz: string) {
 export function renderWorldClocks() {
     dom.worldClocksContainerEl.innerHTML = '';
 
-    const timezonesToRender = [...state.addedTimezones];
-    if (state.temporaryTimezone && !timezonesToRender.includes(state.temporaryTimezone)) {
-        timezonesToRender.push(state.temporaryTimezone);
+    for (const entry of visibleClocks()) {
+        dom.worldClocksContainerEl.appendChild(createClockElement(entry));
     }
 
-    timezonesToRender
-        .sort((a, b) =>
-            getUtcOffset(a) - getUtcOffset(b) ||
-            getZoneLabel(a).localeCompare(getZoneLabel(b)))
-        .forEach((tz: string) => {
-            const clockElement = createClockElement(tz);
-            dom.worldClocksContainerEl.appendChild(clockElement);
-        });
+    // Times first, then measure. The template ships "--:--" as a placeholder and
+    // the time column is flex-none, so its width is set by its content — measure
+    // before the real "12:13 AM" lands and every name is judged against a column
+    // narrower than the one it will actually sit beside.
 }
 
-function createClockElement(tz: string): HTMLElement {
+function createClockElement(entry: ClockEntry): HTMLElement {
     const template = dom.worldClockTemplate;
     const clone = template.content.cloneNode(true) as DocumentFragment;
     const clockDiv = clone.querySelector('.clock-row') as HTMLElement;
 
     // Zone ids contain hyphens (America/Port-au-Prince, Etc/GMT-5), so a
     // slugified id cannot be turned back into the zone. Carry it verbatim.
-    // Distinct from the buttons' data-timezone so row lookups can't match a button.
-    clockDiv.dataset.clockTz = tz;
+    // Ships use a "ship:R/ST" key, which exists only here in the DOM — it is
+    // never stored and never handed to any timezone API.
+    const key = clockKey(entry);
+    clockDiv.dataset.clockKey = key;
+
+    const isShip = entry.kind === 'ship';
+    const tzid = entry.kind === 'zone' ? entry.tzid : null;
 
     clockDiv.classList.remove('border-transparent', 'border-blue-500', 'border-yellow-500');
 
-    if (tz === state.gpsTzid && state.gpsTimezoneSelected) {
+    if (tzid && tzid === state.gpsTzid && state.gpsTimezoneSelected) {
         clockDiv.classList.add('border-yellow-500');
-    } else if (tz === state.gpsTzid) {
+    } else if (tzid && tzid === state.gpsTzid) {
         clockDiv.classList.add('border-blue-500');
-    } else if (tz === state.temporaryTimezone) {
+    } else if (tzid && tzid === state.temporaryTimezone) {
         clockDiv.classList.add('border-yellow-500');
     } else {
         clockDiv.classList.add('border-transparent');
     }
 
-    if (tz === state.temporaryTimezone && !state.addedTimezones.includes(tz)) {
+    const isTransient = !!tzid
+        && tzid === state.temporaryTimezone
+        && !state.addedTimezones.includes(tzid);
+
+    if (isTransient) {
         clockDiv.classList.add('bg-yellow-800', 'bg-opacity-50');
     } else {
         clockDiv.classList.remove('bg-yellow-800', 'bg-opacity-50');
     }
 
-    clone.querySelector('.city')!.textContent = getZoneLabel(tz);
+    clone.querySelector('.city')!.textContent = clockLabel(entry);
     // When the row is named after a place rather than its zone ("Nelson"), name
-    // the zone underneath so the mapping is visible ("Vancouver").
-    const zoneName = getDisplayTimezoneName(tz);
-    const regionEl = clone.querySelector('.region')!;
-    // Bracketed, because in a list of city names an unadorned "Los Angeles"
-    // under "San Francisco" reads like a second place rather than the zone the
-    // first one keeps time by. (The search dropdown shows bare IANA ids, where
-    // that ambiguity doesn't arise.)
-    // Accents aside, "Reykjavík" and the zone "Reykjavik" are the same place —
-    // naming it twice would just look like a mistake.
-    regionEl.textContent = fold(zoneName) === fold(getZoneLabel(tz)) ? '' : `(${zoneName})`;
+    // the zone underneath so the mapping is visible ("Vancouver"). A ship has no
+    // zone, so it names its line instead.
+    clone.querySelector('.region')!.textContent = clockSubLabel(entry);
+    if (isShip) clone.querySelector('.ship-icon')!.classList.remove('hidden');
+
     const removeBtn = clone.querySelector('.remove-btn') as HTMLElement;
     const pinBtn = clone.querySelector('.pin-btn') as HTMLElement;
 
-    removeBtn.dataset.timezone = tz;
-    pinBtn.dataset.timezone = tz;
+    // A DIFFERENT attribute from the row's, deliberately: `data-clock-key`
+    // identifies rows, and a row lookup that could also match one of its own
+    // buttons breaks both the per-second clock update and the tap handler.
+    removeBtn.dataset.clockTarget = key;
+    pinBtn.dataset.clockTarget = key;
 
-    if (tz === state.temporaryTimezone && !state.addedTimezones.includes(tz)) {
+    // Only a zone can be transient — it is the map's unsaved selection. A ship
+    // is saved the moment it is added, so it always offers removal.
+    if (isTransient) {
         removeBtn.classList.add('hidden');
         pinBtn.classList.remove('hidden');
     } else {

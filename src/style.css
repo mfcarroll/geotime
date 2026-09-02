@@ -30,7 +30,12 @@
   Dynamic Island/notch on native devices.
 */
 .is-android #app-container,
-.is-ios #app-container {
+.is-ios #app-container,
+/* privacy.html runs no JavaScript at all, so main.ts never gets to add .is-ios
+   there and the page rendered underneath the Dynamic Island. It opts in from
+   static markup instead. Unconditional is safe: env(safe-area-inset-top) is 0
+   in a normal browser window, so this is inert off-device. */
+.native-safe-area #app-container {
   margin-top: env(safe-area-inset-top);
 }
 
@@ -93,3 +98,64 @@
 #timezone-input::-webkit-search-cancel-button {
   -webkit-appearance: none;
 }
+
+/* Diagnostics dump (src/diagnostics.ts). Deliberately plain: it is a tool for
+   one tester on one voyage, and the only thing that matters is that the text can
+   be selected and copied off the device. */
+.diagnostics-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  background: rgb(0 0 0 / 0.75);
+}
+.diagnostics-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  width: 100%;
+  max-width: 40rem;
+  max-height: 85vh;
+  padding: 1rem;
+  border: 1px solid #4b5563;
+  border-radius: 0.75rem;
+  background: #1f2937;
+}
+.diagnostics-title { font-weight: 600; color: #f9fafb; }
+.diagnostics-hint { font-size: 0.85rem; color: #9ca3af; }
+.diagnostics-text {
+  flex: 1;
+  min-height: 18rem;
+  padding: 0.6rem;
+  border: 1px solid #374151;
+  border-radius: 0.5rem;
+  background: #111827;
+  color: #e5e7eb;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 0.72rem;
+  line-height: 1.45;
+  white-space: pre;
+  overflow: auto;
+  resize: none;
+}
+.diagnostics-close {
+  padding: 0.4rem 0.9rem;
+  border-radius: 0.5rem;
+  background: #374151;
+  color: #f9fafb;
+  font-size: 0.9rem;
+}
+.diagnostics-close:hover { background: #4b5563; }
+.diagnostics-actions { display: flex; justify-content: flex-end; gap: 0.5rem; }
+.diagnostics-send {
+  padding: 0.4rem 0.9rem;
+  border-radius: 0.5rem;
+  background: #2563eb;
+  color: #f9fafb;
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+.diagnostics-send:hover { background: #1d4ed8; }

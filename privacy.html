@@ -13,16 +13,24 @@
     <meta name="apple-mobile-web-app-title" content="GeoTime" />
     <link rel="manifest" href="/icons/site.webmanifest" />
 </head>
-<body class="h-full text-gray-200 antialiased">
+<!-- native-safe-area: this page has no script, so it cannot be given .is-ios the
+     way the main app is. See src/style.css. -->
+<body class="h-full text-gray-200 antialiased native-safe-area">
     <div id="app-container" class="min-h-full p-4 sm:p-6 lg:p-8 bg-gray-900">
         <div class="max-w-7xl mx-auto">
             <div class="prose prose-invert max-w-none text-gray-300 space-y-4">
                 <h1 class="text-3xl font-bold text-white text-center mb-12">Privacy Policy</h1>
-                <p>This Privacy Policy applies to the GeoTime application by <a  class="text-blue-400 hover:text-blue-500" href="https://www.linkedin.com/in/matthewfcarroll/">Matthew F. Carroll</a>, currently available as a <a href="/" class="text-blue-400 hover:text-blue-500">web app</a> and on <a href="https://apps.apple.com/app/geotime/id6753636878" class="text-blue-400 hover:text-blue-500">iOS</a>.</p>
+                <p>This Privacy Policy applies to the GeoTime application by <a  class="text-blue-400 hover:text-blue-500" href="https://www.linkedin.com/in/matthewfcarroll/">Matthew F. Carroll</a>, currently available as a <a href="/" class="text-blue-400 hover:text-blue-500">web app</a>, on <a href="https://apps.apple.com/app/geotime/id6753636878" class="text-blue-400 hover:text-blue-500">iOS</a> and on <a href="https://play.google.com/store/apps/details?id=ca.matthewcarroll.geotime" class="text-blue-400 hover:text-blue-500">Android</a>.</p>
                 <p>
-                    We do not collect, store, or share any personal information whatsoever.
+                    We do not collect, store, transmit, or share any personal information whatsoever.
                     The app requests access to your device's location for the sole purpose of displaying the current time and timezone at your location.
-                    This location data is used only while the app is active and is never stored on your device or transmitted to our servers or any third party.
+                    Your coordinates are used only while the app is running, and are never transmitted to our servers or to any third party.
+                    The app stores the name of the city or town closest to your last known position internally on your device, so the home-screen widget can label your local time while the app is closed. That is never transmitted outside the app.
+                </p>
+                <p>
+                    GeoTime can also show &ldquo;ship time&rdquo; &mdash; the onboard clock on a Royal Caribbean or Celebrity cruise, which shifts during a sailing.
+                    Because that clock is set by the crew and cannot be worked out from a map, the app fetches the current ship time from Royal Caribbean when you add a ship to your world clock list, and while you are connected to a ship's wi-fi, to recognise which ship you are aboard.
+                    Those requests identify only the ship name &mdash; never your location, device or account identifiers, or personal information of any kind.
                 </p>
                 <p class="text-center"><a href="/" class="text-blue-400 hover:text-blue-500">← Back to the app</a></p>
             </div>

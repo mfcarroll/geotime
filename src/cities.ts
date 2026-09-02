@@ -7,18 +7,45 @@
 // download at all.
 
 import { fold, distance, getDisplayTimezoneName, isValidTimezone } from './utils';
+import { matchShipTiers, shipKey, type ShipRef } from './ships';
 
-export interface PlaceResult {
-  /** IANA zone this place resolves to. */
-  tzid: string;
+interface PlaceBase {
   /** Name to store and show on the clock — the place, not the zone. */
   label: string;
   /** Main line: "Nelson, BC, Canada". */
   primary: string;
   /** Smaller line underneath: the zone the place actually keeps time by. */
   secondary: string;
-  kind: 'city' | 'zone';
 }
+
+/** A zone id, searched straight from the map data. */
+export interface ZonePlace extends PlaceBase {
+  kind: 'zone';
+  /** IANA zone this place resolves to. */
+  tzid: string;
+}
+
+/** A town or city, resolving to the zone it keeps time by. */
+export interface CityPlace extends PlaceBase {
+  kind: 'city';
+  /** IANA zone this place resolves to. */
+  tzid: string;
+}
+
+/**
+ * A cruise ship, which has no zone at all — its clock is set by the crew.
+ *
+ * A union rather than an optional `tzid` because the difference is real and
+ * callers must handle it: there is nothing sensible to put in a zone field for a
+ * vessel, and a placeholder would be the first step back towards synthetic zone
+ * ids. TypeScript narrows on `kind`, so the compiler enforces the split.
+ */
+export interface ShipPlace extends PlaceBase {
+  kind: 'ship';
+  ship: ShipRef;
+}
+
+export type PlaceResult = ZonePlace | CityPlace | ShipPlace;
 
 interface CityIndex {
   zones: string[];
@@ -104,7 +131,7 @@ export function loadCityIndex(): Promise<CityIndex | null> {
 // id only when that would have repeated the place name — so the same slot meant
 // "the zone's name" on one row and "the zone's identifier" on the next, which
 // read as arbitrary. One meaning throughout is worth a little more text.
-function cityResult(index: CityIndex, i: number): PlaceResult {
+function cityResult(index: CityIndex, i: number): CityPlace {
   const name = index.names[i];
   return {
     tzid: index.zones[index.zoneOf[i]],
@@ -115,7 +142,7 @@ function cityResult(index: CityIndex, i: number): PlaceResult {
   };
 }
 
-function zoneResult(tzid: string): PlaceResult {
+function zoneResult(tzid: string): ZonePlace {
   return {
     tzid,
     label: getDisplayTimezoneName(tzid),
@@ -123,6 +150,28 @@ function zoneResult(tzid: string): PlaceResult {
     secondary: tzid,
     kind: 'zone',
   };
+}
+
+/**
+ * The primary line is the full name people search for — "Celebrity Apex" — while
+ * `label` is the short one a clock row shows. That mirrors how a city behaves:
+ * the dropdown says "Nelson, BC, Canada" and the row says "Nelson".
+ */
+function shipResult(ship: ShipRef): ShipPlace {
+  return {
+    label: ship.short,
+    primary: ship.name,
+    secondary: ship.brand === 'C' ? 'Celebrity Cruises' : 'Royal Caribbean',
+    kind: 'ship',
+    ship,
+  };
+}
+
+/** One row per place. Ships have no zone, so they key on brand and code. */
+function resultKey(result: PlaceResult): string {
+  return result.kind === 'ship'
+    ? `ship:${shipKey(result.ship)}`
+    : `${result.tzid}|${result.label}`;
 }
 
 /**
@@ -196,6 +245,7 @@ export function searchPlaces(
   zoneIds: string[],
   index: CityIndex | null,
   origin: Origin | null = null,
+  ships: ShipRef[] = [],
   limit = 8
 ): PlaceResult[] {
   const q = fold(query.trim());
@@ -206,7 +256,8 @@ export function searchPlaces(
   // whole list has to be scanned, because a nearby small town can outrank a
   // distant large one and an early cut-off would never see it.
   const cityTiers: number[][] = [[], [], []];
-  const zoneTiers: PlaceResult[][] = [[], [], []];
+  const zoneTiers: ZonePlace[][] = [[], [], []];
+  const shipTiers = matchShipTiers(query, ships);
 
   for (const tzid of zoneIds) {
     const segment = fold(getDisplayTimezoneName(tzid));
@@ -255,20 +306,48 @@ export function searchPlaces(
   // Cities ahead of zones within each tier. A zone named after its city
   // ("Creston") collides with the city itself, and the city row is the better
   // one to keep — it says where the place is.
+  //
+  // Ships lead their tier only on an exact match, and follow the cities
+  // otherwise. Typing "independence" in full is a specific enough act to put
+  // the vessel first; typing "inde" is not. Either way both appear, because
+  // these names genuinely collide — "Independence" is also six real towns, one
+  // of them 120,000 people — and the ship icon is what resolves it, not the
+  // ordering. Nothing is ever silently picked.
   for (let tier = 0; tier < 3 && results.length < limit; tier++) {
     // Only the leading slice is materialised — a broad query like "san" matches
     // thousands, and building a result object for each would be wasted work.
     const ranked = cityTiers[tier].slice(0, limit).map((i) => cityResult(index!, i));
-    for (const candidate of [...ranked, ...zoneTiers[tier]]) {
+    const shipsHere = shipTiers[tier].map(shipResult);
+    const ordered: PlaceResult[] = tier === 0
+      ? [...shipsHere, ...ranked, ...zoneTiers[tier]]
+      : [...ranked, ...shipsHere, ...zoneTiers[tier]];
+
+    for (const candidate of ordered) {
       // One row per place: the same city name can repeat across regions, but an
       // identical name *and* zone is a duplicate as far as the user is concerned.
-      const key = `${candidate.tzid}|${candidate.label}`;
+      const key = resultKey(candidate);
       if (seen.has(key)) continue;
       seen.add(key);
       results.push(candidate);
       if (results.length >= limit) break;
     }
   }
+
+  // A matched ship is never invisible. Ordering ships below cities on a partial
+  // match was meant to express a preference, not to drop them: "inde" matches
+  // seven towns before Independence of the Seas, and one more town would have
+  // pushed the vessel off the end of the list entirely. Someone typing part of a
+  // ship's name would then see no ship at all and reasonably conclude the app
+  // does not know it. So if any ship matched and none survived the cut, the last
+  // row gives way to the best-matching one.
+  if (!results.some((r) => r.kind === 'ship')) {
+    const bestShip = shipTiers.flat()[0];
+    if (bestShip) {
+      if (results.length >= limit) results.pop();
+      results.push(shipResult(bestShip));
+    }
+  }
+
   return results;
 }
 
@@ -338,7 +417,7 @@ export function nearestPlace(
 }
 
 /** A raw IANA id typed in full, for anything the index misses. */
-export function zoneFromRawInput(query: string): PlaceResult | null {
+export function zoneFromRawInput(query: string): ZonePlace | null {
   const trimmed = query.trim();
   return trimmed.includes('/') && isValidTimezone(trimmed) ? zoneResult(trimmed) : null;
 }

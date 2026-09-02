@@ -1,0 +1,15 @@
+// Deploy: npm run deploy:utc-time  (from the repo root)
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "geotime-utc-time",
+  "main": "src/index.ts",
+  // Today's date at creation. Bump deliberately, not incidentally: it changes
+  // runtime behaviour.
+  "compatibility_date": "2026-09-02",
+  "observability": {
+    "enabled": true,
+    // Low traffic — one request per app launch — so capture everything rather
+    // than sample.
+    "head_sampling_rate": 1
+  }
+}

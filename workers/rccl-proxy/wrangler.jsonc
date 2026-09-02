@@ -1,0 +1,22 @@
+// Deploy: npm run deploy:rccl-proxy  (from the repo root)
+//
+// The app key is NOT here. Set it once per environment with:
+//   npx wrangler secret put RCCL_APPKEY --config workers/rccl-proxy/wrangler.jsonc
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "geotime-rccl-proxy",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-02",
+  "vars": {
+    // Not a security boundary — anyone can curl the Worker directly. This stops
+    // a browser on someone else's site from quietly spending our key quota.
+    // Non-secret, so it belongs in vars rather than a secret.
+    "ALLOWED_ORIGINS": "https://geotime.matthewcarroll.ca,https://localhost:5173,http://localhost:5173"
+  },
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1,
+    // Ship codes are not sensitive, but there is no reason to retain them.
+    "redact_query_string": true
+  }
+}

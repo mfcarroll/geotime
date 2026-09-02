@@ -9,6 +9,7 @@ public class MainActivity extends BridgeActivity {
         // Must precede super.onCreate: BridgeActivity.onCreate ends with load(),
         // which builds the bridge and freezes the plugin list.
         registerPlugin(WidgetBridgePlugin.class);
+        registerPlugin(ShipTimePlugin.class);
         super.onCreate(savedInstanceState);
     }
 }

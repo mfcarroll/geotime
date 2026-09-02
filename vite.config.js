@@ -1,7 +1,7 @@
 // vite.config.js
 
 import { resolve } from 'path';
-import { defineConfig } from 'vite';
+import { defineConfig, loadEnv } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
 import basicSsl from '@vitejs/plugin-basic-ssl';
 
@@ -17,9 +17,10 @@ export default defineConfig({
     }
   },
   plugins: [
+    workerCsp(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['timezones.geojson', 'cities.json', 'track.json', 'route.json'],
+      includeAssets: ['timezones.geojson', 'cities.json', 'ships.json', 'track.json', 'route.json'],
       manifest: {
         name: 'GeoTime Dashboard',
         short_name: 'GeoTime',
@@ -51,9 +52,127 @@ export default defineConfig({
     basicSsl()
   ],
   server: {
-    https: true
+    https: true,
+    proxy: rcclDevProxy()
   },
   preview: {
-    https: true
+    https: true,
+    proxy: rcclDevProxy()
   }
 });
+
+/**
+ * Substitutes the configured Worker origins into the page's CSP.
+ *
+ * The alternative was a static `https://*.workers.dev`, which would admit every
+ * Worker anybody has ever deployed — a wildcard over a shared hostname is barely
+ * a policy at all. Deriving the exact origins from the same variables the client
+ * uses keeps the two from drifting, and means moving a Worker to a custom domain
+ * needs no separate CSP edit.
+ *
+ * Only the origin is taken, never the path: CSP source expressions match on
+ * scheme, host and port.
+ */
+function workerCsp() {
+  return {
+    name: 'geotime:worker-csp',
+    transformIndexHtml(html, ctx) {
+      const env = loadEnv(ctx?.server ? 'development' : 'production', process.cwd(), 'VITE_');
+      // Defaults must match the ones in src/rccl.ts and src/time.ts: the CSP
+      // has to admit whatever the client will actually call, and the client
+      // falls back to these when the variables are unset.
+      const origins = [
+        env.VITE_RCCL_PROXY ?? 'https://geotime-rccl-proxy.matthew-carroll.workers.dev',
+        env.VITE_UTC_TIME_URL ?? 'https://geotime-utc-time.matthew-carroll.workers.dev',
+      ]
+        .filter(Boolean)
+        .map((value) => {
+          try {
+            return new URL(value).origin;
+          } catch {
+            return '';
+          }
+        })
+        .filter(Boolean);
+      return html.replace('%WORKER_ORIGINS%', [...new Set(origins)].join(' '));
+    },
+  };
+}
+
+/**
+ * Dev-only proxy for api.rccl.com (ship time).
+ *
+ * Two problems, one solution. api.rccl.com sends no CORS headers and exposes
+ * only Server-Timing, so a browser can neither call it nor read the
+ * environment-ship-code header — on device that is handled by routing through
+ * native, but native isn't available in `npm run dev`. And the app key must
+ * never reach the web bundle, because one dist/ serves both the apps and the
+ * public Pages site.
+ *
+ * Proxying server-side solves both: the browser talks to a same-origin path, and
+ * the key is attached here in Node, so it is never inlined into any client code.
+ * This block does not exist in a production build — Vite's proxy is dev-server
+ * only — which is also why the web build has no ship features at all.
+ */
+function rcclDevProxy() {
+  // loadEnv with an empty prefix so a NON-VITE_ variable is readable: anything
+  // prefixed VITE_ would be inlined into the client bundle, which is the whole
+  // thing being avoided. Read here in Node and attached below, so the key never
+  // reaches the browser even in development.
+  //
+  // No fallback. The key is not in this repo — set RCCL_APPKEY in .env.local
+  // (see .env.local.example). Without it the proxy still serves the open
+  // endpoints, so ship search and detection work in dev and only live offsets
+  // return 401.
+  const appkey = loadEnv('development', process.cwd(), '').RCCL_APPKEY
+    || process.env.RCCL_APPKEY
+    || '';
+  if (!appkey) {
+    console.warn(
+      '\n[rccl] RCCL_APPKEY is not set — ship time offsets will 401 in dev.'
+      + '\n       Set it in .env.local to resolve live ship clocks.\n'
+    );
+  }
+  const simShip = (process.env.RCCL_SIM_SHIP || '').toUpperCase();
+  // The onboard header is a bare 12-hour wall clock with no date and no offset.
+  // Nothing parses it — deriving an offset from it would mean trusting the
+  // device's UTC, which is the one value this app exists because it cannot — so
+  // this is only here to be recorded and reported.
+  const simShipTime = process.env.RCCL_SIM_SHIP_TIME || '3:45 PM';
+  return {
+    '/rccl-api': {
+      target: 'https://api.rccl.com',
+      changeOrigin: true,
+      rewrite: (path) => path.replace(/^\/rccl-api/, ''),
+      configure: (proxy) => {
+        proxy.on('proxyReq', (proxyReq) => {
+          if (appkey) proxyReq.setHeader('appkey', appkey);
+          proxyReq.setHeader('accept', 'application/json');
+          proxyReq.setHeader('platform', 'android');
+          proxyReq.setHeader('appversion', '1.80.0');
+        });
+        // The gateway headers are the whole point of the probe, and a browser
+        // may only read what the response allows it to. Same-origin via the
+        // proxy means we can widen that here for dev.
+        proxy.on('proxyRes', (proxyRes) => {
+          proxyRes.headers['access-control-expose-headers'] =
+            'environment-marker, environment-ship-code, ship-time, date';
+
+          // Onboard simulation: `RCCL_SIM_SHIP=ST npm run dev` makes every
+          // response claim to come from that ship's network.
+          //
+          // Detection is built entirely on headers that have never been seen on
+          // the wire — the API doc infers them from decompiled bytecode — and a
+          // shore machine can never produce them. Without this the whole aboard
+          // path would ship on inference alone; with it, everything except the
+          // real header names can be exercised from a desk. Dev-server only.
+          if (simShip) {
+            proxyRes.headers['environment-marker'] = 'ship';
+            proxyRes.headers['environment-ship-code'] = simShip;
+            proxyRes.headers['ship-time'] = simShipTime;
+          }
+        });
+      },
+    },
+  };
+}

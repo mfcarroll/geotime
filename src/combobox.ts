@@ -10,6 +10,7 @@
 // that isn't a real zone, so there is nothing to reject.
 
 import { loadCityIndex, searchPlaces, zoneFromRawInput, type Origin, type PlaceResult } from './cities';
+import type { ShipRef } from './ships';
 
 export interface ComboboxOptions {
   input: HTMLInputElement;
@@ -19,10 +20,12 @@ export interface ComboboxOptions {
   /** The user's position when known — read per search, since a GPS fix can
    *  arrive after the box is already open. Results are ranked by nearness. */
   origin: () => Origin | null;
+  /** The ship roster, read per search since it loads asynchronously. */
+  ships: () => ShipRef[];
   onSelect: (result: PlaceResult) => void;
 }
 
-export function createSearchCombobox({ input, listbox, zoneIds, origin, onSelect }: ComboboxOptions) {
+export function createSearchCombobox({ input, listbox, zoneIds, origin, ships, onSelect }: ComboboxOptions) {
   let results: PlaceResult[] = [];
   let active = -1;
   let queryToken = 0;
@@ -61,7 +64,15 @@ export function createSearchCombobox({ input, listbox, zoneIds, origin, onSelect
 
       const primary = document.createElement('span');
       primary.className = 'combobox-primary';
-      primary.textContent = result.primary;
+      // A ship is marked, never merely ranked. "Independence" is a vessel and
+      // also six real towns, so the row has to say which it is — the icon does
+      // that, and the ordering is only a preference on top of it.
+      if (result.kind === 'ship') {
+        const icon = document.createElement('i');
+        icon.className = 'fas fa-ship fa-fw mr-2 text-gray-400';
+        primary.appendChild(icon);
+      }
+      primary.appendChild(document.createTextNode(result.primary));
 
       const secondary = document.createElement('span');
       secondary.className = 'combobox-secondary';
@@ -113,9 +124,10 @@ export function createSearchCombobox({ input, listbox, zoneIds, origin, onSelect
     // has to wait for the download.
     const show = (index: Awaited<ReturnType<typeof loadCityIndex>>) => {
       if (token !== queryToken) return; // a newer keystroke already won
-      results = searchPlaces(query, zoneIds(), index, origin());
+      results = searchPlaces(query, zoneIds(), index, origin(), ships());
       const raw = zoneFromRawInput(query);
-      if (raw && !results.some((r) => r.tzid === raw.tzid)) results.unshift(raw);
+      const already = results.some((r) => r.kind !== 'ship' && r.tzid === raw?.tzid);
+      if (raw && !already) results.unshift(raw);
       active = results.length > 0 ? 0 : -1;
       render();
     };

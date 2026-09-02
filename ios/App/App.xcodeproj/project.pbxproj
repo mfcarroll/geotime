@@ -14,6 +14,7 @@
 		26200864DE2C4892E19F6E1F /* MainViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4089EEE9EFA7A2F3ACFA6C8D /* MainViewController.swift */; };
 		2FAD9763203C412B000D30F8 /* config.xml in Resources */ = {isa = PBXBuildFile; fileRef = 2FAD9762203C412B000D30F8 /* config.xml */; };
 		4332B8A9D84565970B724A18 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = FA1DDD3C8B414288DA263611 /* Foundation.framework */; };
+		4504E747F3301DBE6425A00F /* ShipTimeFetcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = BAE6410E7342F4DB41462E70 /* ShipTimeFetcher.swift */; };
 		50379B232058CBB4000EE86E /* capacitor.config.json in Resources */ = {isa = PBXBuildFile; fileRef = 50379B222058CBB4000EE86E /* capacitor.config.json */; };
 		504EC3081FED79650016851F /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 504EC3071FED79650016851F /* AppDelegate.swift */; };
 		504EC30D1FED79650016851F /* Main.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 504EC30B1FED79650016851F /* Main.storyboard */; };
@@ -27,7 +28,9 @@
 		A084ECDBA7D38E1E42DFC39D /* Pods_App.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = AF277DCFFFF123FFC6DF26C7 /* Pods_App.framework */; };
 		B70992AFA47AC2C4736C60FE /* WidgetSharedStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFC9F590BE039A215E483D7E /* WidgetSharedStore.swift */; };
 		DB97CE733F723DBD76E1482F /* GeoTimeWidgetBundle.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE8741FCEB285F6C9DCAF25F /* GeoTimeWidgetBundle.swift */; };
+		E47FB7D6CC776B2858BC57E3 /* ShipTimeFetcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = BAE6410E7342F4DB41462E70 /* ShipTimeFetcher.swift */; };
 		E4E32A0278CA50ED77910000 /* ZoneRowResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9D79ACD1537D40FDAD9BAA8 /* ZoneRowResolver.swift */; };
+		EA2C65B11712157EC7BC8CCB /* ShipTimePlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0BCA1A501626ADF320201B0A /* ShipTimePlugin.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -55,6 +58,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		0BCA1A501626ADF320201B0A /* ShipTimePlugin.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ShipTimePlugin.swift; sourceTree = "<group>"; };
 		0BEE31C9C01FA5755B8EE047 /* GeoTimeWidget.entitlements */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.entitlements; path = GeoTimeWidget.entitlements; sourceTree = "<group>"; };
 		2FAD9762203C412B000D30F8 /* config.xml */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = config.xml; sourceTree = "<group>"; };
 		4089EEE9EFA7A2F3ACFA6C8D /* MainViewController.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MainViewController.swift; sourceTree = "<group>"; };
@@ -73,6 +77,7 @@
 		ACBECF335FC8B08A2577C865 /* Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		AF277DCFFFF123FFC6DF26C7 /* Pods_App.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_App.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		AF51FD2D460BCFE21FA515B2 /* Pods-App.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-App.release.xcconfig"; path = "Pods/Target Support Files/Pods-App/Pods-App.release.xcconfig"; sourceTree = "<group>"; };
+		BAE6410E7342F4DB41462E70 /* ShipTimeFetcher.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ShipTimeFetcher.swift; sourceTree = "<group>"; };
 		BD8C51C4A14DB0EE4E5AEB79 /* GeoTimeWidget.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GeoTimeWidget.swift; sourceTree = "<group>"; };
 		C6F5521A10F74069ED7B2C7B /* GeoTimeWidget.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = GeoTimeWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		DE8741FCEB285F6C9DCAF25F /* GeoTimeWidgetBundle.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GeoTimeWidgetBundle.swift; sourceTree = "<group>"; };
@@ -146,6 +151,7 @@
 				4089EEE9EFA7A2F3ACFA6C8D /* MainViewController.swift */,
 				5CD551621ED78FEB8BE5C07D /* WidgetBridgePlugin.swift */,
 				42034A84A4F7BB6E110EC8A9 /* App.entitlements */,
+				0BCA1A501626ADF320201B0A /* ShipTimePlugin.swift */,
 			);
 			path = App;
 			sourceTree = "<group>";
@@ -156,6 +162,7 @@
 				DFC9F590BE039A215E483D7E /* WidgetSharedStore.swift */,
 				7DAFCEBB3ED0EA2092AE3CDB /* TimezoneDisplay.swift */,
 				E9D79ACD1537D40FDAD9BAA8 /* ZoneRowResolver.swift */,
+				BAE6410E7342F4DB41462E70 /* ShipTimeFetcher.swift */,
 			);
 			name = Shared;
 			path = Shared;
@@ -337,6 +344,7 @@
 				B70992AFA47AC2C4736C60FE /* WidgetSharedStore.swift in Sources */,
 				258F681F0B294FBA0193146E /* TimezoneDisplay.swift in Sources */,
 				03CAC21F90303108D8E8074B /* ZoneRowResolver.swift in Sources */,
+				E47FB7D6CC776B2858BC57E3 /* ShipTimeFetcher.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -350,6 +358,8 @@
 				E4E32A0278CA50ED77910000 /* ZoneRowResolver.swift in Sources */,
 				26200864DE2C4892E19F6E1F /* MainViewController.swift in Sources */,
 				56DBB73423CD4D72B8D6E250 /* WidgetBridgePlugin.swift in Sources */,
+				EA2C65B11712157EC7BC8CCB /* ShipTimePlugin.swift in Sources */,
+				4504E747F3301DBE6425A00F /* ShipTimeFetcher.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

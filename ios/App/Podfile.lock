@@ -5,12 +5,15 @@ PODS:
   - CapacitorGeolocation (8.2.0):
     - Capacitor
     - IONGeolocationLib (= 2.1.0)
+  - CapacitorNetwork (8.0.1):
+    - Capacitor
   - IONGeolocationLib (2.1.0)
 
 DEPENDENCIES:
   - "Capacitor (from `../../node_modules/@capacitor/ios`)"
   - "CapacitorCordova (from `../../node_modules/@capacitor/ios`)"
   - "CapacitorGeolocation (from `../../node_modules/@capacitor/geolocation`)"
+  - "CapacitorNetwork (from `../../node_modules/@capacitor/network`)"
 
 SPEC REPOS:
   trunk:
@@ -23,13 +26,16 @@ EXTERNAL SOURCES:
     :path: "../../node_modules/@capacitor/ios"
   CapacitorGeolocation:
     :path: "../../node_modules/@capacitor/geolocation"
+  CapacitorNetwork:
+    :path: "../../node_modules/@capacitor/network"
 
 SPEC CHECKSUMS:
   Capacitor: 35242afe195b1e53c58ca1b827d1b444c5e6602b
   CapacitorCordova: eebe6bcf807b1b06f3f48237650f96bbcd0eef09
   CapacitorGeolocation: b36f6287bfc9f2eefa04dc900496f2c8ae666136
+  CapacitorNetwork: 8812ce60d11fb63d8f2e4ba51a49b2e59892ebe2
   IONGeolocationLib: 6a7b6f76063fb1b01cfb14fae7d0f526e3c9b271
 
-PODFILE CHECKSUM: 06a279647a3488401fdde16d627d37cbccebd150
+PODFILE CHECKSUM: 116df16c02b481411760c10f7152e62af670ddb0
 
 COCOAPODS: 1.16.2
