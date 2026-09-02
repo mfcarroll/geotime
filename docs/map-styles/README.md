@@ -122,10 +122,9 @@ No CSP violation reached the device log, and no WebGL context loss. Label glyphs
 and coastlines are crisp at 1:1 device pixels, which is the visible difference
 from the scaled raster tiles that prompted this whole thread.
 
-**Not yet checked on real hardware.** The simulator's WebGL does not use the
-driver a phone does, and a context limit — the wrong answer here — is precisely
-the sort of thing that would differ. Worth confirming on a device before the
-next release.
+Then confirmed on a real iPhone, which is the check that counts — the
+simulator's WebGL does not use the driver a phone does, and a context limit, the
+wrong answer here, is precisely the sort of thing that would have differed.
 
 ## Getting it wrong is cheap
 

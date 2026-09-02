@@ -47,9 +47,9 @@ import { clearShipChart, drawShipChart, fitToShip, refreshShipMarkers } from './
  * across six cold launches for the location map and three for the world map,
  * pixel-identical each time, with no CSP violation reaching the device log.
  *
- * Still worth a look on real hardware before trusting it there. The simulator's
- * WebGL does not go through the same driver a phone does, and a context limit —
- * the wrong answer here — is exactly the kind of thing that would differ.
+ * Confirmed on a real iPhone as well, which is the check that counts: the
+ * simulator's WebGL does not go through a phone's driver, and a context limit —
+ * the wrong answer here — is exactly the kind of thing that would have differed.
  *
  * Two Map IDs rather than one, because the small map wants more detail than the
  * large one: locationMapStyles keeps the local roads the world map suppresses,
