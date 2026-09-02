@@ -9,7 +9,7 @@ record why each was built the way it was.
 | | Status |
 | --- | --- |
 | 1. Ship destination is misleading | done |
-| 2. Ship time as the reference while aboard | **open** |
+| 2. Ship time as the reference while aboard | **resolver done, view + Android open** |
 | 3. Red x on the wrong row | done |
 
 ---
@@ -191,6 +191,55 @@ The part that was hard to picture. The rule that resolves it:
 That keeps the whole change to one idea: *offsets are from the clock you are
 living by.* The cards stay as they are, which also means the Ship Time card at
 the top of the page keeps stating the anchor in full.
+
+### Settled while writing the tests
+
+The expected values had to be written by hand, and doing that is what exposed
+the design flaw: **`isLocal` was doing two jobs.** Ashore the GPS zone is both
+where you are and what everything is measured from, so one flag covered both and
+nobody noticed. Aboard they separate, and both facts still want saying — so the
+row gained `isAnchor` beside `isLocal`. The GPS row keeps its pin and gains an
+offset, exactly as the mockup had it.
+
+The parameter is `aboardShipKey: String?`, not a Bool: the list may hold several
+ships and only one is underfoot. `nil` is ashore, which is also the default, so
+every existing caller keeps its behaviour and the ashore tests stay valid
+unchanged. A key naming a ship that is not in the list — an offset that never
+resolved — falls back to the geographic anchor rather than anchoring on nothing.
+
+The fold still compares against the GEOGRAPHIC offset rather than the anchor: it
+exists to lend a name to a row that would otherwise read "UTC−5" mid-ocean, and
+that is a fact about where you are, not about which clock you keep.
+
+### Still open
+
+**The widget view, which is where the documented hazard actually lives.**
+`GeoTimeWidget.swift` hardcodes the string `"Local time"` and gates it on
+`metrics.showLocalLabel`, so it neither reads the anchor's label nor protects
+it from the width budget. The resolver now produces the right text; nothing
+displays it yet. This is the next piece and it is the risky one.
+
+**Android.** `GeoTimeWidgetProvider.java` still has the old single-baseline
+rule. The shared case table that would stop the two drifting does not exist yet.
+
+**The main app.** `src/time.ts` is untouched; the extraction that makes its
+baseline testable has not been done.
+
+### Two decisions the matrix forced into the open
+
+Both are live choices rather than defects, and both are written as tests so the
+current answer is visible and a change of mind fails a test rather than drifting
+silently.
+
+1. **Does the device row still appear when it matches the ground but not the
+   ship?** Currently yes — everything is gated against the anchor, keeping the
+   resolver's "ONE RULE for every special row". The cost is a visibly redundant
+   row: the same figure as the pin row beside it, on the smallest surface the
+   app has.
+2. **Should the ground row say more than a bare offset once it stops being the
+   anchor?** Currently no — it reads "+1 hr" and the pin carries the meaning,
+   which is what the mockup showed. The case against is that the pin is the
+   smallest thing on the row and the first thing dropped when width runs short.
 
 ### Open questions
 

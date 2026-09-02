@@ -212,6 +212,7 @@ final class ZoneRowResolverProperties: XCTestCase {
         let local: TimeZone
         let device: TimeZone
         let ships: [WidgetSharedStore.Ship]
+        var aboard: String? = nil
     }
 
     private var cases: [Case] {
@@ -231,6 +232,21 @@ final class ZoneRowResolverProperties: XCTestCase {
                  local: Fixture.newYork, device: Fixture.vancouver, ships: [star, agreeing]),
             Case(name: "base is a ship's zone", stored: [],
                  local: TimeZone(secondsFromGMT: -5 * 3600)!, device: Fixture.vancouver, ships: [star]),
+
+            // Aboard. These are why the properties are stated against `isAnchor`
+            // rather than `isLocal`: the two are the same row ashore and are not
+            // aboard, and a property that only held in one world would be worth
+            // nothing on the day the other one arrived.
+            Case(name: "aboard, ship differs", stored: ["Europe/London", "Asia/Tokyo"],
+                 local: Fixture.newYork, device: Fixture.newYork, ships: [star], aboard: "R/ST"),
+            Case(name: "aboard, ship agrees", stored: ["Europe/London"],
+                 local: Fixture.newYork, device: Fixture.newYork, ships: [agreeing], aboard: "R/AG"),
+            Case(name: "aboard, device adrift too", stored: ["Europe/London"],
+                 local: Fixture.newYork, device: Fixture.vancouver, ships: [star], aboard: "R/ST"),
+            Case(name: "aboard, two ships", stored: [],
+                 local: Fixture.newYork, device: Fixture.newYork, ships: [star, agreeing], aboard: "R/ST"),
+            Case(name: "aboard, ship not present", stored: ["Europe/London"],
+                 local: Fixture.newYork, device: Fixture.newYork, ships: [star], aboard: "R/GHOST"),
         ]
     }
 
@@ -238,14 +254,22 @@ final class ZoneRowResolverProperties: XCTestCase {
         for c in cases {
             let rows = ZoneRowResolver.resolve(
                 storedIds: c.stored, local: c.local, deviceTz: c.device, now: Fixture.now,
-                localPlaceName: nil, labels: [], ships: c.ships)
+                localPlaceName: nil, labels: [], ships: c.ships, aboardShipKey: c.aboard)
             try body(c.name, rows)
         }
     }
 
     func testExactlyOneRowIsTheAnchor() throws {
         try each { name, rows in
-            XCTAssertEqual(rows.filter(\.isLocal).count, 1, "\(name): the list needs exactly one anchor")
+            XCTAssertEqual(rows.filter(\.isAnchor).count, 1, "\(name): the list needs exactly one anchor")
+        }
+    }
+
+    /// And exactly one row is the ground, always — aboard or not, you are
+    /// somewhere. Aboard, this is a different row from the anchor.
+    func testExactlyOneRowIsTheGround() throws {
+        try each { name, rows in
+            XCTAssertEqual(rows.filter(\.isLocal).count, 1, "\(name): the list needs exactly one pin")
         }
     }
 
@@ -258,7 +282,7 @@ final class ZoneRowResolverProperties: XCTestCase {
     /// promise, because it only ever speaks for the examples in it.
     func testTheAnchorAlwaysNamesItself() throws {
         try each { name, rows in
-            let anchor = rows.first { $0.isLocal }
+            let anchor = rows.first { $0.isAnchor }
             XCTAssertNotNil(anchor, "\(name)")
             XCTAssertFalse(anchor?.relativeText.isEmpty ?? true,
                            "\(name): the anchor must state what everything else is relative to")
@@ -275,8 +299,8 @@ final class ZoneRowResolverProperties: XCTestCase {
 
     func testTheAnchorsOwnOffsetIsTheBaseline() throws {
         try each { name, rows in
-            let anchor = try XCTUnwrap(rows.first { $0.isLocal }, "\(name)")
-            for r in rows where !r.isLocal {
+            let anchor = try XCTUnwrap(rows.first { $0.isAnchor }, "\(name)")
+            for r in rows where !r.isAnchor {
                 let expected = TimezoneDisplay.relativeOffset(
                     zoneSeconds: r.offsetSeconds, deviceSeconds: anchor.offsetSeconds)
                 XCTAssertEqual(r.relativeText, expected,
