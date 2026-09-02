@@ -216,3 +216,32 @@
 @media (prefers-reduced-motion: reduce) {
   .ship-hull svg { transition: none; }
 }
+
+/* Whether there is room for the small location map beside, or above, the World
+   Clock list. Kept here rather than in Tailwind utilities because it takes two
+   clauses and neither is obvious.
+   The naive rule was a single min-width, and width cannot express this: an
+   iPhone 17 in landscape is 874pt wide and an 11" iPad upright is 834pt, so the
+   phone we want to exclude is WIDER than the tablet we want to keep. Every
+   width threshold either loses the iPad or lets the phone back in.
+   Height is what actually separates them, and it is the real criterion rather
+   than a proxy: the objection to this map was always vertical — stacked above
+   the clocks it costs a screen of scrolling to reach them. A phone on its side
+   has 402pt of height and is the worst case for that, not an exception to it. */
+.two-map-only { display: none; }
+
+/* Single column, but tall enough that a stacked map does not bury the list.
+   768 would drop an iPad mini upright, which is 744pt wide and 1133 tall. */
+@media (min-width: 700px) and (min-height: 600px) {
+  .two-map-only { display: block; }
+  #location-map.two-map-only { display: flex; }
+}
+
+/* At lg the layout is three columns and this map sits in the side column,
+   beside the clock list rather than above it — so it costs the list nothing
+   and the height clause does not apply. This is where the columns split; see
+   lg:grid-cols-3 in index.html. */
+@media (min-width: 1024px) {
+  .two-map-only { display: block; }
+  #location-map.two-map-only { display: flex; }
+}

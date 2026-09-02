@@ -97,8 +97,13 @@
               </div>
               <p id="accuracy-display" class="text-center text-gray-400 mt-2 hidden"></p>
             </div>
-            <hr class="border-gray-600">
-            <div id="location-map" class="bg-gray-700 w-full h-64 flex items-center justify-center text-gray-400">
+            <!-- Shown only where a second map does not cost the clock list its
+                 place on screen. The rule is .two-map-only in style.css, which
+                 needs two clauses and explains why; TWO_MAP_LAYOUT in map.ts
+                 carries the same query and declines to build the map at all
+                 when it does not match. -->
+            <hr class="border-gray-600 two-map-only">
+            <div id="location-map" class="bg-gray-700 w-full h-64 two-map-only items-center justify-center text-gray-400">
               <span>Initializing Map...</span>
             </div>
           </div>
