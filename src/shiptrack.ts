@@ -148,6 +148,19 @@ export const FIX_STALE_AGE_MS = 60 * 60 * 1000;
 let fleet: Cached<Map<string, ShipFix>> | null = null;
 const voyages = new Map<string, Cached<ShipVoyage>>();
 
+/**
+ * Requests already on the wire, so concurrent callers share one.
+ *
+ * Not a micro-optimisation. Adding a ship both announces a list change and is
+ * followed by the marker layer's own poll, and on a device the two land about
+ * 50 ms apart — before either has populated the cache, so both went to the
+ * network. Measured on Android: two identical /fleet requests, 47 ms apart, for
+ * one user action. Against a third-party endpoint we are a guest of, halving
+ * that is worth ten lines.
+ */
+let fleetInFlight: Promise<Map<string, ShipFix>> | null = null;
+const voyagesInFlight = new Map<string, Promise<ShipVoyage | null>>();
+
 /** True when the map layers can work at all. */
 export function shipTrackAvailable(): boolean {
   return !!BASE;
@@ -226,17 +239,24 @@ export function initShipTrack(): void {
  * is still where the ship was, and the caller decides whether that is too old to
  * draw.
  */
-export async function fleetFixes(force = false): Promise<Map<string, ShipFix>> {
+export function fleetFixes(force = false): Promise<Map<string, ShipFix>> {
   const fresh = fleet && Date.now() - fleet.at < FLEET_MAX_AGE_MS;
-  if (fresh && !force) return fleet!.value;
+  if (fresh && !force) return Promise.resolve(fleet!.value);
+  if (fleetInFlight) return fleetInFlight;
 
-  const payload = await get<{ ships: ShipFix[] }>('/fleet');
-  if (!payload?.ships?.length) return fleet?.value ?? new Map();
+  fleetInFlight = (async () => {
+    const payload = await get<{ ships: ShipFix[] }>('/fleet');
+    if (!payload?.ships?.length) return fleet?.value ?? new Map<string, ShipFix>();
 
-  const byImo = new Map(payload.ships.map((ship) => [ship.imo, ship]));
-  fleet = { at: Date.now(), value: byImo };
-  writeCache(FLEET_CACHE_KEY, [...byImo]);
-  return byImo;
+    const byImo = new Map(payload.ships.map((ship) => [ship.imo, ship]));
+    fleet = { at: Date.now(), value: byImo };
+    writeCache(FLEET_CACHE_KEY, [...byImo]);
+    return byImo;
+  })();
+
+  // Cleared in a separate link so the value still reaches every caller.
+  void fleetInFlight.finally(() => { fleetInFlight = null; });
+  return fleetInFlight;
 }
 
 /** The last known fix for one ship, by clock key ("R/ST"), or null. */
@@ -257,13 +277,28 @@ export function fleetAge(): number | null {
  * Only called for a selection, so it is per-ship by design — drawing 44
  * overlapping tracks would be noise even if it were free.
  */
-export async function voyageForShip(shipKey: string, force = false): Promise<ShipVoyage | null> {
+export function voyageForShip(shipKey: string, force = false): Promise<ShipVoyage | null> {
   const imo = shipImo(shipKey);
-  if (!imo) return null;   // no identity, no map layer — see build-ship-index.mjs
+  if (!imo) return Promise.resolve(null);   // no identity, no map layer
 
   const cached = voyages.get(imo);
-  if (cached && !force && Date.now() - cached.at < VOYAGE_MAX_AGE_MS) return cached.value;
+  if (cached && !force && Date.now() - cached.at < VOYAGE_MAX_AGE_MS) {
+    return Promise.resolve(cached.value);
+  }
+  // The map fit and the chart both want this the moment a ship is selected.
+  const already = voyagesInFlight.get(imo);
+  if (already) return already;
 
+  const request = fetchVoyage(imo, cached);
+  voyagesInFlight.set(imo, request);
+  void request.finally(() => { voyagesInFlight.delete(imo); });
+  return request;
+}
+
+async function fetchVoyage(
+  imo: string,
+  cached: Cached<ShipVoyage> | undefined
+): Promise<ShipVoyage | null> {
   const payload = await get<ShipVoyage>(`/ship/${imo}`);
   if (!payload?.imo) return cached?.value ?? null;
 
