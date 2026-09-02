@@ -6,19 +6,12 @@ export const worldTimezoneMapStyles: google.maps.MapTypeStyle[] = [
     stylers: [{ color: '#3b4a5a' }],
   },
   {
-    // Labels on this map are server-rendered into the tiles, so their legibility
-    // is entirely a matter of contrast — there is no subpixel trick to fall back
-    // on. #8a99a8 gave 3.1:1 against the land, which reads as soft rather than
-    // sharp at any resolution; this is 7.2:1.
     elementType: 'labels.text.fill',
-    stylers: [{ color: '#dce6f0' }],
+    stylers: [{ color: '#8a99a8' }], 
   },
   {
-    // The halo was #3b4a5a — the same colour as the land, so a 1:1 ratio and no
-    // halo at all. Every label was floating unaided on a mid-tone ground, which
-    // is most of why the map looked blurry when it was in fact pixel-sharp.
     elementType: 'labels.text.stroke',
-    stylers: [{ color: '#16202b' }],
+    stylers: [{ color: '#3b4a5a' }],
   },
   {
     featureType: 'administrative',
@@ -72,19 +65,12 @@ export const locationMapStyles: google.maps.MapTypeStyle[] = [
     stylers: [{ color: '#3b4a5a' }],
   },
   {
-    // Labels on this map are server-rendered into the tiles, so their legibility
-    // is entirely a matter of contrast — there is no subpixel trick to fall back
-    // on. #8a99a8 gave 3.1:1 against the land, which reads as soft rather than
-    // sharp at any resolution; this is 7.2:1.
     elementType: 'labels.text.fill',
-    stylers: [{ color: '#dce6f0' }],
+    stylers: [{ color: '#8a99a8' }], 
   },
   {
-    // The halo was #3b4a5a — the same colour as the land, so a 1:1 ratio and no
-    // halo at all. Every label was floating unaided on a mid-tone ground, which
-    // is most of why the map looked blurry when it was in fact pixel-sharp.
     elementType: 'labels.text.stroke',
-    stylers: [{ color: '#16202b' }],
+    stylers: [{ color: '#3b4a5a' }],
   },
   {
     featureType: 'administrative',
@@ -112,7 +98,7 @@ export const locationMapStyles: google.maps.MapTypeStyle[] = [
   {
     featureType: 'road',
     elementType: 'labels.text.fill',
-    stylers: [{ color: '#c3d0dd' }],
+    stylers: [{ color: '#8a99a8' }],
   },
   {
     featureType: 'road.highway',
