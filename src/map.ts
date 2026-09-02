@@ -389,20 +389,25 @@ function createMyLocationButton(map: google.maps.Map) {
  * column it sits *above* the World Clock list and pushes it a screen further
  * down, so the price of it is a scroll past a map you were not looking at.
  *
- * So it is a layout question, and the breakpoint is where a phone ends rather
- * than where this app's columns split. The columns break at lg (1024px), which
- * would take the map away from an iPad held upright — where there is plenty of
- * room for it. md (768px) keeps it on tablets and desktops and drops it on
- * phones, which is the case actually worth fixing. A large phone in landscape
- * clears 768 and will keep the map; that is the edge this trade accepts.
+ * Width alone cannot express that, which a first attempt at a single min-width
+ * got wrong: an iPhone 17 in landscape is 874pt wide and an 11" iPad upright is
+ * 834pt, so the phone to exclude is wider than the tablet to keep. Height is
+ * what separates them, and it is the real criterion rather than a proxy — a
+ * phone on its side has 402pt of height and is the worst case for burying the
+ * list, not an exception to it.
  *
- * Below the breakpoint the map is not merely hidden, it is never constructed —
+ * The query below must stay in step with .two-map-only in style.css, which owns
+ * the visibility and carries the full reasoning for both of its clauses.
+ *
+ * When it does not match the map is not merely hidden, it is never constructed —
  * which spares the device least able to afford it a second vector map, its
  * WebGL context and its tile traffic. Everything that touches state.locationMap
  * is already null-guarded, so absence is an ordinary state rather than a
  * special case.
  */
-const TWO_MAP_LAYOUT = window.matchMedia('(min-width: 768px)');
+const TWO_MAP_LAYOUT = window.matchMedia(
+  '(min-width: 700px) and (min-height: 600px), (min-width: 1024px)'
+);
 
 function createLocationMap(): void {
   if (state.locationMap) return;
