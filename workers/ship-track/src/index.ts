@@ -21,6 +21,14 @@
 interface Env {
   /** Comma-separated origins allowed to call this. Non-secret; in vars. */
   ALLOWED_ORIGINS: string;
+  /**
+   * Last known good track, keyed by vessel and voyage. See retainedTrack().
+   *
+   * Optional so the Worker still runs unbound — in `wrangler dev --local`
+   * without KV, or if the binding is ever removed. Losing retention degrades to
+   * exactly the previous behaviour rather than to an exception.
+   */
+  SHIP_TRACKS?: KVNamespace;
 }
 
 const ORIGIN = 'https://www.cruisemapper.com';
@@ -247,7 +255,20 @@ function shapeFleet(markers: unknown): unknown {
 }
 
 /** The per-ship detail bundle, trimmed and with both polylines in one order. */
-function shapeDetail(imo: string, payload: any): unknown {
+interface ShapedVoyage {
+  imo: string;
+  name: string | null;
+  destination: string | null;
+  eta: string | null;
+  voyage: { name: string | null; startDate: string | null; endDate: string | null; days: string | null };
+  track: Array<[number, number]>;
+  route: Array<[number, number]>;
+  ports: unknown[];
+  extent: number[] | null;
+  trackRetained?: boolean;
+}
+
+function shapeDetail(imo: string, payload: any): ShapedVoyage {
   const path = payload?.cruise?.path ?? {};
   const names = portNamesByPoi(payload?.cruise?.itinerary);
 
@@ -322,7 +343,7 @@ function shapeDetail(imo: string, payload: any): unknown {
 async function fetchShaped(
   cacheKey: string,
   upstreamUrl: string,
-  shape: (payload: any) => unknown,
+  shape: (payload: any) => unknown | Promise<unknown>,
   ttl: number
 ): Promise<{ body: string; status: number }> {
   const cache = caches.default;
@@ -361,7 +382,10 @@ async function fetchShaped(
     return { body: JSON.stringify({ error: 'upstream_not_json' }), status: 502 };
   }
 
-  const body = JSON.stringify(shape(payload));
+  // Awaited, so the shaping step can consult KV — retention has to happen
+  // BEFORE the put below, or the cache would serve an empty track for the whole
+  // TTL and undo the point of retaining one.
+  const body = JSON.stringify(await shape(payload));
   await cache.put(
     keyRequest,
     new Response(body, {
@@ -372,6 +396,58 @@ async function fetchShaped(
     })
   );
   return { body, status: 200 };
+}
+
+/**
+ * Key for one vessel's history on one sailing.
+ *
+ * The voyage is part of the key rather than a field to compare, so a retained
+ * track can never be served under a different cruise — the wrong wake beneath
+ * the right route is the exact confusion clipping the track exists to prevent.
+ * A new sailing simply misses, which is correct: it has no history yet.
+ */
+function trackKey(imo: string, startDate: string | null): string | null {
+  if (!startDate) return null;   // nothing stable to key on
+  return `track:${imo}:${startDate.replace(/[^0-9A-Za-z]/g, '')}`;
+}
+
+/**
+ * Keeps the newest usable track, and hands one back when upstream has none.
+ *
+ * Writes are deliberately rare: only when nothing is stored for this voyage yet,
+ * or what is stored is empty. Upstream re-decimates the whole span on every
+ * request, so a fresh non-empty response is never *worse* than a stored one and
+ * overwriting would buy nothing at the cost of a write per request. That makes
+ * this roughly one write per vessel per sailing.
+ *
+ * Never throws. Retention is a nicety; a KV hiccup must not cost a user their
+ * route and position too.
+ */
+async function retainedTrack(
+  env: Env,
+  imo: string,
+  shaped: { track: Array<[number, number]>; voyage: { startDate: string | null } }
+): Promise<Array<[number, number]> | null> {
+  const key = trackKey(imo, shaped.voyage.startDate);
+  if (!env.SHIP_TRACKS || !key) return null;
+
+  try {
+    if (shaped.track.length > 0) {
+      const stored = await env.SHIP_TRACKS.get<Array<[number, number]>>(key, 'json');
+      if (!stored || stored.length === 0) {
+        // Expire well after any sailing ends, so the key clears itself.
+        await env.SHIP_TRACKS.put(key, JSON.stringify(shaped.track), {
+          expirationTtl: 60 * 60 * 24 * 30,
+        });
+      }
+      return null;   // fresh is what we serve
+    }
+
+    const stored = await env.SHIP_TRACKS.get<Array<[number, number]>>(key, 'json');
+    return Array.isArray(stored) && stored.length > 0 ? stored : null;
+  } catch {
+    return null;
+  }
 }
 
 export default {
@@ -413,7 +489,15 @@ export default {
       const { body, status } = await fetchShaped(
         `https://ship-track.geotime/ship/${imo}`,
         `${ORIGIN}/map/ship.json?imo=${imo}`,
-        (payload) => shapeDetail(imo, payload),
+        async (payload) => {
+          const shaped = shapeDetail(imo, payload);
+          const retained = await retainedTrack(env, imo, shaped);
+          if (retained) {
+            shaped.track = retained;
+            shaped.trackRetained = true;
+          }
+          return shaped;
+        },
         TTL.detail
       );
       return new Response(body, {

@@ -25,6 +25,16 @@
     // iosScheme is ever removed.
     "ALLOWED_ORIGINS": "https://geotime.matthewcarroll.ca,https://geotime.local,capacitor://geotime.local,https://localhost:5173,http://localhost:5173"
   },
+  // Last known good track per voyage. The upstream `track` array goes empty
+  // intermittently — observed on a vessel that had 720 points hours earlier
+  // while its route and position kept working — and no request recovers it, so
+  // the only remedy is to have kept a copy. Kept HERE rather than only on each
+  // device because a device can retain solely what it has already seen: someone
+  // opening the app for the first time during a drop would otherwise get no
+  // history at all, which is precisely when they have no copy to fall back on.
+  "kv_namespaces": [
+    { "binding": "SHIP_TRACKS", "id": "2ec2fe8de9c9439f93b3c289dab89cce" }
+  ],
   "observability": {
     "enabled": true,
     "head_sampling_rate": 1,
