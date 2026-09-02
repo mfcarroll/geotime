@@ -46,6 +46,30 @@ visible — city names are the only labels that earn their place on a world map.
 Both Map IDs take the same treatment; the two styles differ only in details that
 do not matter much at the sizes these render.
 
+## Only one map is vector
+
+Two vector maps on a page do not both work in WKWebView. Measured in the app on
+iOS: one renders and the other stays a flat beige — no error, no console output,
+and unchanged after a minute, so not a loading state. Chromium runs both without
+complaint, which is why this is invisible in a browser and why it first looked
+like a styling fault. A WebGL context limit is the likely cause.
+
+So the **World Clock Map** is vector and the **Location Map** is not. That is the
+right way round: the world map is large, read at a glance, and its labels sit
+under the timezone bands, while the location map is a small high-zoom view of a
+few streets around a blue dot where raster tiles are indistinguishable.
+
+The Location Map ID stays styled and ready in case WKWebView stops caring —
+building with `VITE_MAP_ID_LOCATION=c75a3fdf244efe751e1f1767` turns it on, and
+the way to check is the app on a device, not a browser.
+
+## Styles take a few minutes to appear
+
+After saving a style in the console it does not apply immediately. A map that is
+still the default beige right after publishing is usually propagation rather
+than anything wrong — wait a few minutes and hard-refresh before changing
+anything.
+
 ## Getting it wrong is cheap
 
 Nothing here ships in the app, so a bad style is fixed in the console without a

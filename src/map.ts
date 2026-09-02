@@ -32,8 +32,23 @@ import { clearShipChart, drawShipChart, fitToShip, refreshShipMarkers } from './
  * raster in exactly the builds nobody inspects by hand. Overriding to an empty
  * string is the deliberate way back to the old path.
  */
-const LOCATION_MAP_ID: string =
-  import.meta.env.VITE_MAP_ID_LOCATION ?? 'c75a3fdf244efe751e1f1767';
+/**
+ * Only ONE map goes vector, and it is the world one.
+ *
+ * Two vector maps on a page do not both work in WKWebView: measured in the app
+ * on iOS, one renders and the other stays a flat beige — no error, no console
+ * output, and unchanged after a minute, so not a loading state. Chromium runs
+ * both happily, which is why this is invisible in a browser and why it looked
+ * like a styling fault. A WebGL context limit is the likely cause.
+ *
+ * The world map is the one that earns it: it is large, it is read at a glance,
+ * and its labels sit under the timezone bands. The location map is a small
+ * high-zoom view of a few streets around a blue dot, where raster tiles are
+ * indistinguishable. So it keeps the styled raster path, and its Map ID —
+ * c75a3fdf244efe751e1f1767, styled and ready — waits for the day WKWebView
+ * stops caring. Set VITE_MAP_ID_LOCATION to it to try again.
+ */
+const LOCATION_MAP_ID: string = import.meta.env.VITE_MAP_ID_LOCATION ?? '';
 const TIMEZONE_MAP_ID: string =
   import.meta.env.VITE_MAP_ID_TIMEZONE ?? 'c75a3fdf244efe75fccc5434';
 
