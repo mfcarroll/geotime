@@ -33,30 +33,30 @@ import { clearShipChart, drawShipChart, fitToShip, refreshShipMarkers } from './
  * string is the deliberate way back to the old path.
  */
 /**
- * Only ONE map goes vector, and it is the world one.
+ * Both maps go vector, each with its own style.
  *
- * Two vector maps on a page do not both work in WKWebView: measured in the app
- * on iOS, one renders and the other stays a flat beige — no error, no console
- * output, and unchanged after a minute, so not a loading state. Chromium runs
- * both happily, which is why this is invisible in a browser and why it looked
- * like a styling fault. A WebGL context limit is the likely cause.
+ * This was one map for a while, on a finding that turned out to be wrong. Two
+ * vector maps really did fail in WKWebView — one rendered, the other stayed a
+ * flat beige — but the cause was not a WebGL context limit. It was our own CSP:
+ * no worker-src, so it fell back to script-src, which does not allow blob:, and
+ * the renderer's WebGL workers were blocked. See the comment on the policy in
+ * index.html. The measurements were real; the explanation was a guess, and it
+ * held for as long as it did because the failure names nothing.
  *
- * Sharing one Map ID between the two does not help — tested, and the second map
- * is beige just the same. The limit is on vector map instances, not on distinct
- * styles.
+ * Re-measured on the simulator with the policy fixed: both maps render, styled,
+ * across six cold launches for the location map and three for the world map,
+ * pixel-identical each time, with no CSP violation reaching the device log.
  *
- * The world map is the one that earns the slot: it is large, it is read at a
- * glance, and its labels sit under the timezone bands. The location map is a
- * small high-zoom view of a few streets around a blue dot, where raster tiles
- * are indistinguishable — and where the deliberately more detailed
- * locationMapStyles, which keeps the local roads the world map suppresses, is
- * the point of it being a separate style at all.
+ * Still worth a look on real hardware before trusting it there. The simulator's
+ * WebGL does not go through the same driver a phone does, and a context limit —
+ * the wrong answer here — is exactly the kind of thing that would differ.
  *
- * Its Map ID — c75a3fdf244efe751e1f1767, styled and ready — waits for the day
- * WKWebView stops caring. Set VITE_MAP_ID_LOCATION to it to try again, and
- * check on a device, since a browser renders both regardless.
+ * Two Map IDs rather than one, because the small map wants more detail than the
+ * large one: locationMapStyles keeps the local roads the world map suppresses,
+ * which is the whole point of it being a separate style.
  */
-const LOCATION_MAP_ID: string = import.meta.env.VITE_MAP_ID_LOCATION ?? '';
+const LOCATION_MAP_ID: string =
+  import.meta.env.VITE_MAP_ID_LOCATION ?? 'c75a3fdf244efe751e1f1767';
 const TIMEZONE_MAP_ID: string =
   import.meta.env.VITE_MAP_ID_TIMEZONE ?? 'c75a3fdf244efe75fccc5434';
 

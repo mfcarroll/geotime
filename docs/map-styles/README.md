@@ -77,43 +77,64 @@ still the default beige right after publishing is usually propagation rather
 than anything wrong — wait a few minutes and hard-refresh before changing
 anything.
 
-## UNRESOLVED: vector maps sometimes render blank
+## RESOLVED: the blank vector map was our own CSP
 
-Left deliberately undecided, pending whether it settles on Google's end. The
-styles had been published only minutes before the first sightings, and style
-propagation had already caused one false alarm the same day.
+Both maps are vector. The section this replaces recorded a WebGL context limit
+in WKWebView, which was wrong.
 
-What was actually observed:
+The real cause: `index.html` set no `worker-src`, so the directive fell back to
+`script-src`, which does not allow `blob:`. Google's vector renderer spawns its
+WebGL workers from `blob:` URLs, and every one was blocked. A second grant was
+needed too — `connect-src data:`, for the label worker's glyph atlases, which
+workers inherit from the document policy.
+
+The observations that led to the wrong answer were all sound:
 
 | Where | Result |
 | --- | --- |
-| WKWebView, two vector maps | fails reproducibly — one map flat beige across three builds, pixel unchanged over 50s |
-| WKWebView, one vector map | works |
-| A Chromium browser, two vector maps | four consecutive reloads fine, no context loss, 32 spare WebGL contexts |
+| WKWebView, two vector maps | failed reproducibly — one map flat beige across three builds, pixel unchanged over 50s |
+| WKWebView, one vector map | worked |
+| A Chromium browser, two vector maps | four consecutive reloads fine, 32 spare WebGL contexts |
 | Chrome, in ordinary use | intermittent — fine for a while, then beige again |
 
-The failure is **silent**: no error, no console output, no `webglcontextlost`
-event, and `getRenderingType()` still reports `VECTOR`. Nothing distinguishes a
-working map from a blank one programmatically, which is what makes it hard both
-to diagnose and to guard against.
+What made them mislead:
 
-The gain from vector is crisper labels, and nothing else — the base map is
-deliberately muted, and the bands are what the map is for.
+- **A browser comparison that was not a comparison.** The standalone prototypes
+  carried no CSP meta tag, so they were never subject to the rule that was
+  breaking the app. "Chromium handles both fine" measured a different document.
+- **The one-map case worked**, which fit a context limit exactly, so the
+  hypothesis kept earning its place.
+- **Chrome's intermittency**, which a static policy should not produce. It came
+  from a service worker serving a cached build over `http://` while the dev
+  server spoke `https://` — so which bundle, and which policy, was live varied.
+- **Google's own CSP probe was being blocked** by an ad blocker
+  (`gen_204?csp_test=true` → `ERR_BLOCKED_BY_CLIENT`), so the API never warned.
 
-Three ways out, if it does not settle:
+The failure is silent by nature — no error, no `webglcontextlost`, and
+`getRenderingType()` still reports `VECTOR` — so both directives now carry a
+comment in `index.html` saying what breaks without them. A flat map points
+nobody at a Content Security Policy; it cost two long detours before the console
+was read carefully enough.
 
-1. **Back to raster.** Slightly soft labels, never blank. The cloud styles and
-   Map IDs cost nothing sitting idle, and `VITE_MAP_ID_TIMEZONE` re-enables
-   vector whenever it is worth retrying.
-2. **Ship as it stands** — world map vector, location map raster — accepting an
-   occasional blank world map that cannot be detected or reported.
-3. **A runtime fallback**, swapping to raster when a map never finishes loading.
-   `tilesloaded` may be a usable signal. Real complexity, and a new silent
-   failure surface of its own, for an aesthetic gain.
+### Re-measured after the fix
 
-Worth knowing that this is the second time vector has been abandoned here; it
-was tried once before and dropped, and the reason had been forgotten until the
-same wall turned up from the other side.
+Simulator, iPhone 17, both maps vector, cold launches. Mean colour of the map
+region separates a styled render from the beige failure; a flat fill also
+collapses the colour count and luminance spread.
+
+| Map | Launches | Result |
+| --- | --- | --- |
+| Location | 6 | cool slate `#3b4a5a` every time, identical from launch 3 on |
+| World | 3 | pixel-identical — 2662 colours, σ30.53, `#2c3d50` |
+
+No CSP violation reached the device log, and no WebGL context loss. Label glyphs
+and coastlines are crisp at 1:1 device pixels, which is the visible difference
+from the scaled raster tiles that prompted this whole thread.
+
+**Not yet checked on real hardware.** The simulator's WebGL does not use the
+driver a phone does, and a context limit — the wrong answer here — is precisely
+the sort of thing that would differ. Worth confirming on a device before the
+next release.
 
 ## Getting it wrong is cheap
 
