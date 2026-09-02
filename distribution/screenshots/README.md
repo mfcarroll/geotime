@@ -8,9 +8,32 @@ Regenerable — see below — so they do not have to be redone by hand each rele
 | `6.9/` | 6.9" | 1320 x 2868 | iPhone 17 Pro Max |
 | `6.5/` | 6.5" | 1242 x 2688 | iPhone 11 Pro Max |
 | `6.3/` | 6.3" | 1206 x 2622 | iPhone 17 Pro |
+| `ipad-13/` | iPad 13" | 2064 x 2752 | iPad Pro 13-inch (M5) |
 
-Five per size: the local/device split, the timezone map with a zone lit, the
-World Clock list, a ship's track, and the home screen widget.
+Ordered so the first three are the ones that matter: App Store Connect shows
+only the first three on the app installation sheet, though the full product page
+takes up to ten.
+
+1. **overview** — local vs device time, GPS, and the timezone map with the GPS
+   band in blue and a selected band in gold
+2. **ship-track** — a cruise's wake, the route ahead and its ports
+3. **widget** — the home screen widget
+4. timezone-map, 5. clocks — phone sets only
+
+## Why three iPhone sizes when Apple scales one
+
+App Store Connect scales a single iPhone set across every iPhone display size,
+so a 6.9" set alone would cover a listing that has never had screenshots. This
+one has: the 6.5" and 6.3" slots already hold images from the app's first
+release, and the fallback fills *empty* slots rather than replacing filled ones.
+Uploading only 6.9" would leave 2024 screenshots showing at the other two sizes.
+Replacing all three is deterministic; deleting the old ones and trusting the
+fallback is not.
+
+iPad is a separate family rather than one of those "display sizes" — the app
+ships with `TARGETED_DEVICE_FAMILY = "1,2"`, so it needs its own set. It is also
+the only one that shows the small location map, since iPad clears the 1024px
+three-column breakpoint that hides it on phones.
 
 ## Regenerating
 
@@ -30,7 +53,9 @@ out of every other build — verify with:
 npx vite build && grep -c "Star of the Seas" dist/assets/main-*.js   # expect 0
 ```
 
-Then per device: install, set the location, and drive the rest by hand.
+Then per device: install, set the location, and drive the rest by hand. On iPad
+grant the location prompt first — it appears on a fresh install and blocks the
+view.
 
 ```
 xcrun simctl boot <udid>
