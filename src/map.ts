@@ -11,6 +11,7 @@ import { clockKey, clockLabel, clockSubLabel, visibleClocks, type ClockEntry } f
 import { shipKey, type ShipClock } from './ships';
 import { voyageForShip, type ShipVoyage } from './shiptrack';
 import { clearShipChart, drawShipChart, fitToShip, refreshShipMarkers } from './ship-markers';
+import { voyageLine } from './voyage-line';
 
 /**
  * Cloud-styled vector maps.
@@ -182,7 +183,7 @@ function selectZone(newTzid: string | null) {
     clearShipChart();
     // Cleared, not just hidden: leaving one ship's ETA in a hidden element is a
     // trap for whoever next changes when this line is shown.
-    setShipVoyageLine(null);
+    setShipVoyageLine(null, null);
     document.dispatchEvent(new CustomEvent('temporarytimezonechanged'));
 }
 
@@ -249,7 +250,7 @@ export function selectShip(key: string): void {
     void voyage.then((resolved) => {
         // Same guard as the map's: the user may have moved on, and a stale
         // destination under a new ship's name is worse than none.
-        if (state.selectedShipKey === key) setShipVoyageLine(resolved);
+        if (state.selectedShipKey === key) setShipVoyageLine(resolved, key);
     }).catch(() => {});
 }
 
@@ -267,12 +268,12 @@ function updateShipCard(ship: ShipClock | null): void {
             dom.selectedTimezoneDetailsEl, dom.selectedTimezoneNameEl,
             dom.selectedTimezoneOffsetEl, null, 'offset'
         );
-        setShipVoyageLine(null);
+        setShipVoyageLine(null, null);
         return;
     }
     // Cleared until the voyage arrives, so a previous ship's destination cannot
     // sit under a new ship's name.
-    setShipVoyageLine(null);
+    setShipVoyageLine(null, null);
 
     // The short name, not the full one. This card is a compact overlay, and
     // "Independence of the Seas" truncates to "Independence of the S…" in it —
@@ -294,25 +295,16 @@ function updateShipCard(ship: ShipClock | null): void {
 }
 
 /**
- * The third line of the card: where she is headed, and when she is due.
+ * The third line of the card: where she is, or where she is going.
  *
- * Both come from the operator's own AIS and itinerary rather than from us, and
- * the ETA is quoted as they state it — a scheduled arrival at that port, in that
- * port's time. That is the conventional reading of an ETA and the only one it
- * can have, but it is the reason this line is small and subordinate: an
- * unqualified time is exactly what this app spends the rest of its surface
- * avoiding, so it should not compete with the clock above it.
- *
- * Hidden entirely when there is nothing to say, which is common — a third of
- * the fleet reports no usable destination.
+ * The reasoning lives in voyage-line.ts, which has to read the fleet fix and two
+ * clocks to decide between them. This end only paints the result and hides the
+ * line when there is nothing to say.
  */
-function setShipVoyageLine(voyage: ShipVoyage | null): void {
-    const parts: string[] = [];
-    if (voyage?.destination) parts.push(`→ ${voyage.destination}`);
-    if (voyage?.eta) parts.push(`ETA ${voyage.eta}`);
-
-    dom.selectedShipVoyageEl.textContent = parts.join(' · ');
-    dom.selectedShipVoyageEl.classList.toggle('hidden', parts.length === 0);
+function setShipVoyageLine(voyage: ShipVoyage | null, key: string | null): void {
+    const line = voyageLine(voyage, key);
+    dom.selectedShipVoyageEl.textContent = line;
+    dom.selectedShipVoyageEl.classList.toggle('hidden', line === '');
 }
 
 /**

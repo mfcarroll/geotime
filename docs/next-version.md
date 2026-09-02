@@ -1,12 +1,20 @@
 # Next minor version — planning
 
-Three items raised after 1.5.0 went out. Nothing here is started. Written up for
-planning rather than as a spec: the first and third are close to decided, the
-second has a design question inside it that is worth settling before any code.
+Three items raised after 1.5.0 went out.
+
+**Items 1 and 3 are done.** Item 2 remains, and is the one with a design
+question inside it. The write-ups for the finished two are kept because they
+record why each was built the way it was.
+
+| | Status |
+| --- | --- |
+| 1. Ship destination is misleading | done |
+| 2. Ship time as the reference while aboard | **open** |
+| 3. Red x on the wrong row | done |
 
 ---
 
-## 1. The ship's destination line is misleading
+## 1. The ship's destination line is misleading — DONE
 
 ### What it says now
 
@@ -60,24 +68,38 @@ otherwise:
     → Cozumel · ETA 11:15 AM
 ```
 
-### What needs deciding
+### What was decided
 
-- **N.** Ships anchor off some ports and tender in, so the threshold is not
-  "at the pier". Wants checking against a real voyage rather than guessing.
-- **The last port has no departure.** `ShipPort.depart` is documented as
-  `null` on the final call. Disembarkation day needs its own wording —
-  probably the arrival, which is the number that matters then.
-- **Which clock is `depart` in?** It is upstream's local time for that port,
-  which is not necessarily ship time and definitely not the reader's. An
-  unqualified time is the one thing this app spends its whole surface avoiding,
-  so this needs an explicit basis. **This is why item 2 should land first** — if
-  ship time becomes the stated reference while aboard, "Dep. 4:30 PM" reads
-  correctly with no extra qualifier.
+- **N is 10 km, gated behind speed.** Several Caribbean calls are tender ports
+  where the ship anchors well offshore, so "at the pier" was never the test. A
+  vessel under 0.7 knots that close to a scheduled call is at it, and the speed
+  gate is what lets the distance be loose. 0.7 rather than 0, because AIS
+  reports a tenth of a knot of drift on a moored hull and a hard zero would
+  flicker the line between fixes.
+- **The last port says `In <port>`** rather than inventing an arrival. A call
+  whose departure has already passed says the same — a ship running late or a
+  stale itinerary both get the place without a time, which is still the useful
+  half.
+- **Which clock: port time, and this did not need item 2 after all.** The card
+  had already decided, in a comment predating this whole thread, that an
+  itinerary time is "a scheduled arrival at that port, in that port's time —
+  the conventional reading and the only one it can have". Following the decision
+  already in the code beat re-opening it. What is new is that the times are now
+  **labelled** `port time` when the port's clock and the ship's disagree, and
+  left unlabelled when they match, which is the common case alongside.
 
-### Effort
+### Verified
 
-An afternoon, most of it in the threshold and the final-port case. Both want a
-real voyage to test against.
+All three branches, against live vessels rather than fixtures:
+
+| Branch | Ship | Result |
+| --- | --- | --- |
+| At sea | Star of the Seas | `→ Roatan Island · ETA 12:15 PM port time` — label fired, Roatan being UTC-6 against the ship's UTC-5 |
+| In port, departure ahead | Anthem of the Seas | `Sitka · Dep. 5:00 PM` — no label, both on Alaska time |
+| In port, final call | Serenade of the Seas | `In Vancouver` — replacing an ETA of *August 31*, two days stale |
+
+The Serenade case is the original complaint reproduced on a second ship, which
+is worth noting: the stale ETA was never specific to one voyage.
 
 ---
 
@@ -212,7 +234,7 @@ the transition are the rest, and they are where this could go wrong quietly.
 
 ---
 
-## 3. Red × appears on the wrong row
+## 3. Red × appears on the wrong row — DONE
 
 ### Reproduced
 
@@ -257,8 +279,13 @@ Minutes, plus a rebuild and a look on device.
 
 ---
 
-## Suggested order
+## What happened to the order
 
-1. **Item 3** — one line, unrelated to the others, no reason to wait.
-2. **Item 2** — it decides the clock that item 1's departure time is stated in.
-3. **Item 1** — cheaper and less ambiguous once the reference is settled.
+The plan was 3, then 2, then 1 — on the reasoning that item 2 would settle which
+clock item 1's times are stated in. Item 1 went ahead of item 2 instead, and the
+question resolved itself: this card had **already** decided, in a comment
+predating all of this, that itinerary times are port time. Following the
+decision already in the code beat re-opening it, and the basis label covers the
+case where it matters.
+
+Item 2 is unaffected by that and still stands on its own.
