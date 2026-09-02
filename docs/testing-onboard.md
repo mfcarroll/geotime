@@ -139,16 +139,10 @@ configuration, styled or not, so the softness was never something styling or
 resolution could fix. Vector draws labels client-side at device resolution.
 
 The trade is that the Maps API ignores inline `styles` when a Map ID is present,
-so the palette lives in Cloud console styling now. `src/map-styles.ts` is kept as
-the only version-controlled copy of it, and
-
-```
-node scripts/export-map-styles.mjs --out docs/map-styles
-```
-
-regenerates the JSON to paste into the console's style editor. One file per Map
-ID, named to match. Changing the TypeScript changes nothing until the cloud style
-is re-imported.
+so the palette lives in Cloud console styling now. The tracked copy is
+`docs/map-styles/google-maps-styles.json`, exported from the console — see
+`docs/map-styles/README.md`. `src/map-styles.ts` is only the fallback for the
+no-Map-ID path and has drifted from what the maps actually look like.
 
 Map IDs are public identifiers rather than secrets — they travel in every tile
 request, and the API key carries the restrictions — so they are defaulted in

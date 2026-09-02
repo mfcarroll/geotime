@@ -110,11 +110,15 @@ release. And setting `VITE_MAP_ID_LOCATION` or `VITE_MAP_ID_TIMEZONE` to an
 empty string falls the app back to the old raster path with the styles in
 `src/map-styles.ts`, which still work.
 
-## Regenerating the JSON
+## Keeping the tracked style in step
 
-```
-node scripts/export-map-styles.mjs --out docs/map-styles
-```
+`google-maps-styles.json` is exported from the console, not generated from this
+repo. Edit the style in the console, then use its **Export JSON** and overwrite
+that file, so the tracked copy stays the thing the console would actually
+re-import.
 
-`src/map-styles.ts` remains the only copy of the palette under source control,
-even though it no longer drives anything at runtime.
+There was a `scripts/export-map-styles.mjs` that went the other way, generating
+JSON from `src/map-styles.ts`. It has been removed: it emitted the legacy
+`MapTypeStyle[]` format, which is the format the console silently refuses to
+import — so following its instructions could only waste your time. Those arrays
+are now an old raster palette kept for the no-Map-ID fallback, nothing more.
