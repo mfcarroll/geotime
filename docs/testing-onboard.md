@@ -237,6 +237,18 @@ Testing "ashore" with only one of them cleared is the mistake to avoid — it
 looks like stickiness misbehaving and is simply the other signal still saying
 ship. The scripts only cover the second; the gateway is yours to set.
 
+### It serves on 5173, the dev port, deliberately
+
+The Maps browser key is restricted by HTTP referrer, port included, so a preview
+on Vite's default 4173 gets a blank map and a console full of
+`RefererNotAllowedMapError`. Reusing the dev port means the restriction you
+already have covers this too, and nothing has to be loosened for a test rig.
+
+Hence `--strictPort`: preview otherwise slides quietly to 5174, the key stops
+matching, and it presents as a broken map rather than a taken port. If it
+refuses to start, something is already on 5173 — usually `npm run dev`, which
+you do not need at the same time.
+
 ### Why the preview is HTTPS, and what to do about it
 
 `preview.https` is on for parity with the deployed site, and a self-signed cert
