@@ -307,9 +307,35 @@ resolver's own comment warns about. The shared case table that would prevent it
 still does not exist, and is the obvious next piece of work if this is ever
 touched again.
 
-**Also unverified: the widget's own aboard/ashore transition on Android.** The
-gateway harness can drive it (`echo shore > /tmp/ship-mode`), and it has been
-exercised on iOS but not here.
+### Android, checked on the emulator
+
+Run aboard through the gateway harness. `aboardShipKey` reaches SharedPreferences
+as `R/ST`, and the widget renders:
+
+```
+Vancouver −2 hrs 📍       Wednesday  10:15 PM
+Star of the Seas  Ship time 🛳       12:15 AM
+```
+
+**One real bug found and fixed.** The offset TextView was gated on `!isLocal`,
+which was the same row as the anchor for as long as those two were one flag.
+Aboard they part, and the ground row — the one a guest checks before stepping
+ashore — was the only row on screen with no offset. Now keyed on `!isAnchor`.
+
+**The anchor label shows on a ship here, where iOS suppresses it.** Deliberate:
+iOS hand-rolls a width budget that grants the label without checking the row it
+lands on, so aboard it ate the vessel's name. Android lets the layout measure,
+and the name survives beside the label. Copying the iOS workaround would make
+this side worse to match a defect.
+
+### Known, small, and left for later
+
+The phone mark disappears from the ground row aboard. Not a logic fault — the
+flag is set — but `row_device` is the last child of a `layout_weight="1"`
+container in `widget_row.xml`, so the newly-added offset text consumes the width
+and squeezes the icon to nothing. It appeared before the offset did. Fixing it
+means reordering the row or bounding the city's width, which is a design choice
+rather than a correction.
 
 ## 3. Red × appears on the wrong row — DONE
 

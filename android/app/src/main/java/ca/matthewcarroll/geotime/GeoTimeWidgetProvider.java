@@ -155,10 +155,16 @@ public class GeoTimeWidgetProvider extends AppWidgetProvider {
             row.setViewVisibility(R.id.row_ship, r.isShip ? View.VISIBLE : View.GONE);
             row.setViewVisibility(R.id.row_pin, r.isLocal ? View.VISIBLE : View.GONE);
             // The anchor's own words — "Local time" ashore, "Ship time" aboard —
-            // rather than the string baked into the layout. Never on a SHIP
-            // anchor: the mark is already on the row, and spending the width on
-            // the label costs the vessel its name. Mirrors GeoTimeWidget.swift.
-            boolean anchorLabel = r.isAnchor && showLocalLabel && !r.isShip;
+            // rather than the string baked into the layout.
+            //
+            // Shown here even on a ship anchor, where iOS suppresses it. That is
+            // a real difference and not an oversight: iOS hand-rolls a width
+            // budget that grants the label without checking the row it lands on,
+            // so aboard it ate the vessel's name. Android lets the layout do the
+            // measuring, and the name survives beside the label. Copying the iOS
+            // workaround here would make this side worse for the sake of
+            // matching a defect.
+            boolean anchorLabel = r.isAnchor && showLocalLabel;
             if (anchorLabel) row.setTextViewText(R.id.row_local_label, r.offset);
             row.setViewVisibility(R.id.row_local_label, anchorLabel ? View.VISIBLE : View.GONE);
             row.setViewVisibility(R.id.row_device, r.isDevice ? View.VISIBLE : View.GONE);
@@ -168,7 +174,12 @@ public class GeoTimeWidgetProvider extends AppWidgetProvider {
             } else {
                 row.setViewVisibility(R.id.row_day, View.GONE);
             }
-            if (!r.isLocal) {
+            // Keyed on the ANCHOR, not on the pin. Ashore they are the same row
+            // and this read as "!isLocal" for years. Aboard they are not: the
+            // ground is an ordinary distance from the ship and must say so, or
+            // the one row a guest checks before stepping ashore is the only row
+            // with no offset on it.
+            if (!r.isAnchor) {
                 row.setTextViewText(R.id.row_offset, r.offset);
                 row.setViewVisibility(R.id.row_offset, View.VISIBLE);
             } else {
