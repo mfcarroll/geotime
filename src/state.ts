@@ -2,12 +2,21 @@
 
 import { syncWidgetTimezones } from './widget';
 import { newShipClock, shipKey, type ShipClock, type ShipRef } from './ships';
+import type { DeviceFix } from './ship-position';
 
 export interface AppState {
     timeOffset: number;
     localTimezone: string | null;
     deviceTimezone: string | null;   // OS timezone reported by native (may differ from localTimezone)
     gpsTzid: string | null;
+    /**
+     * The last device fix, kept for position-based ship detection.
+     *
+     * Not persisted: a fix from a previous session says where the device was,
+     * and the one question this answers is where it is now. Stale here would
+     * mean claiming to be aboard a ship left yesterday.
+     */
+    deviceFix: DeviceFix | null;
     /**
      * Nearest town to the GPS fix inside the GPS zone; null when none is close.
      * Persisted so a relaunch can hand the widget the last known place instead
@@ -166,6 +175,7 @@ export const state: AppState = {
     localTimezone: null,
     deviceTimezone: null,
     gpsTzid: null,
+    deviceFix: null,
     localPlaceName: localStorage.getItem('localPlaceName') || null,
     addedTimezones: stored.map((z) => z.tz),
     shipClocks: loadStoredShips(),

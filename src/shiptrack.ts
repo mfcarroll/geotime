@@ -239,6 +239,43 @@ export function initShipTrack(): void {
  * is still where the ship was, and the caller decides whether that is too old to
  * draw.
  */
+/**
+ * One vessel near a point, of any cruise line — including the ones we cannot
+ * serve a clock for, which is the entire point of asking.
+ */
+export interface NearbyVessel {
+  imo: string;
+  name: string | null;
+  line: string | null;
+  lat: number;
+  lon: number;
+  /** Knots. 0 means alongside or at anchor. */
+  sog: number | null;
+  /** Unix SECONDS of the AIS fix, as upstream reports it. */
+  tst: number | null;
+}
+
+/**
+ * Every vessel within reach of a position.
+ *
+ * Not cached client-side on purpose. The Worker snaps the box to a grid and
+ * caches per cell, so every guest aboard one ship shares a single upstream
+ * response — caching again here would only add a second staleness to reason
+ * about, and this is asked at most once a minute.
+ *
+ * Null on any failure, which the caller must read as "unknown", never as
+ * "no vessels nearby".
+ */
+export async function nearbyVessels(lat: number, lon: number): Promise<NearbyVessel[] | null> {
+  if (!shipTrackAvailable()) return null;
+  const path = `/nearby?lat=${lat.toFixed(4)}&lon=${lon.toFixed(4)}`;
+  const payload = await get<{ vessels?: NearbyVessel[] }>(path);
+  if (!payload || !Array.isArray(payload.vessels)) return null;
+  return payload.vessels.filter(
+    (v) => typeof v?.imo === 'string' && Number.isFinite(v?.lat) && Number.isFinite(v?.lon),
+  );
+}
+
 export function fleetFixes(force = false): Promise<Map<string, ShipFix>> {
   const fresh = fleet && Date.now() - fleet.at < FLEET_MAX_AGE_MS;
   if (fresh && !force) return Promise.resolve(fleet!.value);

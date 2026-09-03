@@ -25,6 +25,8 @@
 import { Capacitor } from '@capacitor/core';
 import { Network } from '@capacitor/network';
 import { addShipClock, patchShipClock, persistShipClocks, setAboardShip, state } from './state';
+import { isUsableFix, shouldAsk, verdictFor, type DeviceFix } from './ship-position';
+import { nearbyVessels } from './shiptrack';
 import {
   loadShipRoster,
   refreshShipRoster,
@@ -294,6 +296,34 @@ function originIsKnownStamped(): boolean {
   }
 }
 
+/**
+ * The verdict as the rest of ship mode already understands it.
+ *
+ * Deliberately shaped as an Environment so it can be handed to the same
+ * noteEnvironment() the gateway marker goes through — which auto-adds the ship,
+ * pins the voyage, resolves the offset and handles stepping ashore. None of
+ * that wants reimplementing, and a second path through it would be a second
+ * place for the two to disagree.
+ *
+ * `null` means unknown, matching that function's contract exactly.
+ */
+export async function sniffPositionEnvironment(fix: DeviceFix | null): Promise<Environment | null> {
+  if (!isUsableFix(fix)) return null;
+  if (!shouldAsk(fix)) return null;
+
+  const vessels = await nearbyVessels(fix.lat, fix.lon);
+  if (!vessels) return null;
+
+  const roster = await loadShipRoster();
+  const verdict = verdictFor(fix, vessels, roster, Date.now());
+
+  if (verdict.kind === 'unknown') return null;
+  if (verdict.kind === 'ashore') {
+    return { marker: 'shore', shipCode: null, shipTime: null };
+  }
+  return { marker: 'ship', shipCode: verdict.ship.code, shipTime: null };
+}
+
 async function sniffBrowserEnvironment(): Promise<void> {
   const env = await sniffSameOriginEnvironment(originIsKnownStamped());
   // A ship marker from our own origin proves the gateway stamps this host, which
@@ -302,6 +332,19 @@ async function sniffBrowserEnvironment(): Promise<void> {
     try { localStorage.setItem(ORIGIN_STAMPED_KEY, '1'); } catch { /* private mode */ }
   }
   await noteEnvironment(env);
+
+  // The header route was run aboard and came back empty — the ship's gateway
+  // stamps RCCL's hosts and not ours, so on the web that sniff will keep
+  // returning nothing forever. It is still asked first because it is free and
+  // certain when it does answer; position is the fallback, and the only thing
+  // that actually works in a browser today.
+  //
+  // Order matters only in that a real marker should never be overridden by an
+  // inference, and it cannot be: noteEnvironment ignores a null, and position
+  // returns null whenever it is not sure.
+  if (env?.marker == null) {
+    await noteEnvironment(await sniffPositionEnvironment(state.deviceFix));
+  }
 }
 
 export function startShipTimeWatch(): void {
@@ -318,6 +361,10 @@ export function startShipTimeWatch(): void {
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible') void sniffBrowserEnvironment();
     });
+    // A first fix usually lands well after startup, and until it does the
+    // position route has nothing to work with. Without this a guest would see
+    // ship mode appear only on their next tab switch.
+    document.addEventListener('devicefixchanged', () => { void sniffBrowserEnvironment(); });
   }
 
   if (Capacitor.isNativePlatform()) {

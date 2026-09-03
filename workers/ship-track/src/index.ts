@@ -66,6 +66,51 @@ const UPSTREAM_HEADERS: Record<string, string> = {
 const FLEET_QUERY =
   '?minLat=-80&maxLat=80&minLon=-180&maxLon=180&zoom=2&filter=2,10';
 
+/**
+ * Every cruise line the endpoint will admit, for the nearby query.
+ *
+ * `filter` is the same cruise-line index FLEET_QUERY uses, so this is the same
+ * request with the blinkers off: 45 vessels becomes ~278 across 35 lines. The
+ * doc warns that an over-wide filter returns a raw SQL exception; 25 was probed
+ * against the live endpoint and is inside the line.
+ *
+ * The clock list must NOT use this — it wants our fleet and nothing else. The
+ * only caller is detection, which cannot tell whether a hull nearby is ours
+ * without seeing the ones that are not.
+ */
+const ALL_LINES = Array.from({ length: 25 }, (_, i) => i + 1).join(',');
+
+/**
+ * The nearby box is snapped to a grid so that every guest on a given ship asks
+ * for the SAME url, and therefore shares one cached upstream response.
+ *
+ * Without snapping, each distinct GPS fix would be its own cache key and the
+ * cache would never hit — three thousand guests would become three thousand
+ * upstream requests, which is both rude and the fastest way to be blocked.
+ *
+ * A half-degree cell puts the true position within 0.25 deg of the centre, and
+ * a 0.75 deg box around that centre therefore covers the guest by at least
+ * 0.5 deg (~55 km) in every direction. Detection accepts at 10 km, so the box
+ * has room to spare.
+ */
+const GRID = 0.5;
+const BOX = 0.75;
+
+function snap(value: number): number {
+  return Math.round(value / GRID) * GRID;
+}
+
+/**
+ * Longitude degrees shrink towards the poles, so a fixed box would be a sliver
+ * at Svalbard — where cruise ships do in fact go. Widened by 1/cos(lat) and
+ * capped, because near the pole the box wraps the whole circle anyway.
+ */
+function lonBox(lat: number): number {
+  const shrink = Math.cos((lat * Math.PI) / 180);
+  if (shrink < 0.05) return 180;
+  return Math.min(180, BOX / shrink);
+}
+
 /** How long each shape may be served from cache. */
 const TTL = {
   /** A position is the one thing here that is genuinely live. */
@@ -256,6 +301,38 @@ function coord(lon: unknown, lat: unknown): [number, number] | null {
 }
 
 /** The live-position feed, trimmed to what the map draws. */
+/**
+ * Vessels near a point, of every line — the raw material for deciding which
+ * hull a guest is standing on.
+ *
+ * Deliberately thinner than shapeFleet: no route, no destination, no heading.
+ * Detection needs a position, a speed, an age and an identity, and sending more
+ * would be sending a list of everyone's whereabouts to answer a question about
+ * one person's own.
+ */
+function shapeNearby(markers: unknown): unknown {
+  if (!Array.isArray(markers)) return { vessels: [] };
+
+  const vessels = markers.flatMap((marker: any) => {
+    const imo = String(marker?.imo ?? '');
+    const at = coord(marker?.lon, marker?.lat);
+    if (!validImo(imo) || !at) return [];
+    return [{
+      imo,
+      // `ship_name` is present on every record and empty on every record; the
+      // name lives in `hover`. Same quirk shapeFleet handles.
+      name: typeof marker?.hover === 'string' ? marker.hover : null,
+      line: typeof marker?.ship_line_title === 'string' ? marker.ship_line_title : null,
+      lon: at[0],
+      lat: at[1],
+      sog: Number.isFinite(Number(marker?.sog)) ? Number(marker.sog) : null,
+      tst: Number.isFinite(Number(marker?.tst)) ? Number(marker.tst) : null,
+    }];
+  });
+
+  return { vessels };
+}
+
 function shapeFleet(markers: unknown): unknown {
   if (!Array.isArray(markers)) return { ships: [] };
 
@@ -502,6 +579,38 @@ export default {
         cacheKey('/fleet'),
         `${ORIGIN}/map/ships.json${FLEET_QUERY}`,
         shapeFleet,
+        TTL.fleet
+      );
+      return new Response(body, {
+        status,
+        headers: {
+          ...cors,
+          'Content-Type': 'application/json; charset=utf-8',
+          'Cache-Control': status === 200 ? `public, max-age=${TTL.fleet}` : 'no-store',
+        },
+      });
+    }
+
+    // Every vessel near a point, of any line. Detection only — see ALL_LINES.
+    if (url.pathname === '/nearby') {
+      const lat = Number(url.searchParams.get('lat'));
+      const lon = Number(url.searchParams.get('lon'));
+      if (!Number.isFinite(lat) || !Number.isFinite(lon)
+          || Math.abs(lat) > 90 || Math.abs(lon) > 180) {
+        return json({ error: 'bad_position' }, 400, cors);
+      }
+
+      const cLat = snap(lat);
+      const cLon = snap(lon);
+      const dLon = lonBox(cLat);
+      const query = `?minLat=${(cLat - BOX).toFixed(2)}&maxLat=${(cLat + BOX).toFixed(2)}`
+        + `&minLon=${(cLon - dLon).toFixed(2)}&maxLon=${(cLon + dLon).toFixed(2)}`
+        + `&zoom=10&filter=${ALL_LINES}`;
+
+      const { body, status } = await fetchShaped(
+        cacheKey(`/nearby/${cLat.toFixed(2)},${cLon.toFixed(2)}`),
+        `${ORIGIN}/map/ships.json${query}`,
+        shapeNearby,
         TTL.fleet
       );
       return new Response(body, {

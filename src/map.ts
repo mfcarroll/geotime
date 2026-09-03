@@ -746,7 +746,14 @@ export async function onLocationSuccess(pos: GeolocationPosition) {
   // kind of fix this is, and the user gets to distrust it accordingly.
   // Accuracy alone does not separate them: the tell is the sensor-only fields,
   // which a network fix cannot supply.
-  if (accuracy <= 15 && (altitude !== null || speed !== null || heading !== null)) {
+  // A network fix can land on the other side of the world from the hull it was
+  // taken aboard, so ship detection must never see one. Same test, one answer,
+  // used for both the icon and that guard — see isUsableFix.
+  const sensorFix = altitude !== null || speed !== null || heading !== null;
+  state.deviceFix = { lat: latitude, lon: longitude, accuracy, sensor: sensorFix };
+  document.dispatchEvent(new CustomEvent('devicefixchanged'));
+
+  if (accuracy <= 15 && sensorFix) {
     dom.locationTitleEl.innerHTML = `<i class="fas fa-satellite fa-fw mr-2 text-blue-400"></i>GPS Location`;
   } else if (accuracy <= 15) {
     dom.locationTitleEl.innerHTML = `<i class="fas fa-location-dot fa-fw mr-2 text-blue-400"></i>Location`;
