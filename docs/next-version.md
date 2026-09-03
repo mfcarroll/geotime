@@ -1,16 +1,19 @@
 # Next minor version — planning
 
-Three items raised after 1.5.0 went out.
+Three items raised after 1.5.0 went out, plus a fourth that arrived by a
+different route — item 4 is the write-up of a question we could only answer
+from a ship, and we now have the answer.
 
-**Items 1 and 3 are done.** Item 2 remains, and is the one with a design
-question inside it. The write-ups for the finished two are kept because they
-record why each was built the way it was.
+**Items 1, 2 and 3 are done.** Item 4 is not scheduled: it is a refinement of
+something that already works well enough without it, recorded so the
+measurements do not have to be taken twice.
 
 | | Status |
 | --- | --- |
 | 1. Ship destination is misleading | done |
 | 2. Ship time as the reference while aboard | done |
 | 3. Red x on the wrong row | done |
+| 4. Browser ship detection | answered — not scheduled |
 
 ---
 
@@ -392,3 +395,147 @@ decision already in the code beat re-opening it, and the basis label covers the
 case where it matters.
 
 Item 2 is unaffected by that and still stands on its own.
+
+---
+
+## 4. Browser ship detection — what the probe settled
+
+Native detects the ship from `environment-marker` / `environment-ship-code` on
+RCCL's own responses, which works because `CapacitorHttp` is not bound by CORS.
+The browser cannot do that, so `?shipprobe` was built to ask the one question
+shore cannot answer: **aboard, does the ship's gateway stamp responses from OUR
+origin, or only from api.rccl.com?**
+
+It was run aboard Star of the Seas on 2026-09-03. The answer is only.
+
+### What the probe returned
+
+All three attempts reported `marker: (none)`. More useful than the negative is
+what the 24- and 27-header dumps contained: nothing injected. `via: 1.1 varnish`
+is GitHub's own Fastly hop, `cf-ray: …-MIA` and `x-served-by: cache-mia…` are
+simply the Miami edge that served her — which is where a Caribbean satellite
+link makes landfall, not evidence of a ship.
+
+The ship's network is a transparent path. The `environment-*` headers come from
+RCCL's infrastructure, keyed on traffic arriving at *them*. **No host we control
+will ever carry them**, so this is not a matter of finding the right host or the
+right request — the route is closed.
+
+The Worker returning only two headers is the same finding a third time, not a
+bug: `Access-Control-Expose-Headers` only reveals headers that exist, and both
+survivors (`cache-control`, `content-type`) are CORS-safelisted anyway. The
+exposure list deployed for the probe was a no-op.
+
+### What the browser has instead, and why no new control
+
+`platformSupportsShipTime()` is true whenever `PROXY_BASE` is set, which it
+always is — so **the ship picker already works on the web**. A passenger adds
+her ship and reads its clock today, with no detection at all.
+
+An "I am aboard this ship" toggle was considered and rejected: adding the ship
+*is* the manual control, and a second way to say the same thing is worse than
+none.
+
+The one thing detection buys that adding does not is the **anchor** — with
+`aboardShipKey` set, everything else is expressed relative to ship time (item
+2). `setAboardShip` is only ever called from the detection paths in
+`shiptime.ts`, so on the web the anchor stays on the device zone. If that gap is
+ever worth closing, the natural gesture is *"anchor to this row"* on a clock
+already in the list, which generalises past ships and needs none of what
+follows.
+
+### Position matching, if the anchor is ever wanted on the web
+
+The fleet feed already carries `lat`, `lon`, `sog` and `tst` per ship, from our
+own Worker, in the JSON body — no headers, no CORS. The browser already has GPS.
+So the ingredients are present.
+
+The trap is treating a position report as a position. `tst` says when the fix
+was *reported*, and ships out of terrestrial AIS range are only seen on
+satellite passes:
+
+```
+median fix age 6 min    p90 52 min    max 217 min
+worst case: Allure Of The Seas, 217 min at 17 kn -> a 114 km circle
+```
+
+**But fix age is not what decides matchability — isolation is.** Measured
+against our own fleet, every one of 27 under-way ships was unambiguous despite
+those circles, because the nearest fleetmate was 260 km away. Meanwhile four
+ships alongside had perfect fixes and were hopeless: Oasis and Adventure 0.1 km
+apart, Jewel and Wonder 0.2 km. An Oasis-class hull is 360 m, so walking aft
+moves a phone further than the gap between two ships, and AIS reports the
+antenna, not the vessel.
+
+Accuracy is best exactly where separation is worst.
+
+### The other-vessels problem is solvable, and it matters
+
+Our fleet is 45 ships; the sea has more. That exposure looked unmeasurable until
+the `filter` parameter was tested.
+
+**`filter` is a cruise-line index, not a ship-type filter.** The API doc says
+type; the Worker comment says line; the Worker is right. Widening it from
+`2,10` to `1..25` returns **278 vessels across 35 lines** — Carnival, MSC,
+Norwegian, Princess, Holland America, Disney, essentially the whole industry —
+from the same endpoint, with the same `UPSTREAM_HEADERS`, in one request. The
+SQL exception the doc warns about was not reached at 25.
+
+It immediately caught two false positives invisible to the fleet-only view:
+
+```
+UNDER WAY   Anthem of the Seas    1.4 km from ms Westerdam           (Holland America)
+            Liberty Of The Seas   3.7 km from Oceania Nautica        (Oceania)
+```
+
+Without this we would have shipped a rule that tells someone on the Westerdam
+they are on Anthem. Two of 26 is a 7% error rate on the case we most wanted to
+automate.
+
+In port it confirms the abstain rule and shows the problem is far larger than
+the fleet-only count suggested — **11 of 18 crowded, not 4**, including Star of
+the Seas at 0.6 km from MSC Seascape.
+
+### The rule that follows
+
+Two quantities were being conflated. Keep them apart:
+
+| | |
+| --- | --- |
+| **Ambiguity** between candidates | compare uncertainty circles |
+| **Acceptance** of a match | a *tight* radius, ~10 km |
+
+A stale fix must not widen acceptance. Allure's 217-minute-old fix means "we do
+not know where Allure is", not "you are within 114 km of Allure, welcome
+aboard". Stale means abstain.
+
+Against one coherent snapshot of all 278 vessels:
+
+```
+UNDER WAY   26 ships   matchable 19   abstain  2 crowded /  6 stale
+ALONGSIDE   18 ships   matchable  7   abstain 11 crowded /  0 stale
+OVERALL     44 ships   matchable 26   = 59%
+```
+
+The other 41% abstain rather than guess, and abstaining costs nothing because
+adding the ship manually still works. Auto-detect at sea, abstain in port — the
+opposite of what the fix-freshness numbers first suggested, and the right way
+round: at sea is where "what time is it on this ship?" is genuinely hard, and in
+port she can see the terminal.
+
+### Cost, and two design notes
+
+Near zero. Same endpoint, same headers, same Worker, one parameter widened.
+
+- **Do not widen the existing `/fleet` query.** It feeds the clock list and
+  would carry 278 vessels instead of 45 for no benefit there. Detection wants a
+  *small bbox around the user's GPS* — only vessels within ~10 km matter — which
+  is far smaller than either.
+- **Web only.** Native has the header route and must never pay for this.
+
+### The vessel name field
+
+`ship_name` is present on all 278 records and **empty on all 278**. The name is
+in `hover` ("Carnival Legend"), which is clean text — no markup, none empty.
+`imo` and `mmsi` are both populated on every record; `imo` is the identity key,
+and is what the fleet feed already uses.
