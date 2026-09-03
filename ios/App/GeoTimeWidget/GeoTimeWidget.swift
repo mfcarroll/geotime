@@ -34,7 +34,8 @@ private struct RowMetrics {
     let inlineOffset: Bool     // offset inline after the city (compact medium/large)
     let useFullDay: Bool       // full weekday name ("Tuesday") vs short ("Tue")
     let useFullShipName: Bool  // "Star of the Seas" vs "Star"
-    let showLocalLabel: Bool   // "Local time" tag on the local row (single-line only)
+    let showLocalLabel: Bool   // anchor label ("Local time" / "Ship time") on a
+                               // single-line row, when the width allows
     let showDeviceLabel: Bool  // "· Device time" tag on the device row (single-line only)
     let dayUnderTime: Bool     // small two-line: day label under the time, not beside it
     let dayTimeGap: CGFloat    // extra space between day label and time
@@ -165,15 +166,29 @@ struct GeoTimeWidgetView: View {
             var scale: CGFloat = 1
             for r in rows {
                 var reserved: CGFloat = 0
-                // The marker (pin/phone/ship) sits on line 1 in every layout, and
-                // a merged local+ship row carries two of them.
-                if r.isLocal || r.isDevice || r.isShip { reserved += pinSize + hGap }
-                if r.isShip && r.isLocal { reserved += pinSize + hGap * 0.5 }
+                // The markers sit on line 1 in every layout, and a row can carry
+                // up to three of them — a ship in port keeps the pin, and a phone
+                // agreeing with either is marked there rather than given a row.
+                let marks = (r.isShip ? 1 : 0) + (r.isLocal ? 1 : 0) + (r.isDevice ? 1 : 0)
+                if marks > 0 { reserved += pinSize + hGap }
+                if marks > 1 { reserved += CGFloat(marks - 1) * (pinSize + hGap * 0.5) }
                 // Offset + optional labels are on line 1 only in single-line rows;
                 // in rich rows they live on line 2 (free of the city's width).
                 if !rich {
-                    if r.isLocal {
-                        if localLabel { reserved += width("Local time", detailFont) + hGap }
+                    if r.isAnchor {
+                        // The anchor's label — "Local time" ashore, "Ship time"
+                        // aboard — is a garnish like every other, and the width
+                        // budget may refuse it.
+                        //
+                        // It was briefly made mandatory aboard, on the theory that
+                        // without it the offsets below lose their reference. On a
+                        // real widget that theory cost the vessel its NAME: the
+                        // row rendered "St.. Ship time" because the label was
+                        // spent before the name. A guest aboard knows which ship
+                        // they are on; they cannot recover a name the layout ate.
+                        // The rule above already said as much — names before
+                        // labels — and this is simply obeying it.
+                        if localLabel { reserved += width(r.relativeText, detailFont) + hGap }
                     } else if inlineOffset {
                         reserved += width(r.relativeText, detailFont) + hGap
                         if r.isDevice && deviceLabel { reserved += width("· Device time", detailFont) + hGap }
@@ -328,8 +343,13 @@ private struct RowView: View {
                 marker(for: row)
             } else {
                 // Single-line: city – offset/label(s) – marker (at the end).
-                if row.isLocal {
-                    if metrics.showLocalLabel { detailText("Local time") }
+                //
+                // The anchor prints its own label rather than a constant, because
+                // what it says is now a fact about the world: "Local time" ashore,
+                // "Ship time" aboard. Optional either way — a name outranks a
+                // label, and the ship mark still says which row is which.
+                if row.isAnchor {
+                    if metrics.showLocalLabel { detailText(row.relativeText) }
                 } else if metrics.inlineOffset {
                     detailText(row.relativeText)
                     if row.isDevice && metrics.showDeviceLabel { detailText("· Device time") }
@@ -372,12 +392,17 @@ private struct RowView: View {
     // the pin there was tempting — "implied by it being the base row" — but the
     // two answer different questions, and a row that means "this vessel is your
     // local time" should say both things rather than leave one inferred.
+    /// Every mark the row has earned, in a fixed order: ship, then pin, then
+    /// phone. A row can carry more than one — aboard in port the ship keeps the
+    /// pin, and a phone agreeing with either marks that row instead of taking one
+    /// of its own — so this composes rather than choosing, which the old cascade
+    /// of else-ifs could not do.
     @ViewBuilder private func marker(for row: WidgetRow) -> some View {
-        if row.isShip && row.isLocal {
-            HStack(spacing: metrics.hGap * 0.5) { shipMark; pin }
-        } else if row.isShip { shipMark }
-        else if row.isLocal { pin }
-        else if row.isDevice { phone }
+        HStack(spacing: metrics.hGap * 0.5) {
+            if row.isShip { shipMark }
+            if row.isLocal { pin }
+            if row.isDevice { phone }
+        }
     }
 
     @ViewBuilder private var pin: some View {

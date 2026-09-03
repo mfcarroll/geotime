@@ -142,24 +142,30 @@ It also makes the GPS row earn its place. `Havana ↗ +1 hr` says how far the
 shore you are about to step onto is from the ship's clock, which is exactly the
 number a passenger wants before going ashore.
 
-### The condition: the anchor label must never be trimmed
+### The anchor label is a garnish, not a guarantee
 
-This is the one hazard, and it is not hypothetical. The widget already drops
-labels when width is short:
+This was written up as the one hazard of the whole change: that the widget's
+width budget would drop the label naming what everything is measured from, and
+every offset would silently change meaning. So the label was made mandatory
+aboard.
 
-```swift
-// ios/App/GeoTimeWidget/GeoTimeWidget.swift
-let showLocalLabel: Bool   // "Local time" tag on the local row (single-line only)
+On a real widget that was worse than the problem. The row rendered:
+
+```
+St.. Ship time 🛳   11:23 PM
 ```
 
-If that same trimming ever reaches the ship-time anchor, every offset in the
-list silently changes meaning with nothing on screen to say so. That is
-precisely the failure this app exists to prevent, and it would be invisible in
-testing on a wide device.
+The vessel lost its **name** so the label could be kept. And the file already
+said not to do that:
 
-**The "Ship time" label must be exempt from the width budget, ahead of every
-other label — full weekday names, "Device time", and "Local time" included.** If
-it will not fit, something else gives way.
+> Names are decided BEFORE the optional labels, because a name is content and a
+> label is garnish: it would be wrong to keep "Tuesday" at the cost of
+> abbreviating a vessel.
+
+A guest aboard knows which ship they are on. They cannot recover a name the
+layout has eaten. So the anchor label is optional like every other, and the ship
+mark carries the meaning when the words will not fit — which is exactly how
+"Local time" has always behaved ashore.
 
 ### Where the baseline actually lives
 
