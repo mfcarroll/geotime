@@ -134,6 +134,12 @@ function workerCsp() {
         env.VITE_RCCL_PROXY ?? 'https://geotime-rccl-proxy.matthew-carroll.workers.dev',
         env.VITE_UTC_TIME_URL ?? 'https://geotime-utc-time.matthew-carroll.workers.dev',
         env.VITE_SHIP_TRACK ?? 'https://geotime-ship-track.matthew-carroll.workers.dev',
+        // The onboard stand-in, in a shiptest build only. A browser enforces the
+        // CSP where CapacitorHttp does not, so without this the gateway is
+        // reachable on a device and blocked in the one place it is quickest to
+        // test. Absent from every ordinary build — the variable is only ever set
+        // by --mode shiptest.
+        env.VITE_SHIP_GATEWAY ?? '',
       ]
         .filter(Boolean)
         .map((value) => {

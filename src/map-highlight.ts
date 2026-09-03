@@ -18,6 +18,11 @@ export interface ZoneStyle {
 export const FILLS = {
   base:            { fillColor: '#000000', fillOpacity: 0,    zIndex: 1 },
   gpsBand:         { fillColor: '#3F80FF', fillOpacity: 0.35, zIndex: 2 },
+  // The clock you are living by, when that is a ship. Green rather than gold
+  // because gold means "you picked this" — the ship is a fact about where you
+  // are standing, in the same family as the blue band beside it, and the two
+  // carry the same weight for that reason.
+  shipBand:        { fillColor: '#34C759', fillOpacity: 0.32, zIndex: 4 },
   hoverBand:       { fillColor: '#FFFFFF', fillOpacity: 0.18, zIndex: 3 },
   gpsSegment:      { fillColor: '#3F80FF', fillOpacity: 0.75, zIndex: 5 },
   selectedBand:    { fillColor: '#FFD700', fillOpacity: 0.3,  zIndex: 6 },
@@ -57,12 +62,15 @@ export interface ZoneStyleInput {
   gpsTzid: string | null;
   /** Zone under the pointer, or null. */
   hoveredTzid: string | null;
+  /** The ship's offset when a marker confirms we are aboard; null ashore. */
+  anchorShipOffset: number | null;
   /** Current UTC offset of an arbitrary zone id. */
   offsetOf: (tzid: string) => number;
 }
 
 export function resolveZoneStyle(input: ZoneStyleInput): ZoneStyle {
-  const { tzid, offset, selectedTzid, selectedOffset, gpsTzid, hoveredTzid, offsetOf } = input;
+  const { tzid, offset, selectedTzid, selectedOffset, gpsTzid, hoveredTzid, offsetOf,
+          anchorShipOffset } = input;
 
   const sameOffsetAs = (other: string | null) =>
     other !== null && offsetOf(other) === offset;
@@ -77,6 +85,11 @@ export function resolveZoneStyle(input: ZoneStyleInput): ZoneStyle {
   // region: it is still the band you are in, so it stays blue and only the
   // chosen zone goes gold. Gold spreads across a band only when that band is a
   // different time from yours.
+  // Aboard, the ship's band is painted BEFORE the GPS band, so when the two
+  // coincide — a ship keeping the port's time — the region reads green and
+  // only the zone you are standing in stays a bright blue segment. Green for
+  // the clock, blue for the ground: the same split the widget makes.
+  else if (anchorShipOffset !== null && anchorShipOffset === offset) fill = FILLS.shipBand;
   else if (sameOffsetAs(gpsTzid)) fill = FILLS.gpsBand;
   else if (selectedOffset === offset) fill = FILLS.selectedBand;
   else if (sameOffsetAs(hoveredTzid)) fill = FILLS.hoverBand; // covers the hovered zone itself

@@ -1,13 +1,13 @@
 // src/map.ts
 
 import * as dom from './dom';
-import { state, persistTimezones, setLocalPlaceName, syncWidget } from './state';
+import { aboardShip, state, persistTimezones, setLocalPlaceName, syncWidget } from './state';
 import { timezoneForCoordinates, findTimezoneFromGeoJSON, startClocks, relativeTextForZone, relativeTextForShip, getFormattedTime, getUtcOffset, getDisplayTimezoneName, getZoneLabel, updateAllClocks, formatOffsetDiff } from './time';
 import { locationMapStyles, worldTimezoneMapStyles } from './map-styles';
 import { distance, formatAccuracy, fold } from './utils';
 import { loadCityIndex, nearestPlace } from './cities';
 import { resolveZoneStyle } from './map-highlight';
-import { clockKey, clockLabel, clockSubLabel, visibleClocks, type ClockEntry } from './clocks';
+import { clockKey, clockLabel, clockSubLabel, formatFixedOffsetTime, visibleClocks, type ClockEntry } from './clocks';
 import { shipKey, type ShipClock } from './ships';
 import { voyageForShip, type ShipVoyage } from './shiptrack';
 import { clearShipChart, drawShipChart, fitToShip, refreshShipMarkers } from './ship-markers';
@@ -114,6 +114,24 @@ function updateCard(
       valueEl.textContent = relativeTextForZone(tzid);
     }
 
+    // Blue when the zone selected is the one you are standing in, gold
+
+
+    // otherwise. The colour answers 'what is this' rather than 'how did it
+
+
+    // get here', so it always agrees with the marks above the map.
+
+
+    const isGround = tzid === state.gpsTzid;
+
+
+    cardEl.classList.toggle('border-blue-500', isGround);
+
+
+    cardEl.classList.toggle('border-yellow-500', !isGround);
+
+
     cardEl.classList.remove('hidden');
   } else {
     cardEl.classList.add('hidden');
@@ -122,22 +140,63 @@ function updateCard(
   }
 }
 
+/**
+ * The left slot above the map: what you are living by.
+ *
+ * Ashore that is the ground, in blue, matching the GPS band under it. Aboard it
+ * becomes the ship, in green, matching its own band — because the slot has
+ * always meant "the clock everything else is measured from", and aboard that is
+ * no longer the place you are standing. The ground does not disappear: it
+ * becomes an ordinary zone on the map and an ordinary row in the list, with an
+ * offset like any other, which is what the widget already does.
+ */
+let lastAnchorTzid: string | null = null;
+
+/**
+ * Repaint the anchor slot without needing to be told the zone again.
+ *
+ * Boarding moves the anchor, and the event that says so carries no timezone —
+ * nor should it. Requiring one meant the slot silently kept its old colour
+ * wherever the GPS zone had never resolved, which is every browser that has not
+ * been granted location.
+ */
+export function refreshAnchorChip(): void {
+    if (lastAnchorTzid) updateUserTimezoneDetails(lastAnchorTzid);
+}
+
 export function updateUserTimezoneDetails(tzid: string) {
-  // The map card names the zone; the Local Time card names the town you're in.
-  dom.userTimezoneNameEl.textContent = getDisplayTimezoneName(tzid);
-  dom.userTimezoneDetailsEl.classList.remove('hidden');
+    lastAnchorTzid = tzid;
+    if (userTimeInterval) window.clearInterval(userTimeInterval);
 
-  if (userTimeInterval) window.clearInterval(userTimeInterval);
+    const ship = aboardShip();
+    const aboard = ship !== null && ship.offsetHours !== null;
 
-  const updateTime = () => {
-    dom.userTimezoneTimeEl.textContent = getFormattedTime(tzid, {
-      hour: 'numeric',
-      minute: '2-digit',
-    });
-  };
-  
-  updateTime();
-  userTimeInterval = window.setInterval(updateTime, 1000);
+    dom.userTimezoneDetailsEl.classList.toggle('border-green-500', aboard);
+    dom.userTimezoneDetailsEl.classList.toggle('border-blue-500', !aboard);
+    dom.userTimezoneDetailsEl.classList.remove('hidden');
+
+    if (aboard) {
+        // The short name: this slot is narrow and shares a row with two others.
+        dom.userTimezoneNameEl.textContent = ship!.short;
+        const tick = () => {
+            dom.userTimezoneTimeEl.textContent = formatFixedOffsetTime(
+                ship!.offsetHours as number, { hour: 'numeric', minute: '2-digit' });
+        };
+        tick();
+        userTimeInterval = window.setInterval(tick, 1000);
+        return;
+    }
+
+    // The map card names the zone; the Local Time card names the town you're in.
+    dom.userTimezoneNameEl.textContent = getDisplayTimezoneName(tzid);
+    const updateTime = () => {
+        dom.userTimezoneTimeEl.textContent = getFormattedTime(tzid, {
+            hour: 'numeric',
+            minute: '2-digit',
+        });
+    };
+    updateTime();
+    userTimeInterval = window.setInterval(updateTime, 1000);
 }
 
 /**
@@ -574,6 +633,12 @@ function styleFor(feature: google.maps.Data.Feature): google.maps.Data.StyleOpti
     gpsTzid: state.gpsTzid,
     hoveredTzid: state.hoveredTzid,
     offsetOf: getUtcOffset,
+
+    // Green paints the clock we are keeping, which is only a ship's when a
+
+    // marker says so. aboardShip() is null every other moment.
+
+    anchorShipOffset: aboardShip()?.offsetHours ?? null,
   });
 }
 

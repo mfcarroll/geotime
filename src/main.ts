@@ -5,7 +5,7 @@ import './style.css';
 import { Loader } from '@googlemaps/js-api-loader';
 import * as dom from './dom';
 import { state, persistTimezones, migrateStoredTimezones, setZoneLabel, syncWidget, addShipClock } from './state';
-import { initMaps, onLocationError, onLocationSuccess, selectTimezone, selectShip, renderWorldClocks, addUniqueTimezoneToList, updateUserTimezoneDetails, showLocationUnavailable, loadTimezoneGeoJson } from './map';
+import { refreshAnchorChip, refreshMapStyles, initMaps, onLocationError, onLocationSuccess, selectTimezone, selectShip, renderWorldClocks, addUniqueTimezoneToList, updateUserTimezoneDetails, showLocationUnavailable, loadTimezoneGeoJson } from './map';
 import { updateAllClocks, syncClock, getDisplayTimezoneName, startClocks } from './time';
 import { Capacitor } from '@capacitor/core';
 import { getDeviceTimezone, onDeviceTimezoneChanged } from './widget';
@@ -254,17 +254,19 @@ async function startApp() {
   document.addEventListener('aboardshipchanged', () => {
     renderWorldClocks();
     updateAllClocks();
+    // Boarding moves the anchor, and the anchor is what the left slot names and
+    // what the green band paints. Neither follows from the clock list alone.
+    refreshAnchorChip();
+    refreshMapStyles();
   });
 
-  document.addEventListener('gpstimezoneSelectionChanged', (e: Event) => {
-      const { selected } = (e as CustomEvent).detail;
-      if (selected) {
-          dom.userTimezoneDetailsEl.classList.add('border-yellow-500');
-          dom.userTimezoneDetailsEl.classList.remove('border-blue-500');
-      } else {
-          dom.userTimezoneDetailsEl.classList.remove('border-yellow-500');
-          dom.userTimezoneDetailsEl.classList.add('border-blue-500');
-      }
+  // The left slot keeps its own colour now, whatever is selected: blue for the
+  // ground ashore, green for the ship aboard. Selecting the zone you are
+  // standing in turns the SELECTED slot blue instead — see updateZoneCard — so a
+  // colour always names the thing rather than the act of choosing it, and the
+  // two slots can never both claim gold.
+  document.addEventListener('gpstimezoneSelectionChanged', () => {
+      refreshMapStyles();
   });
 
   document.addEventListener('gpstimezonefound', (e) => {

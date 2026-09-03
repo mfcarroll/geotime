@@ -178,3 +178,39 @@ ls dist/assets/main-*.js \
 ```
 
 Three different hashes means three different builds, not three different bugs.
+
+## Browser ship mode can see you board, but not leave
+
+Same-origin detection has an asymmetry native does not. Aboard, the gateway
+stamps our origin and the marker says `ship`. Ashore there is no gateway at all,
+so the response carries **nothing** — and nothing has always meant *unknown*,
+never *ashore*, because a dead spot and a disembarkation look identical.
+
+Native does not have this problem: api.rccl.com answers `environment-marker:
+shore` from land, which is a positive statement the app can act on.
+
+So a browser that has been aboard stays aboard until something definite says
+otherwise. In practice the ship keeps its clock and its row, which is the same
+outcome as a phone with no signal, and the costs are the ones already argued for
+stickiness. But it is a real difference and worth knowing before it is mistaken
+for a bug.
+
+## Testing ship mode in a browser
+
+The gateway now serves browsers as well as native, and `--mode shiptest` admits
+its origin to the CSP, so the whole aboard path can be exercised where it
+reloads in a second:
+
+```
+node scripts/ship-gateway.mjs
+VITE_SHIP_GATEWAY=http://localhost:8899 npx vite build --mode shiptest
+```
+
+Serve `dist/` and open it. Two independent signals can put the app aboard, and
+BOTH must say shore to get it back:
+
+  the gateway         `echo shore > /tmp/ship-mode`
+  the origin's own headers   whatever is serving `dist/`
+
+Testing "ashore" with only one of them set is the mistake to avoid — it looks
+like stickiness misbehaving and is simply the other signal still saying ship.
