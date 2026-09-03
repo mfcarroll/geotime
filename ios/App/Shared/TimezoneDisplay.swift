@@ -21,6 +21,16 @@ enum TimezoneDisplay {
         return ZoneInfo(timeZone: tz, displayName: cityName(id))
     }
 
+    /// Whether this zone can only ever be shown as a number.
+    ///
+    /// Nautical and synthesized fixed-offset zones have no place behind them, so
+    /// their row reads "UTC−5" and says nothing a reader can hold on to. Every
+    /// real tzdb id carries a region and a city, and therefore a "/".
+    static func isBareOffset(_ id: String) -> Bool {
+        if parseEtcGmt(id) != nil { return true }
+        return !id.contains("/")
+    }
+
     static func displayName(_ id: String) -> String {
         resolveZone(id)?.displayName ?? cityName(id)
     }

@@ -192,89 +192,51 @@ That keeps the whole change to one idea: *offsets are from the clock you are
 living by.* The cards stay as they are, which also means the Ship Time card at
 the top of the page keeps stating the anchor in full.
 
-### Settled while writing the tests
+### The rule set, as settled
 
-The expected values had to be written by hand, and doing that is what exposed
-the design flaw: **`isLocal` was doing two jobs.** Ashore the GPS zone is both
-where you are and what everything is measured from, so one flag covered both and
-nobody noticed. Aboard they separate, and both facts still want saying — so the
-row gained `isAnchor` beside `isLocal`. The GPS row keeps its pin and gains an
-offset, exactly as the mockup had it.
+1. The candidates are device, ground, ship, and the saved world-clock entries.
+2. The anchor is the ship when a marker confirms we are aboard, otherwise the
+   ground.
+3. Every offset is measured from the anchor.
+4. The ground is always shown, with its pin.
+5. Aboard, the ship is always shown, with its mark.
+6. The phone gets a row only when it agrees with neither ship nor ground.
+7. When it agrees with the anchor, it marks that row instead — aboard only.
+8. When it agrees with the ground and the ground is not the anchor, it marks the
+   ground row.
+9. Saved zones fill what space is left, dropping any whose clock already appears
+   above, nearest the anchor first.
+10. The ground's offset is stated plainly aboard, in the same words every other
+    row uses.
 
-The parameter is `aboardShipKey: String?`, not a Bool: the list may hold several
-ships and only one is underfoot. `nil` is ashore, which is also the default, so
-every existing caller keeps its behaviour and the ashore tests stay valid
-unchanged. A key naming a ship that is not in the list — an offset that never
-resolved — falls back to the geographic anchor rather than anchoring on nothing.
+### What changed from the first attempt
 
-The fold still compares against the GEOGRAPHIC offset rather than the anchor: it
-exists to lend a name to a row that would otherwise read "UTC−5" mid-ocean, and
-that is a fact about where you are, not about which clock you keep.
+The first design kept the 1.4.0 fold and gated everything on the anchor alone.
+That was more complicated and worse. Rules 4 and 5 delete the fold outright —
+ship and ground are two different facts and each earns a line — and rule 6
+replaces a redundant phone row with a mark on the row it agrees with.
 
-### Still open
+Three reversals of long-standing behaviour, all deliberate:
 
-**The widget view, which is where the documented hazard actually lives.**
-`GeoTimeWidget.swift` hardcodes the string `"Local time"` and gates it on
-`metrics.showLocalLabel`, so it neither reads the anchor's label nor protects
-it from the width budget. The resolver now produces the right text; nothing
-displays it yet. This is the next piece and it is the risky one.
+- **Saved zones sharing an offset are now deduped** in the widget. The reasoning
+  that kept both was that they diverge in November; the answer is that the
+  widget is the summary and the app is the complete list, so they should
+  diverge *there*, on the day it starts meaning something.
+- **Ship and ground no longer merge when their clocks agree**, except in the one
+  case the fold was ever really for: mid-ocean, where the ground has no name and
+  its row would read "UTC−5" beside a ship showing the same hour.
+- **Trimming keeps the zones nearest the anchor.** It used to keep the first N of
+  an offset-sorted list, which meant whichever cities lay furthest west — an
+  accident of the sort order rather than a decision.
 
-**Android.** `GeoTimeWidgetProvider.java` still has the old single-baseline
-rule. The shared case table that would stop the two drifting does not exist yet.
+### The consequence to keep an eye on
 
-**The main app.** `src/time.ts` is untouched; the extraction that makes its
-baseline testable has not been done.
-
-### Two decisions the matrix forced into the open
-
-Both are live choices rather than defects, and both are written as tests so the
-current answer is visible and a change of mind fails a test rather than drifting
-silently.
-
-1. **Does the device row still appear when it matches the ground but not the
-   ship?** Currently yes — everything is gated against the anchor, keeping the
-   resolver's "ONE RULE for every special row". The cost is a visibly redundant
-   row: the same figure as the pin row beside it, on the smallest surface the
-   app has.
-2. **Should the ground row say more than a bare offset once it stops being the
-   anchor?** Currently no — it reads "+1 hr" and the pin carries the meaning,
-   which is what the mockup showed. The case against is that the pin is the
-   smallest thing on the row and the first thing dropped when width runs short.
-
-### Open questions
-
-**The row-fold rule inverts.** `ZoneRowResolver.swift:49` folds a ship whose
-offset matches the base into the local row:
-
-```swift
-let agreeingShip = ships.first { $0.offsetMinutes * 60 == localOffset }
-```
-
-That is the "like Vancouver" behaviour added in 1.4.0. With the ship as the
-base it still merges, but which label wins? Almost certainly "Ship time" — it
-is the anchor, and losing it to "Local time" would remove the only thing making
-the other offsets readable. Wants confirming on a device.
-
-**The dedup rule shifts with it.** `ZoneRowResolver.swift:124` drops zones whose
-offset equals the base:
-
-```swift
-if offset == localOffset { continue }
-```
-
-Change the base and a different set of the user's saved cities disappears from
-the widget. Probably correct, possibly surprising, worth seeing.
-
-**The transition.** Boarding or leaving re-bases every offset at once. If it
-happens while someone is looking at the list, every number changes with no
-explanation. The label changing from an offset to "Ship time" may well be
-explanation enough — but this is the part to watch on a real transition rather
-than reason about. The onboard gateway harness (`scripts/ship-gateway.mjs`) can
-drive it from a desk: `echo shore > /tmp/ship-mode` flips it live.
-
-**Only on confirmed-aboard.** The trigger must stay the wifi marker, never a
-guess from proximity or from having a ship on the list. A wrongly re-based list
-ashore would be the worst version of this.
+Ashore, a ship on the list whose clock matches your own is now dropped from the
+widget entirely, where the old fold at least showed its name on your row. It
+reappears when its clock shifts, and the app lists it throughout. Asserted in
+`testAshoreAShipSharingYourOffsetIsDroppedFromTheWidget` so it is a decision
+rather than a surprise. Exempting ships from the offset dedup is a one-line
+change if it reads badly on a real device.
 
 ### Effort
 

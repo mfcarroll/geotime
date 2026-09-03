@@ -45,85 +45,93 @@ enum ZoneRowResolver {
     /// - Parameter aboardShipKey: the ship the wifi marker says we are aboard,
     ///   or nil ashore. A key rather than a flag because the list may hold
     ///   several ships and only one of them is underfoot. Naming a ship that is
-    ///   not in `ships` — an offset that has never resolved — falls back to the
+    ///   not in `ships` — an offset that never resolved — falls back to the
     ///   geographic anchor rather than anchoring on nothing.
     static func resolve(storedIds: [String], local: TimeZone, deviceTz: TimeZone, now: Date,
                         localPlaceName: String? = nil, labels: [String] = [],
                         ships: [WidgetSharedStore.Ship] = [],
                         aboardShipKey: String? = nil) -> [WidgetRow] {
         let geographicOffset = local.secondsFromGMT(for: now)
+        let deviceOffset = deviceTz.secondsFromGMT(for: now)
 
         // THE ONE THING THIS FUNCTION DECIDES: what everything is measured from.
         //
-        // Ashore, the clock you live by is the ground you stand on. Aboard, it
-        // is the ship — set by the crew, announced over the tannoy, and the only
+        // Ashore, the clock you live by is the ground you stand on. Aboard, it is
+        // the ship — set by the crew, announced over the tannoy, and the only
         // clock a gangway time is ever quoted in. Re-basing there is not an
         // exception to this app's principle that time is geographic; it is the
         // same principle applied where the two come apart.
         let aboardShip = aboardShipKey.flatMap { key in ships.first { $0.key == key } }
         let anchorOffset = aboardShip.map { $0.offsetMinutes * 60 } ?? geographicOffset
-        let anchorLabel = aboardShip == nil ? "Local time" : "Ship time"
-        let localOffset = anchorOffset
-        var seenIds: Set<String> = [local.identifier] // local pre-claims its slot
+        let anchorTz = anchorZone(anchorOffset)
+
+        // Ship and ground are separate rows even when their clocks agree: they
+        // are two different facts and each is worth its own line. The single
+        // exception is the one the old fold was really for — mid-ocean the
+        // ground has no name, so its row would read "UTC−5" beside a ship
+        // showing the same time. There, and only there, they merge.
+        let groundIsNameless = localPlaceName == nil && TimezoneDisplay.isBareOffset(local.identifier)
+        let mergeGroundIntoShip = aboardShip != nil
+            && anchorOffset == geographicOffset
+            && groundIsNameless
+
+        // The phone earns a row only when it agrees with neither ship nor
+        // ground; otherwise it is a mark on whichever row it matches. Ashore it
+        // is never marked — there, agreeing is the ordinary state and the
+        // absence of a phone is exactly what says so. That falls out of the two
+        // guards below rather than needing a flag of its own: the ship row only
+        // exists aboard, and the ground row is only marked when it is not the
+        // anchor, which is only true aboard.
         var rows: [WidgetRow] = []
+        var claimedOffsets: Set<Int> = []
 
-        // ONE RULE for every special row: the base always shows, and device and
-        // ship each appear only when they add information — that is, when their
-        // offset differs from the base. Three bespoke branches would drift apart
-        // between here and the Android provider; one test does not.
-        //
-        // The deliberate asymmetry is which way "agreeing" resolves. An agreeing
-        // device is hidden, because knowing your phone concurs is not worth a
-        // row. An agreeing ship is *folded into the base row*, because it brings
-        // something a device never can: a name. Mid-ocean the base row would
-        // otherwise read "UTC−5" — nearestPlace is capped at 150 km and
-        // correctly finds nothing out there — so lending it "Star" is the
-        // difference between naming where you are and naming a number.
-        // Still measured against the GEOGRAPHIC offset, not the anchor: the fold
-        // exists to lend a name to a row that would otherwise read "UTC−5"
-        // mid-ocean, and that is a fact about where you are rather than about
-        // which clock you are keeping. The ship underfoot wins if two agree.
-        let agreeingShip = (aboardShip.map { $0.offsetMinutes * 60 == geographicOffset } == true
-            ? aboardShip
-            : nil) ?? ships.first { $0.offsetMinutes * 60 == geographicOffset }
-        let geographicIsAnchor = geographicOffset == anchorOffset
-        let localParts = TimezoneDisplay.timeParts(local, at: now)
-        rows.append(WidgetRow(
-            id: local.identifier,
-            // The ship if it agrees, else the town the app last placed you in,
-            // else the zone's own name.
-            name: agreeingShip?.name
-                ?? localPlaceName
-                ?? TimezoneDisplay.displayName(local.identifier),
-            shortName: agreeingShip?.shortOrFull,
-            isLocal: true,
-            isDevice: false,
-            isShip: agreeingShip != nil,
-            isAnchor: geographicIsAnchor,
-            timeDigits: localParts.digits,
-            timePeriod: localParts.period,
-            // Aboard and adrift of the ship's clock, this row is an ordinary day
-            // away from the anchor and says so; the pin keeps saying it is where
-            // you actually are.
-            weekdayShort: geographicIsAnchor ? nil
-                : (TimezoneDisplay.dayDiffers(local, anchorZone(anchorOffset), at: now)
-                    ? TimezoneDisplay.weekday(local, at: now, full: false) : nil),
-            weekdayFull: geographicIsAnchor ? nil
-                : (TimezoneDisplay.dayDiffers(local, anchorZone(anchorOffset), at: now)
-                    ? TimezoneDisplay.weekday(local, at: now, full: true) : nil),
-            relativeText: geographicIsAnchor
-                ? anchorLabel
-                : TimezoneDisplay.relativeOffset(zoneSeconds: geographicOffset, deviceSeconds: anchorOffset),
-            offsetSeconds: geographicOffset
-        ))
+        if let ship = aboardShip {
+            let parts = TimezoneDisplay.timeParts(anchorTz, at: now)
+            rows.append(WidgetRow(
+                id: "ship:\(ship.key)",
+                name: ship.name,
+                shortName: ship.shortOrFull,
+                isLocal: mergeGroundIntoShip,
+                isDevice: deviceOffset == anchorOffset,
+                isShip: true,
+                isAnchor: true,
+                timeDigits: parts.digits,
+                timePeriod: parts.period,
+                weekdayShort: nil,
+                weekdayFull: nil,
+                relativeText: "Ship time",
+                offsetSeconds: anchorOffset
+            ))
+            claimedOffsets.insert(anchorOffset)
+        }
 
-        // The device's OS timezone, when it differs from the GPS-derived local zone
-        // (e.g. phone still on Vancouver time while you're in London).
-        let deviceOffset = deviceTz.secondsFromGMT(for: now)
-        if deviceOffset != localOffset {
-            seenIds.insert(deviceTz.identifier)
+        if !mergeGroundIntoShip {
+            let isAnchor = aboardShip == nil
+            let parts = TimezoneDisplay.timeParts(local, at: now)
+            let differs = !isAnchor && TimezoneDisplay.dayDiffers(local, anchorTz, at: now)
+            rows.append(WidgetRow(
+                id: local.identifier,
+                name: localPlaceName ?? TimezoneDisplay.displayName(local.identifier),
+                shortName: nil,
+                isLocal: true,
+                isDevice: deviceOffset == geographicOffset && !isAnchor,
+                isShip: false,
+                isAnchor: isAnchor,
+                timeDigits: parts.digits,
+                timePeriod: parts.period,
+                weekdayShort: differs ? TimezoneDisplay.weekday(local, at: now, full: false) : nil,
+                weekdayFull: differs ? TimezoneDisplay.weekday(local, at: now, full: true) : nil,
+                relativeText: isAnchor
+                    ? "Local time"
+                    : TimezoneDisplay.relativeOffset(zoneSeconds: geographicOffset, deviceSeconds: anchorOffset),
+                offsetSeconds: geographicOffset
+            ))
+            claimedOffsets.insert(geographicOffset)
+        }
+
+        if !claimedOffsets.contains(deviceOffset) {
             let parts = TimezoneDisplay.timeParts(deviceTz, at: now)
-            let differs = TimezoneDisplay.dayDiffers(deviceTz, anchorZone(anchorOffset), at: now)
+            let differs = TimezoneDisplay.dayDiffers(deviceTz, anchorTz, at: now)
             rows.append(WidgetRow(
                 id: "device:\(deviceTz.identifier)",
                 name: TimezoneDisplay.displayName(deviceTz.identifier),
@@ -136,21 +144,26 @@ enum ZoneRowResolver {
                 timePeriod: parts.period,
                 weekdayShort: differs ? TimezoneDisplay.weekday(deviceTz, at: now, full: false) : nil,
                 weekdayFull: differs ? TimezoneDisplay.weekday(deviceTz, at: now, full: true) : nil,
-                relativeText: TimezoneDisplay.relativeOffset(zoneSeconds: deviceOffset, deviceSeconds: localOffset),
+                relativeText: TimezoneDisplay.relativeOffset(zoneSeconds: deviceOffset, deviceSeconds: anchorOffset),
                 offsetSeconds: deviceOffset
             ))
+            claimedOffsets.insert(deviceOffset)
         }
 
+        // Everything else the user asked for: saved cities, and any ship that is
+        // not the one underfoot. A row is dropped when its clock already appears
+        // above it — on a surface this small a second copy of a time buys
+        // nothing, and the app itself still lists both. Two zones that agree
+        // today and part in November part here too, which is the point.
         for (index, id) in storedIds.enumerated() {
             if id == local.identifier { continue }
             guard let info = TimezoneDisplay.resolveZone(id) else { continue }
-            // The name the user chose, where there is one.
-            let chosen = index < labels.count && !labels[index].isEmpty ? labels[index] : nil
             let off = info.timeZone.secondsFromGMT(for: now)
-            if seenIds.contains(info.timeZone.identifier) { continue }
-            seenIds.insert(info.timeZone.identifier)
+            if claimedOffsets.contains(off) { continue }
+            claimedOffsets.insert(off)
+            let chosen = index < labels.count && !labels[index].isEmpty ? labels[index] : nil
             let parts = TimezoneDisplay.timeParts(info.timeZone, at: now)
-            let differs = TimezoneDisplay.dayDiffers(info.timeZone, anchorZone(anchorOffset), at: now)
+            let differs = TimezoneDisplay.dayDiffers(info.timeZone, anchorTz, at: now)
             rows.append(WidgetRow(
                 id: id,
                 name: chosen ?? info.displayName,
@@ -163,23 +176,19 @@ enum ZoneRowResolver {
                 timePeriod: parts.period,
                 weekdayShort: differs ? TimezoneDisplay.weekday(info.timeZone, at: now, full: false) : nil,
                 weekdayFull: differs ? TimezoneDisplay.weekday(info.timeZone, at: now, full: true) : nil,
-                relativeText: TimezoneDisplay.relativeOffset(zoneSeconds: off, deviceSeconds: localOffset),
+                relativeText: TimezoneDisplay.relativeOffset(zoneSeconds: off, deviceSeconds: anchorOffset),
                 offsetSeconds: off
             ))
         }
 
-        // Ships that do NOT match the base offset get their own row. The one
-        // that does was folded in above, so it is skipped here — a detected ship
-        // appears once, never twice.
         for ship in ships {
+            if ship.key == aboardShipKey { continue }
             let offset = ship.offsetMinutes * 60
-            // Skip the one folded into the geographic row above — compared to the
-            // GEOGRAPHIC offset, matching the fold, so a ship is never both
-            // folded and listed.
-            if offset == geographicOffset { continue }
+            if claimedOffsets.contains(offset) { continue }
+            claimedOffsets.insert(offset)
             guard let tz = ship.timeZone else { continue }
             let parts = TimezoneDisplay.timeParts(tz, at: now)
-            let differs = TimezoneDisplay.dayDiffers(tz, anchorZone(anchorOffset), at: now)
+            let differs = TimezoneDisplay.dayDiffers(tz, anchorTz, at: now)
             rows.append(WidgetRow(
                 id: "ship:\(ship.key)",
                 name: ship.name,
@@ -187,19 +196,16 @@ enum ZoneRowResolver {
                 isLocal: false,
                 isDevice: false,
                 isShip: true,
-                isAnchor: ship.key == aboardShipKey,
+                isAnchor: false,
                 timeDigits: parts.digits,
                 timePeriod: parts.period,
                 weekdayShort: differs ? TimezoneDisplay.weekday(tz, at: now, full: false) : nil,
                 weekdayFull: differs ? TimezoneDisplay.weekday(tz, at: now, full: true) : nil,
-                relativeText: ship.key == aboardShipKey
-                    ? anchorLabel
-                    : TimezoneDisplay.relativeOffset(zoneSeconds: offset, deviceSeconds: anchorOffset),
+                relativeText: TimezoneDisplay.relativeOffset(zoneSeconds: offset, deviceSeconds: anchorOffset),
                 offsetSeconds: offset
             ))
         }
 
-        // Offsets can now tie, so break ties by name for a stable order.
         rows.sort {
             $0.offsetSeconds != $1.offsetSeconds
                 ? $0.offsetSeconds < $1.offsetSeconds
@@ -208,18 +214,27 @@ enum ZoneRowResolver {
         return rows
     }
 
-    // Trims to `maxRows`, always keeping the special rows (local, device, ship);
+    // Trims to `maxRows`, always keeping the rows that are not negotiable — the
+    // anchor, the ground, and the phone when it has a row of its own — and
     // returns how many were hidden (for the "+N more" footer).
     //
-    // A ship counts as special because aboard it is the most important row on
-    // the screen. It only stops being special when a definite `shore` marker
-    // arrives — which needs connectivity, and therefore means the guest really
-    // is ashore. Standing in a port with a dead phone yields no marker at all,
-    // so the ship keeps its guaranteed slot exactly when it matters most.
+    // WHICH OTHERS SURVIVE: the ones nearest the anchor. Keeping the first N of
+    // an offset-sorted list, as this used to, kept whichever cities happened to
+    // lie furthest west — an accident of the sort order rather than a decision.
+    // Nearness to the clock you are living by is at least a reason.
+    //
+    // The anchor keeps its slot with no ship-specific rule needed: aboard it IS
+    // the ship row, and `aboardShipKey` only changes on a definite answer, so a
+    // guest whose phone has lost the network keeps the ship exactly when it
+    // matters most.
     static func fit(_ rows: [WidgetRow], maxRows: Int) -> (visible: [WidgetRow], overflow: Int) {
         if rows.count <= maxRows { return (rows, 0) }
-        let specials = rows.filter { $0.isLocal || $0.isDevice || $0.isShip || $0.isAnchor }
-        let others = rows.filter { !$0.isLocal && !$0.isDevice && !$0.isShip && !$0.isAnchor }
+        let isSpecial: (WidgetRow) -> Bool = { $0.isAnchor || $0.isLocal || $0.isShip || $0.isDevice }
+        let specials = rows.filter(isSpecial)
+        let anchorOffset = rows.first { $0.isAnchor }?.offsetSeconds ?? 0
+        let others = rows.filter { !isSpecial($0) }
+            .sorted { abs($0.offsetSeconds - anchorOffset) < abs($1.offsetSeconds - anchorOffset) }
+
         var kept = specials
         kept += others.prefix(max(0, maxRows - specials.count))
         kept.sort {

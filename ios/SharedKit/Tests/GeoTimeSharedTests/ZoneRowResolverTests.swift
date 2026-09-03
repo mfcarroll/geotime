@@ -100,14 +100,17 @@ final class ZoneRowResolverInvariants: XCTestCase {
         XCTAssertTrue(rows[0].isLocal)
     }
 
-    func testTwoZonesSharingAnOffsetBothSurvive() throws {
-        // Deliberate: Vancouver and Los Angeles read the same today and differ
-        // in November. If the user added both, the user asked for both.
+    func testOnlyOneOfTwoZonesSharingAnOffsetIsShown() throws {
+        // CHANGED, deliberately. Vancouver and Los Angeles read the same today,
+        // and on a surface this small a second copy of a time buys nothing —
+        // the app itself still lists both, which is where the complete answer
+        // lives. In November they diverge and both appear, which is not a
+        // glitch: that is the day the distinction starts meaning something.
         let rows = ZoneRowResolver.resolve(
             storedIds: ["America/Vancouver", "America/Los_Angeles"],
             local: Fixture.newYork, deviceTz: Fixture.newYork, now: Fixture.now)
 
-        XCTAssertEqual(rows.filter { !$0.isLocal }.count, 2)
+        XCTAssertEqual(rows.filter { !$0.isLocal }.count, 1)
     }
 
     func testAChosenLabelWinsOverTheZoneName() throws {
@@ -133,32 +136,35 @@ final class ZoneRowResolverInvariants: XCTestCase {
         XCTAssertEqual(ship.relativeText, "\u{2212}1 hr")
     }
 
-    func testAnAgreeingShipIsFoldedIntoTheBaseAndLendsItItsName() throws {
-        // The asymmetry worth protecting: an agreeing DEVICE is dropped, an
-        // agreeing SHIP is merged, because it brings a name the base row would
-        // otherwise lack mid-ocean.
+    /// CHANGED, and this is the consequence worth having in front of you.
+    ///
+    /// Ashore, a ship on the list whose clock matches your own no longer folds
+    /// into your row lending it its name — it is an ordinary entry now, and the
+    /// offset rule drops it. So the vessel disappears from the widget entirely
+    /// on the days its clock happens to agree with yours, and reappears when it
+    /// shifts. The app still lists it throughout.
+    ///
+    /// The old fold hid this by showing the ship's name on the local row. That
+    /// was only ever justified by the mid-ocean case, which is now handled
+    /// precisely — see testTheGroundMergesIntoTheShipOnlyWhenItHasNoNameOfItsOwn.
+    func testAshoreAShipSharingYourOffsetIsDroppedFromTheWidget() throws {
         let star = Fixture.ship("R/ST", "Star of the Seas", offsetHours: -4, short: "Star")
-        let rows = ZoneRowResolver.resolve(
-            storedIds: [], local: Fixture.newYork, deviceTz: Fixture.newYork, now: Fixture.now,
-            ships: [star])
-
-        XCTAssertEqual(rows.count, 1, "folded, not added alongside")
-        let base = rows[0]
-        XCTAssertTrue(base.isLocal)
-        XCTAssertTrue(base.isShip)
-        XCTAssertEqual(base.name, "Star of the Seas")
-        XCTAssertEqual(base.shortName, "Star")
-        XCTAssertEqual(base.relativeText, "Local time",
-                       "TODAY the merged row is labelled from the shore's point of view")
-    }
-
-    func testAnAgreeingShipOutranksThePlaceName() throws {
-        let star = Fixture.ship("R/ST", "Star of the Seas", offsetHours: -4)
         let rows = ZoneRowResolver.resolve(
             storedIds: [], local: Fixture.newYork, deviceTz: Fixture.newYork, now: Fixture.now,
             localPlaceName: "Brooklyn", ships: [star])
 
-        XCTAssertEqual(rows[0].name, "Star of the Seas")
+        XCTAssertEqual(rows.count, 1)
+        XCTAssertEqual(rows[0].name, "Brooklyn", "the ground keeps its own name")
+        XCTAssertFalse(rows[0].isShip)
+    }
+
+    func testAshoreAShipOnADifferentClockStillGetsItsRow() throws {
+        let star = Fixture.ship("R/ST", "Star of the Seas", offsetHours: -5, short: "Star")
+        let rows = ZoneRowResolver.resolve(
+            storedIds: [], local: Fixture.newYork, deviceTz: Fixture.newYork, now: Fixture.now,
+            localPlaceName: "Brooklyn", ships: [star])
+
+        XCTAssertEqual(try row(rows, named: "Star of the Seas").relativeText, "\u{2212}1 hr")
     }
 
     // MARK: order

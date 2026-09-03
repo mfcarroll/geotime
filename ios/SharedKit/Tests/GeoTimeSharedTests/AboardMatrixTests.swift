@@ -68,36 +68,122 @@ final class AboardMatrixTests: XCTestCase {
 
     // MARK: 2 — aboard, the ship's clock matches the ground
 
-    func testAnAgreeingShipMergesAndTheMergedRowIsLabelledForTheShip() throws {
+    func testShipAndGroundStayApartEvenWhenTheirClocksAgree() throws {
+        // In port on the port's time. Two rows saying the same hour, because
+        // they are answering two different questions — "what is the ship
+        // keeping" and "where am I standing" — and the second is exactly the
+        // thing a guest checks before stepping off.
         let inStep = Fixture.ship("R/ST", "Star of the Seas", offsetHours: -4, short: "Star")
         let rows = ZoneRowResolver.resolve(
             storedIds: [], local: Fixture.newYork, deviceTz: Fixture.newYork, now: Fixture.now,
-            ships: [inStep], aboardShipKey: "R/ST")
+            localPlaceName: "Cozumel", ships: [inStep], aboardShipKey: "R/ST")
 
-        XCTAssertEqual(rows.count, 1, "one row, not two — the fold still applies")
-        let merged = rows[0]
-        XCTAssertTrue(merged.isLocal)
-        XCTAssertTrue(merged.isShip)
-        XCTAssertTrue(merged.isAnchor)
-        XCTAssertEqual(merged.name, "Star of the Seas")
-        // This is THE assertion that differs from the ashore invariant of the
-        // same shape. Ashore the merged row says "Local time"; aboard it must
-        // say "Ship time", because that is what the offsets below it are
-        // measured from and nothing else on screen says so.
-        XCTAssertEqual(merged.relativeText, "Ship time")
+        XCTAssertEqual(rows.count, 2)
+        let ship = try XCTUnwrap(rows.first(where: { $0.isShip }))
+        let ground = try XCTUnwrap(rows.first(where: { $0.isLocal }))
+        XCTAssertTrue(ship.isAnchor)
+        XCTAssertEqual(ship.relativeText, "Ship time")
+        XCTAssertEqual(ground.name, "Cozumel")
+        XCTAssertEqual(ground.relativeText, "+0 hrs", "level with the ship, and says so")
+        XCTAssertFalse(ground.isShip)
+    }
+
+    /// The one surviving merge, and the only case the old fold was ever really
+    /// for. Mid-ocean there is no town within 150 km, so the ground has no name
+    /// and its row would read "UTC−5" beside a ship showing the same time —
+    /// a number keeping a name company for no reason. There, they merge, and
+    /// the row carries both marks.
+    func testTheGroundMergesIntoTheShipOnlyWhenItHasNoNameOfItsOwn() throws {
+        let atSea = TimeZone(identifier: "Etc/GMT+5")!
+        let inStep = Fixture.ship("R/ST", "Star of the Seas", offsetHours: -5, short: "Star")
+        let rows = ZoneRowResolver.resolve(
+            storedIds: [], local: atSea, deviceTz: atSea, now: Fixture.now,
+            localPlaceName: nil, ships: [inStep], aboardShipKey: "R/ST")
+
+        XCTAssertEqual(rows.count, 1)
+        XCTAssertTrue(rows[0].isShip)
+        XCTAssertTrue(rows[0].isLocal, "it carries the pin too")
+        XCTAssertTrue(rows[0].isAnchor)
+        XCTAssertEqual(rows[0].name, "Star of the Seas")
+        XCTAssertEqual(rows[0].relativeText, "Ship time")
     }
 
     // MARK: 3 — a saved zone that happens to share the ship's clock
 
-    func testAZoneSharingTheShipsOffsetReadsAsZeroRatherThanVanishing() throws {
-        // Bogota keeps UTC−5 year round, which is the ship's clock here. Saved
-        // zones are deduped by identifier and never by offset — if the user
-        // added it, the user asked for it — so it stays, reading level.
+    func testASavedZoneOnTheShipsOwnClockIsDropped() throws {
+        // Bogota keeps UTC−5 year round, which is this ship's clock. The widget
+        // will not print the same hour twice; the app still lists Bogota.
         let rows = ZoneRowResolver.resolve(
             storedIds: ["America/Bogota"], local: Fixture.newYork, deviceTz: Fixture.newYork,
             now: Fixture.now, ships: [star], aboardShipKey: "R/ST")
 
-        XCTAssertEqual(try row(rows, named: "Bogota").relativeText, "+0 hrs")
+        XCTAssertNil(rows.first { $0.name == "Bogota" })
+    }
+
+    // MARK: the phone — a row only when it agrees with neither
+
+    func testThePhoneMarksTheShipRatherThanTakingOneOfItsOwn() throws {
+        // Phone still on the ship's clock: nothing to report, so no row — but
+        // the ship row wears the mark, which is what says the phone is right.
+        let rows = ZoneRowResolver.resolve(
+            storedIds: [], local: Fixture.newYork, deviceTz: TimeZone(secondsFromGMT: -5 * 3600)!,
+            now: Fixture.now, localPlaceName: "Cozumel", ships: [star], aboardShipKey: "R/ST")
+
+        XCTAssertNil(rows.first { $0.isDevice && !$0.isShip }, "no standalone phone row")
+        XCTAssertTrue(try XCTUnwrap(rows.first(where: { $0.isShip })).isDevice)
+    }
+
+    func testThePhoneMarksTheGroundWhenItIsKeepingPortTime() throws {
+        let rows = ZoneRowResolver.resolve(
+            storedIds: [], local: Fixture.newYork, deviceTz: Fixture.newYork, now: Fixture.now,
+            localPlaceName: "Cozumel", ships: [star], aboardShipKey: "R/ST")
+
+        XCTAssertNil(rows.first { $0.isDevice && !$0.isLocal })
+        XCTAssertTrue(try XCTUnwrap(rows.first(where: { $0.isLocal })).isDevice)
+    }
+
+    func testThePhoneGetsItsOwnRowWhenItAgreesWithNeither() throws {
+        let rows = ZoneRowResolver.resolve(
+            storedIds: [], local: Fixture.newYork, deviceTz: Fixture.vancouver, now: Fixture.now,
+            localPlaceName: "Cozumel", ships: [star], aboardShipKey: "R/ST")
+
+        let phone = try XCTUnwrap(rows.first(where: { $0.isDevice }))
+        XCTAssertFalse(phone.isShip)
+        XCTAssertFalse(phone.isLocal)
+        XCTAssertEqual(phone.relativeText, "\u{2212}2 hrs", "measured from the ship")
+    }
+
+    func testAshoreAnAgreeingPhoneIsNotMarkedAtAll() throws {
+        // The absence of a phone is the signal that nothing is wrong, and ashore
+        // agreeing is the ordinary state. Marking every widget forever would say
+        // nothing and cost a glyph.
+        let rows = ZoneRowResolver.resolve(
+            storedIds: [], local: Fixture.newYork, deviceTz: Fixture.newYork, now: Fixture.now,
+            localPlaceName: "Brooklyn")
+
+        XCTAssertEqual(rows.count, 1)
+        XCTAssertFalse(rows[0].isDevice)
+    }
+
+    // MARK: what survives when space runs out
+
+    func testTrimmingKeepsTheZonesNearestTheAnchor() throws {
+        // The anchor is deliberately EAST of the saved cities, so that nearest
+        // and first-in-offset-order are different answers. With the ship on
+        // −5 they coincide and the test cannot tell the two rules apart — which
+        // is how the first version of it passed against both.
+        let farEast = Fixture.ship("R/ST", "Star of the Seas", offsetHours: 9, short: "Star")
+        let rows = ZoneRowResolver.resolve(
+            storedIds: ["Europe/London", "America/Vancouver"],
+            local: Fixture.newYork, deviceTz: Fixture.newYork, now: Fixture.now,
+            localPlaceName: "Cozumel", ships: [farEast], aboardShipKey: "R/ST")
+
+        // Offsets: Vancouver −7, ground −4, London +1, ship +9.
+        // First in order is Vancouver; nearest the anchor is London.
+        let (visible, overflow) = ZoneRowResolver.fit(rows, maxRows: 3)
+        XCTAssertEqual(overflow, 1)
+        XCTAssertNotNil(visible.first { $0.name == "London" }, "nearest the anchor survives")
+        XCTAssertNil(visible.first { $0.name == "Vancouver" }, "not merely the westernmost")
     }
 
     // MARK: 5 — more than one ship on the list
@@ -160,59 +246,44 @@ final class AboardMatrixTests: XCTestCase {
     }
 }
 
-// MARK: - Open questions this matrix exposed
+// MARK: - Settled, and worth keeping visible
 //
-// Both are live design decisions, not defects. They are written as tests so the
-// current answer is visible and a change of mind shows up as a failing test
-// rather than as a silent drift.
+// Both of these were open questions while the resolver still gated everything
+// on the anchor alone. The ten-rule model answered them, and the answers are
+// asserted here so a change of mind fails a test rather than drifting.
+//
+//   Q: should the phone still take a row when it matches the ground but not the
+//      ship?  A: no — rule 6. It marks the row it agrees with instead, which is
+//      covered by the three phone tests above.
+//   Q: should the ground row say more than a bare offset once it stops being
+//      the anchor?  A: no — rule 10. Asserted below.
 
-final class AboardOpenQuestions: XCTestCase {
+final class SettledByTheTenRules: XCTestCase {
 
     private let star = Fixture.ship("R/ST", "Star of the Seas", offsetHours: -5, short: "Star")
 
-    /// QUESTION 1 — should the device row still appear when it agrees with the
-    /// ground but not with the ship?
-    ///
-    /// Ashore, the device row is hidden when it matches the anchor, because
-    /// knowing your phone concurs is not worth a row. Aboard, "matches the
-    /// anchor" means matches the SHIP — so a phone still on the port's time now
-    /// earns a row, and that row carries the same number as the pin row beside
-    /// it. Two rows, one figure, different marks.
-    ///
-    /// CURRENT ANSWER: shown. It keeps the resolver's "ONE RULE for every
-    /// special row" intact — everything is gated against the anchor, with no
-    /// second rule to drift from Android.
-    ///
-    /// THE CASE AGAINST: it is visibly redundant on the smallest surface the app
-    /// has. Gating the device row against the ground instead would hide it, at
-    /// the cost of that row meaning something different from every other.
-    func testDeviceRowAppearsEvenWhenItMatchesTheGround() throws {
-        let rows = ZoneRowResolver.resolve(
-            storedIds: [], local: Fixture.newYork, deviceTz: Fixture.newYork, now: Fixture.now,
-            ships: [star], aboardShipKey: "R/ST")
-
-        let device = try XCTUnwrap(rows.first(where: { $0.isDevice }), "currently shown")
-        let ground = try XCTUnwrap(rows.first(where: { $0.isLocal }))
-        XCTAssertEqual(device.relativeText, ground.relativeText,
-                       "and it says exactly what the pin row says — this is the redundancy")
-    }
-
-    /// QUESTION 2 — should the ground row say more than a bare offset?
-    ///
-    /// Ashore it reads "Local time". Aboard it reads "+1 hr" and the only thing
-    /// still marking it as where you are is the pin. On a row that has just
-    /// stopped being the anchor, a bare number may be too quiet.
-    ///
-    /// CURRENT ANSWER: bare offset, pin carries the meaning — which is what the
-    /// mockup showed (`Havana ↗ 5:10 PM +1 hr`).
-    ///
-    /// THE CASE AGAINST: the pin is the smallest thing on the row, and the one
-    /// most likely to be dropped first when the widget runs out of width.
+    /// Aboard, the ground is an ordinary distance from the clock you are keeping
+    /// and says so in the same words every other row uses. The pin is what marks
+    /// it as the place you are standing.
     func testTheGroundRowSaysOnlyItsOffset() throws {
         let rows = ZoneRowResolver.resolve(
-            storedIds: [], local: Fixture.newYork, deviceTz: Fixture.newYork, now: Fixture.now,
-            ships: [star], aboardShipKey: "R/ST")
+            storedIds: [], local: Fixture.newYork, deviceTz: Fixture.vancouver, now: Fixture.now,
+            localPlaceName: "Cozumel", ships: [star], aboardShipKey: "R/ST")
 
-        XCTAssertEqual(try XCTUnwrap(rows.first(where: { $0.isLocal })).relativeText, "+1 hr")
+        let ground = try XCTUnwrap(rows.first(where: { $0.isLocal }))
+        XCTAssertEqual(ground.relativeText, "+1 hr")
+        XCTAssertFalse(ground.isAnchor)
+    }
+
+    /// And the phone, when it disagrees with both, is measured from the anchor
+    /// like everything else rather than from the ground it happens to be near.
+    func testAStandalonePhoneRowIsMeasuredFromTheAnchor() throws {
+        let rows = ZoneRowResolver.resolve(
+            storedIds: [], local: Fixture.newYork, deviceTz: Fixture.vancouver, now: Fixture.now,
+            localPlaceName: "Cozumel", ships: [star], aboardShipKey: "R/ST")
+
+        let phone = try XCTUnwrap(rows.first(where: { $0.isDevice }))
+        XCTAssertFalse(phone.isLocal)
+        XCTAssertEqual(phone.relativeText, "\u{2212}2 hrs")
     }
 }
