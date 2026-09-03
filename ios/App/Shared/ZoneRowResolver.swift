@@ -102,7 +102,6 @@ enum ZoneRowResolver {
                 relativeText: "Ship time",
                 offsetSeconds: anchorOffset
             ))
-            claimedOffsets.insert(anchorOffset)
         }
 
         if !mergeGroundIntoShip {
@@ -129,7 +128,7 @@ enum ZoneRowResolver {
             claimedOffsets.insert(geographicOffset)
         }
 
-        if !claimedOffsets.contains(deviceOffset) {
+        if deviceOffset != anchorOffset && deviceOffset != geographicOffset {
             let parts = TimezoneDisplay.timeParts(deviceTz, at: now)
             let differs = TimezoneDisplay.dayDiffers(deviceTz, anchorTz, at: now)
             rows.append(WidgetRow(
@@ -150,11 +149,14 @@ enum ZoneRowResolver {
             claimedOffsets.insert(deviceOffset)
         }
 
-        // Everything else the user asked for: saved cities, and any ship that is
-        // not the one underfoot. A row is dropped when its clock already appears
-        // above it — on a surface this small a second copy of a time buys
-        // nothing, and the app itself still lists both. Two zones that agree
-        // today and part in November part here too, which is the point.
+        // The saved cities. One is dropped when its clock already appears above
+        // it — on a surface this small a second copy of a time buys nothing, and
+        // the app itself still lists both. Two zones that agree today and part in
+        // November part here too, which is the point.
+        //
+        // Only the ground and a standalone phone claim an offset here, and the
+        // ground goes first, so where you actually are always wins: in Vancouver
+        // with San Francisco saved, Vancouver keeps the slot.
         for (index, id) in storedIds.enumerated() {
             if id == local.identifier { continue }
             guard let info = TimezoneDisplay.resolveZone(id) else { continue }
@@ -181,11 +183,15 @@ enum ZoneRowResolver {
             ))
         }
 
+        // Ships are outside the no-repeated-clocks rule in BOTH directions: a
+        // vessel is not a timezone. It is a thing with a name that you are on,
+        // or about to be on, and a saved city that happens to keep the same hour
+        // is not another copy of it — so neither hides the other. Docked in your
+        // home port, the ship and the port both show, reading the same time and
+        // meaning different things.
         for ship in ships {
             if ship.key == aboardShipKey { continue }
             let offset = ship.offsetMinutes * 60
-            if claimedOffsets.contains(offset) { continue }
-            claimedOffsets.insert(offset)
             guard let tz = ship.timeZone else { continue }
             let parts = TimezoneDisplay.timeParts(tz, at: now)
             let differs = TimezoneDisplay.dayDiffers(tz, anchorTz, at: now)

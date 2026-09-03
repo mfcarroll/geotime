@@ -138,28 +138,31 @@ final class ZoneRowResolverInvariants: XCTestCase {
 
     /// CHANGED, and this is the consequence worth having in front of you.
     ///
-    /// Ashore, a ship whose clock matches your own is an ordinary entry now, and
-    /// the offset rule drops it. It reappears when its clock shifts; the app
-    /// lists it throughout.
+    /// A ship is not a timezone, so it is outside the no-repeated-clocks rule in
+    /// both directions: a saved city never hides it, and it never hides a saved
+    /// city. Docked in your own home port the two read the same hour and mean
+    /// different things — one is where you live, the other is the thing you are
+    /// about to board.
     ///
-    /// What the fold did here was worse than losing it. It did not add the
-    /// ship's name to your row, it REPLACED your place name with it —
-    /// `agreeingShip?.name ?? localPlaceName` — so this very case rendered as
-    /// "Star of the Seas" under a pin, with Brooklyn nowhere, while you stood in
-    /// Brooklyn. Silently, since the matching clocks made the time right either
-    /// way. Hence the assertion below on the NAME as much as on the count.
-    ///
-    /// Mid-ocean is where that rule was defensible, and it is kept there — see
-    /// testTheGroundMergesIntoTheShipOnlyWhenItHasNoNameOfItsOwn.
-    func testAshoreAShipSharingYourOffsetIsDroppedFromTheWidget() throws {
-        let star = Fixture.ship("R/ST", "Star of the Seas", offsetHours: -4, short: "Star")
+    /// Note what the OLD fold did with this exact case, which was worse than
+    /// either dropping or showing it. The ship's name did not join your row, it
+    /// REPLACED your place name — `agreeingShip?.name ?? localPlaceName` — so
+    /// standing in Vancouver you saw "Star of the Seas" under a pin and no
+    /// Vancouver at all, silently, since the matching clocks made the time right
+    /// either way.
+    func testYourPortYourShipAndACitySharingTheirClockAllResolveSensibly() throws {
+        // In Vancouver, San Francisco saved, and a ship docked alongside.
+        let ship = Fixture.ship("R/ST", "Star of the Seas", offsetHours: -7, short: "Star")
         let rows = ZoneRowResolver.resolve(
-            storedIds: [], local: Fixture.newYork, deviceTz: Fixture.newYork, now: Fixture.now,
-            localPlaceName: "Brooklyn", ships: [star])
+            storedIds: ["America/Los_Angeles"],
+            local: Fixture.vancouver, deviceTz: Fixture.vancouver, now: Fixture.now,
+            localPlaceName: "Vancouver", ships: [ship])
 
-        XCTAssertEqual(rows.count, 1)
-        XCTAssertEqual(rows[0].name, "Brooklyn", "the ground keeps its own name")
-        XCTAssertFalse(rows[0].isShip)
+        XCTAssertEqual(rows.count, 2)
+        XCTAssertEqual(try row(rows, named: "Vancouver").relativeText, "Local time")
+        XCTAssertEqual(try row(rows, named: "Star of the Seas").relativeText, "+0 hrs")
+        XCTAssertNil(rows.first { $0.name == "Los Angeles" },
+                     "the city folds — where you actually are wins the slot")
     }
 
     func testAshoreAShipOnADifferentClockStillGetsItsRow() throws {

@@ -205,7 +205,9 @@ the top of the page keeps stating the anchor in full.
 8. When it agrees with the ground and the ground is not the anchor, it marks the
    ground row.
 9. Saved zones fill what space is left, dropping any whose clock already appears
-   above, nearest the anchor first.
+   above, nearest the anchor first. **Ships are outside this rule in both
+   directions** — a vessel is not a timezone, so a saved city never hides a ship
+   and a ship never hides a saved city.
 10. The ground's offset is stated plainly aboard, in the same words every other
     row uses.
 
@@ -229,33 +231,45 @@ Three reversals of long-standing behaviour, all deliberate:
   an offset-sorted list, which meant whichever cities lay furthest west — an
   accident of the sort order rather than a decision.
 
-### The consequence, stated accurately
+### Ships are not timezones
 
-Ashore, a ship whose clock matches your own is now dropped from the widget. It
-reappears when its clock shifts, and the app lists it throughout.
+The no-repeated-clocks rule applies to *zones*. A ship is a named thing you are
+on or about to board, and a city that happens to keep the same hour is not
+another copy of it — so neither hides the other, in either direction.
 
-This was first written up as a loss against the old fold, which is wrong and
-worth correcting, because the old behaviour was the worse of the two. The fold
-did not add the ship's name to your row — it *replaced* your location's name
-with it:
+The case that settles it: in Vancouver, with San Francisco saved, and a ship
+docked alongside. All three keep the same clock, and the right answer is two
+rows.
+
+| | |
+| --- | --- |
+| Vancouver | kept — where you actually are wins the slot |
+| San Francisco | folded — a second copy of the same hour |
+| Star of the Seas | kept — not a timezone, so not a duplicate |
+
+The ground claims its offset before any saved city is considered, which is why
+the Vancouver-beats-San-Francisco half needed no code at all. Only the ship
+needed exempting.
+
+**Proximity, in the general case, is not computable here.** The widget receives
+zone identifiers and no coordinates, so "keep the nearest" cannot mean
+geographic distance. What it does mean is that the row for where you are claims
+its clock first. Two *saved* cities sharing an offset with each other and not
+with you — London and Lisbon, say — are still resolved by list order, which is
+arbitrary. Worth knowing; not obviously worth fixing.
+
+### What the old fold did with this case
+
+Worse than either dropping the ship or showing it. The ship's name did not join
+your row, it **replaced** your place name:
 
 ```swift
 name: agreeingShip?.name ?? localPlaceName ?? TimezoneDisplay.displayName(...)
 ```
 
-So ashore in Brooklyn, with a ship on the list that happened to share your
-offset, your own row read "Star of the Seas" under a pin, and Brooklyn was
-nowhere. Silently, too: with the clocks matching, the time was right either way,
-so only the name gave it away.
-
-Losing a vessel from a summary surface is a smaller harm than mislabelling the
-row you are standing in. Mid-ocean is the one place the old rule was defensible
-— no place name, so the ship replaced "UTC−5" rather than a real town — and that
-is precisely the case rule 3 kept.
-
-Asserted in `testAshoreAShipSharingYourOffsetIsDroppedFromTheWidget`, so it stays
-a decision. Exempting ships from the dedup is a one-line change if it reads badly
-on a device.
+So standing in Vancouver with a ship alongside, your own pinned row read "Star of
+the Seas" and Vancouver was nowhere — silently, since the matching clocks made
+the time right either way.
 
 ### Effort
 

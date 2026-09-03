@@ -110,14 +110,15 @@ final class AboardMatrixTests: XCTestCase {
 
     // MARK: 3 — a saved zone that happens to share the ship's clock
 
-    func testASavedZoneOnTheShipsOwnClockIsDropped() throws {
-        // Bogota keeps UTC−5 year round, which is this ship's clock. The widget
-        // will not print the same hour twice; the app still lists Bogota.
+    func testASavedZoneOnTheShipsOwnClockIsStillShown() throws {
+        // Bogota keeps UTC−5 year round, which is this ship's clock. The ship
+        // does not fold it away: a city keeping ship time is a useful thing to
+        // be told, not a duplicate of the ship.
         let rows = ZoneRowResolver.resolve(
             storedIds: ["America/Bogota"], local: Fixture.newYork, deviceTz: Fixture.newYork,
             now: Fixture.now, ships: [star], aboardShipKey: "R/ST")
 
-        XCTAssertNil(rows.first { $0.name == "Bogota" })
+        XCTAssertEqual(try row(rows, named: "Bogota").relativeText, "+0 hrs")
     }
 
     // MARK: the phone — a row only when it agrees with neither
