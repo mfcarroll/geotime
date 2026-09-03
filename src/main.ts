@@ -247,6 +247,13 @@ async function startApp() {
   document.addEventListener('shipclockschanged', () => {
     renderWorldClocks();
     updateAllClocks();
+    // The anchor slot needs this too, not just the boarding event. Boarding is
+    // detected BEFORE the ship's offset resolves — the marker arrives on one
+    // response and the clock on a later one — and a ship with no offset cannot
+    // anchor anything, so without this the slot keeps the shore's colours for
+    // the whole of a first launch aboard.
+    refreshAnchorChip();
+    refreshMapStyles();
   });
 
   // Stepping aboard or ashore changes which surface the ship appears on: the

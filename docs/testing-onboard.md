@@ -179,21 +179,30 @@ ls dist/assets/main-*.js \
 
 Three different hashes means three different builds, not three different bugs.
 
-## Browser ship mode can see you board, but not leave
+## Browser ship mode can see you board AND leave
 
-Same-origin detection has an asymmetry native does not. Aboard, the gateway
-stamps our origin and the marker says `ship`. Ashore there is no gateway at all,
-so the response carries **nothing** — and nothing has always meant *unknown*,
-never *ashore*, because a dead spot and a disembarkation look identical.
+An earlier version of this note claimed it could only see you board. That was
+wrong, and the reasoning behind it was the interesting part of the mistake.
 
-Native does not have this problem: api.rccl.com answers `environment-marker:
-shore` from land, which is a positive statement the app can act on.
+The rule everywhere else is that a null marker means *unknown*, never *ashore* —
+a request to somebody else's host goes unstamped for a dozen reasons. But this
+host is ours. A clean 200 from our own origin carrying no marker is not the same
+event as no response at all: if a gateway would have stamped it, then reaching
+it unstamped means no gateway is in the path, which is what being ashore IS.
 
-So a browser that has been aboard stays aboard until something definite says
-otherwise. In practice the ship keeps its clock and its row, which is the same
-outcome as a phone with no signal, and the costs are the ones already argued for
-stickiness. But it is a real difference and worth knowing before it is mistaken
-for a bug.
+It is also the same bet the boarding detection already makes. Using it in one
+direction and refusing it in the other was simply inconsistent.
+
+**Guarded on the origin having been stamped before**, recorded in localStorage as
+`sameOriginStamped`. Without that the reasoning inverts and turns dangerous: on a
+ship whose gateway stamps api.rccl.com but not us, every clean response would
+read as ashore and take the ship's clock away from a guest standing on it. The
+costs are not symmetric — a stale ship row ashore is untidy, a missing ship clock
+at sea strands somebody — so the shore reading is trusted only on a channel that
+has already proved it carries the signal.
+
+Which makes it self-bootstrapping: only the channel that put you aboard can take
+you back off.
 
 ## Testing ship mode in a browser
 

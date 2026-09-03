@@ -168,35 +168,41 @@ export function updateUserTimezoneDetails(tzid: string) {
     lastAnchorTzid = tzid;
     if (userTimeInterval) window.clearInterval(userTimeInterval);
 
-    const ship = aboardShip();
-    const aboard = ship !== null && ship.offsetHours !== null;
+    // Decided on every tick rather than once at paint time.
+    //
+    // Boarding is three separate events — the marker arrives, the ship is added,
+    // its offset resolves — and this slot has to change on the last of them. An
+    // event-driven repaint has to be subscribed to all three and has to be
+    // listening before any of them fire, which on a fast connection it is not:
+    // a same-origin HEAD to a nearby host can answer before the listeners are
+    // even attached, and the slot then keeps the wrong colour indefinitely.
+    // Re-reading once a second costs nothing and cannot miss a transition.
+    const paint = () => {
+        const ship = aboardShip();
+        const aboard = ship !== null && ship.offsetHours !== null;
 
-    dom.userTimezoneDetailsEl.classList.toggle('border-green-500', aboard);
-    dom.userTimezoneDetailsEl.classList.toggle('border-blue-500', !aboard);
-    dom.userTimezoneDetailsEl.classList.remove('hidden');
+        dom.userTimezoneDetailsEl.classList.toggle('border-green-500', aboard);
+        dom.userTimezoneDetailsEl.classList.toggle('border-blue-500', !aboard);
+        dom.userTimezoneDetailsEl.classList.remove('hidden');
 
-    if (aboard) {
-        // The short name: this slot is narrow and shares a row with two others.
-        dom.userTimezoneNameEl.textContent = ship!.short;
-        const tick = () => {
+        if (aboard) {
+            // The short name: this slot is narrow and shares a row with two others.
+            dom.userTimezoneNameEl.textContent = ship!.short;
             dom.userTimezoneTimeEl.textContent = formatFixedOffsetTime(
                 ship!.offsetHours as number, { hour: 'numeric', minute: '2-digit' });
-        };
-        tick();
-        userTimeInterval = window.setInterval(tick, 1000);
-        return;
-    }
+            return;
+        }
 
-    // The map card names the zone; the Local Time card names the town you're in.
-    dom.userTimezoneNameEl.textContent = getDisplayTimezoneName(tzid);
-    const updateTime = () => {
+        // The map card names the zone; the Local Time card names the town you're in.
+        dom.userTimezoneNameEl.textContent = getDisplayTimezoneName(tzid);
         dom.userTimezoneTimeEl.textContent = getFormattedTime(tzid, {
             hour: 'numeric',
             minute: '2-digit',
         });
     };
-    updateTime();
-    userTimeInterval = window.setInterval(updateTime, 1000);
+
+    paint();
+    userTimeInterval = window.setInterval(paint, 1000);
 }
 
 /**

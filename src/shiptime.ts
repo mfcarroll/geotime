@@ -276,8 +276,32 @@ export function resolveAllShipClocks(): Promise<void> {
  * host we control, and a null answer changes nothing, so the cost of being
  * wrong about the gateway stamping us is a wasted round trip and no more.
  */
+/**
+ * Whether this origin has ever come back stamped.
+ *
+ * Persisted, because it is what licenses reading an UNstamped response as
+ * ashore, and that has to survive a reload — otherwise stepping off the ship and
+ * refreshing would leave the app aboard forever, having forgotten the one fact
+ * that lets it change its mind.
+ */
+const ORIGIN_STAMPED_KEY = 'sameOriginStamped';
+
+function originIsKnownStamped(): boolean {
+  try {
+    return localStorage.getItem(ORIGIN_STAMPED_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
 async function sniffBrowserEnvironment(): Promise<void> {
-  await noteEnvironment(await sniffSameOriginEnvironment());
+  const env = await sniffSameOriginEnvironment(originIsKnownStamped());
+  // A ship marker from our own origin proves the gateway stamps this host, which
+  // is the fact the shore reading rests on. Recorded the moment it is observed.
+  if (env?.marker === 'ship') {
+    try { localStorage.setItem(ORIGIN_STAMPED_KEY, '1'); } catch { /* private mode */ }
+  }
+  await noteEnvironment(env);
 }
 
 export function startShipTimeWatch(): void {

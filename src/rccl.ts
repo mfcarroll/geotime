@@ -284,17 +284,43 @@ export function readEnvironment(headers: Headers): Environment {
  * cached response carries no gateway headers, and would look exactly like being
  * ashore.
  */
-export async function sniffSameOriginEnvironment(): Promise<Environment | null> {
+export async function sniffSameOriginEnvironment(
+  originIsKnownStamped: boolean,
+): Promise<Environment | null> {
   if (Capacitor.isNativePlatform()) return null;
+  let res: Response;
   try {
-    const res = await fetch(`${window.location.origin}/`, { method: 'HEAD', cache: 'no-store' });
-    const headers: Headers = {};
-    res.headers.forEach((value, key) => { headers[key.toLowerCase()] = value; });
-    return readEnvironment(headers);
+    res = await fetch(`${window.location.origin}/`, { method: 'HEAD', cache: 'no-store' });
   } catch {
-    // Offline, blocked, or a captive portal. Unknown, which is not ashore.
+    // Offline, blocked, or a captive portal swallowing it. Unknown, and unknown
+    // is not ashore.
     return null;
   }
+
+  const headers: Headers = {};
+  res.headers.forEach((value, key) => { headers[key.toLowerCase()] = value; });
+  const env = readEnvironment(headers);
+  if (env.marker !== null) return env;
+
+  // A CLEAN RESPONSE WITH NO MARKER IS NOT THE SAME AS NO RESPONSE.
+  //
+  // Elsewhere a null marker means "unknown", because a request to somebody
+  // else's host can go unstamped for a dozen reasons. This host is ours. If a
+  // gateway would have stamped it, then reaching it unstamped means no gateway
+  // is in the path — which is what being ashore is.
+  //
+  // Guarded on having seen a stamp from this origin BEFORE. Without that the
+  // reasoning inverts and becomes dangerous: on a ship whose gateway stamps
+  // api.rccl.com but not us, every clean response would read as ashore and take
+  // the ship's clock away from a guest who is standing on it. The costs are not
+  // symmetric — a stale ship row ashore is untidy, a missing ship clock at sea
+  // strands somebody — so the shore reading is only trusted on a channel that
+  // has already proved it carries the signal at all.
+  //
+  // Which makes it self-bootstrapping: only the channel that put you aboard can
+  // take you back off.
+  if (originIsKnownStamped) return { marker: 'shore', shipCode: null, shipTime: null };
+  return null;
 }
 
 /**

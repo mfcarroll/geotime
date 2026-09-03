@@ -85,7 +85,8 @@ function render(attempts: Attempt[]): string {
   lines.push(`user agent: ${navigator.userAgent}`);
   lines.push('');
   lines.push('The question: does anything below report marker=ship?');
-  lines.push('If one does, browser ship mode is possible by that route.');
+  lines.push('If one does, browser ship mode is possible by that route — and');
+  lines.push('the same route can then report shore by coming back unstamped.');
   lines.push('');
 
   for (const a of attempts) {
