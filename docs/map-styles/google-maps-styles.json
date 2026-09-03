@@ -1,5 +1,5 @@
 {
-  "variant": "dark",
+  "variant": "light",
   "styles": [
     {
       "id": "infrastructure",
@@ -71,7 +71,11 @@
     {
       "id": "infrastructure.roadNetwork.road",
       "geometry": {
-        "visible": true
+        "visible": true,
+        "fillOpacity": 1,
+        "fillColor": "#4a6078",
+        "strokeOpacity": 1,
+        "strokeColor": "#4a6078"
       }
     },
     {
@@ -140,7 +144,9 @@
     {
       "id": "infrastructure.roadNetwork.roadDetail.surface",
       "geometry": {
-        "visible": true
+        "visible": true,
+        "fillOpacity": 1,
+        "fillColor": "#4a6078"
       }
     },
     {
