@@ -47,3 +47,11 @@ against. The cases it owes are listed at the foot of
 by value — a test expecting "3:22 PM" would pass in Cupertino and fail on a
 24-hour machine. Everything asserted literally (`relativeText`, names, ordering,
 the role flags) is locale-independent.
+
+## What this package cannot catch
+
+It builds for macOS, where the availability floor is higher than the app's. An
+API newer than the iOS deployment target compiles here and fails in Xcode —
+`TimeZone.gmt` did exactly that, passing 41 tests and then breaking the app
+build. Run a real `xcodebuild` before believing the suite about anything that
+touches a platform API.

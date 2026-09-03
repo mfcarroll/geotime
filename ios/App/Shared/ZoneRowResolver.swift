@@ -39,7 +39,8 @@ enum ZoneRowResolver {
     /// it. A fixed offset is right here: it is only ever asked what calendar day
     /// it is on, and a vessel's clock has no DST rules to lose.
     private static func anchorZone(_ seconds: Int) -> TimeZone {
-        TimeZone(secondsFromGMT: seconds) ?? .gmt
+        // Not `.gmt`, which needs iOS 16 and this target goes back further.
+        TimeZone(secondsFromGMT: seconds) ?? TimeZone(secondsFromGMT: 0)!
     }
 
     /// - Parameter aboardShipKey: the ship the wifi marker says we are aboard,
