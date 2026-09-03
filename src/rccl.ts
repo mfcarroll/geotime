@@ -267,6 +267,37 @@ export function readEnvironment(headers: Headers): Environment {
 }
 
 /**
+ * The environment as our OWN origin reports it, for browsers.
+ *
+ * On native, detection rides RCCL's responses and never needs a request of its
+ * own. A browser cannot do that: CORS hides any header RCCL does not choose to
+ * expose, and it will not be exposing these. So the only reading available is
+ * from a host we control, where same-origin means every header is visible.
+ *
+ * That rests on an assumption we cannot test from shore — that the gateway is a
+ * transparent proxy stamping everything it passes, rather than only api.rccl.com.
+ * The ?shipprobe page exists to settle it on the first voyage. Until then this
+ * is a cheap bet: one HEAD, and a null reading changes nothing, because a null
+ * marker has always meant "unknown" rather than "ashore".
+ *
+ * HEAD rather than GET so Workbox does not answer it from the precache — a
+ * cached response carries no gateway headers, and would look exactly like being
+ * ashore.
+ */
+export async function sniffSameOriginEnvironment(): Promise<Environment | null> {
+  if (Capacitor.isNativePlatform()) return null;
+  try {
+    const res = await fetch(`${window.location.origin}/`, { method: 'HEAD', cache: 'no-store' });
+    const headers: Headers = {};
+    res.headers.forEach((value, key) => { headers[key.toLowerCase()] = value; });
+    return readEnvironment(headers);
+  } catch {
+    // Offline, blocked, or a captive portal. Unknown, which is not ashore.
+    return null;
+  }
+}
+
+/**
  * The live UTC offset for a ship, plus the environment that came with it.
  *
  * `time` is null when the ship is unknown to the API (a 404 on a retired code)

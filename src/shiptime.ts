@@ -32,7 +32,7 @@ import {
   shipKey,
   type ShipClock,
 } from './ships';
-import { fetchActiveVoyage, shipTimeAvailable, todayStamp, type Environment } from './rccl';
+import { fetchActiveVoyage, shipTimeAvailable, sniffSameOriginEnvironment, todayStamp, type Environment } from './rccl';
 
 /** The last definite environment reading, with when it arrived. */
 let lastEnvironment: (Environment & { at: number }) | null = null;
@@ -268,12 +268,33 @@ export function resolveAllShipClocks(): Promise<void> {
  * widget *without* the app being opened belongs to each platform's own widget
  * cycle, not here.
  */
+/**
+ * Ask our own origin where we are.
+ *
+ * A browser has no RCCL response to read the marker off — CORS hides it — so
+ * unlike native, detection here needs a request of its own. It is one HEAD to a
+ * host we control, and a null answer changes nothing, so the cost of being
+ * wrong about the gateway stamping us is a wasted round trip and no more.
+ */
+async function sniffBrowserEnvironment(): Promise<void> {
+  await noteEnvironment(await sniffSameOriginEnvironment());
+}
+
 export function startShipTimeWatch(): void {
   if (!shipTimeAvailable()) return;
 
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') void resolveAllShipClocks();
   });
+
+  if (!Capacitor.isNativePlatform()) {
+    // Coming back to the tab is a browser's version of rejoining the wi-fi: the
+    // moment a reading could newly succeed.
+    void sniffBrowserEnvironment();
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') void sniffBrowserEnvironment();
+    });
+  }
 
   if (Capacitor.isNativePlatform()) {
     // Joining the ship's wi-fi is exactly this event, and the moment a probe can

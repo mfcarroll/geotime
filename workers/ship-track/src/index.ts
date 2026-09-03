@@ -102,7 +102,17 @@ const CACHE_VERSION = 'v2';
 const cacheKey = (path: string) => `https://ship-track.geotime/${CACHE_VERSION}${path}`;
 
 /** Response headers the browser is allowed to read. Nothing custom is needed. */
-const EXPOSED = 'content-type';
+/**
+ * Headers a browser is allowed to read off our responses.
+ *
+ * content-type is what the client actually uses. The three environment-*
+ * names are a bet worth its cost: aboard, a ship's gateway stamps the
+ * responses it passes, and IF it stamps this host and not only api.rccl.com,
+ * naming them here is the difference between a browser knowing it is at sea
+ * and not. Ashore they are simply absent, so it costs nothing to be wrong.
+ * The ?shipprobe page reports whether they ever arrive.
+ */
+const EXPOSED = 'content-type, environment-marker, environment-ship-code, ship-time';
 
 function allowedOrigins(env: Env): string[] {
   return env.ALLOWED_ORIGINS.split(',').map((o) => o.trim()).filter(Boolean);

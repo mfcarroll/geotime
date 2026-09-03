@@ -17,6 +17,7 @@ import { forgetShip, resolveAllShipClocks, startShipTimeWatch } from './shiptime
 import { initShipTrack } from './shiptrack';
 import { refreshShipMarkers, startShipMarkerWatch } from './ship-markers';
 import { installDiagnostics } from './diagnostics';
+import { maybeRunShipProbe } from './ship-probe';
 import { library, dom as faDom } from '@fortawesome/fontawesome-svg-core';
 import { faLocationDot, faWifi, faBullseye, faMobileAlt, faSatellite, faShip } from '@fortawesome/free-solid-svg-icons';
 
@@ -44,6 +45,11 @@ function handleUrlParameters() {
 }
 
 async function startApp() {
+  // An unlinked diagnostic, reached at ?shipprobe. It answers the one
+  // question about browser ship mode that cannot be settled from shore, so it
+  // takes over the page rather than running behind a working app.
+  if (maybeRunShipProbe()) return;
+
   handleUrlParameters();
   
   setTimeout(() => {

@@ -50,7 +50,9 @@
             </div>
             <div id="time-content" class="hidden">
               <h2 class="text-xl font-semibold text-white mb-2 flex items-center justify-center">
-                <i class="fas fa-location-dot fa-fw mr-2 text-green-400"></i>
+                <!-- Blue, matching the GPS band on the map and the satellite above it: the
+                     colour names the thing, not the act of choosing it. -->
+                <i class="fas fa-location-dot fa-fw mr-2 text-blue-400"></i>
                 Local Time
               </h2>
               <p id="local-time" class="text-4xl font-bold text-white tracking-wider font-mono">--:--:--</p>
@@ -65,7 +67,9 @@
               <div id="ship-time-section" class="hidden">
                 <hr class="border-gray-600 my-4">
                 <h2 class="text-xl font-semibold text-white mb-2 flex items-center justify-center">
-                  <i class="fas fa-ship fa-fw mr-2 text-amber-400"></i>
+                  <!-- Green, and deliberately not amber: amber is what a SELECTED zone is,
+                       and a ship is something you are on rather than something you picked. -->
+                  <i class="fas fa-ship fa-fw mr-2 text-green-400"></i>
                   Ship Time
                 </h2>
                 <p id="ship-time" class="text-3xl font-medium text-gray-300 font-mono">--:--:--</p>
