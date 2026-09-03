@@ -187,12 +187,17 @@ export function updateUserTimezoneDetails(tzid: string) {
         dom.userTimezoneDetailsEl.classList.remove('hidden');
 
         if (aboard) {
-            // The short name: this slot is narrow and shares a row with two others.
-            dom.userTimezoneNameEl.textContent = ship!.short;
+            // The full name, not `short`. The slot is narrow and this wraps to
+            // two lines because of it — which is the cheaper of the two costs.
+            // A vessel's name is content; the row it sits in is layout.
+            dom.userTimezoneNameEl.textContent = ship!.name;
             dom.userTimezoneTimeEl.textContent = formatFixedOffsetTime(
                 ship!.offsetHours as number, { hour: 'numeric', minute: '2-digit' });
+            setAnchorVoyageLine(shipKey(ship!));
             return;
         }
+
+        setAnchorVoyageLine(null);
 
         // The map card names the zone; the Local Time card names the town you're in.
         dom.userTimezoneNameEl.textContent = getDisplayTimezoneName(tzid);
@@ -237,9 +242,19 @@ function selectZone(newTzid: string | null) {
         state.temporaryTimezone = newTzid;
     }
 
+    // Only a deselection empties this slot.
+    //
+    // It used to empty when the ground zone was picked, on the reasoning that
+    // the card beside it already said the same thing. But the map paints the
+    // picked zone yellow either way, and a yellow zone with no yellow card
+    // breaks the pairing the colours exist to make. The two cards are also not
+    // saying the same thing: the left one names the place you are standing and
+    // gives its time, this one names the zone you clicked and measures it
+    // against the anchor. Aboard they are not even close — the ground can be
+    // hours off the ship.
     updateCard(
         dom.selectedTimezoneDetailsEl, dom.selectedTimezoneNameEl, dom.selectedTimezoneOffsetEl,
-        (isDeselecting || state.gpsTimezoneSelected) ? null : newTzid,
+        isDeselecting ? null : newTzid,
         'offset'
     );
 
@@ -348,14 +363,22 @@ function updateShipCard(ship: ShipClock | null): void {
     // where `short` was built for exactly this: the same name with the words
     // that distinguish nothing removed. Ambiguity is not a risk here, since the
     // user just picked this row.
-    dom.selectedTimezoneNameEl.textContent = ship.short;
+    dom.selectedTimezoneNameEl.textContent = ship.name;
     if (ship.offsetHours === null) {
         // The same wording the clock row uses, for the same reason: no offset
         // means nothing sensible to show, and the embark port's zone is the
         // obvious wrong answer.
         dom.selectedTimezoneOffsetEl.textContent = 'Finding ship time…';
+    } else if (aboardShip() && shipKey(aboardShip()!) === shipKey(ship)) {
+        // The ship you are ON, picked deliberately. "Ship time" is a list-row
+        // label — it earns its place there because the list has no colour to
+        // mark the reference — and in a card that is already green-and-leftmost
+        // it says nothing while occupying the one line that could. An offset
+        // would be worse still: measured from itself, always +0.
+        dom.selectedTimezoneOffsetEl.textContent = formatFixedOffsetTime(
+            ship.offsetHours, { hour: 'numeric', minute: '2-digit' });
     } else {
-                dom.selectedTimezoneOffsetEl.textContent =
+        dom.selectedTimezoneOffsetEl.textContent =
             relativeTextForShip(ship as { brand: string; code: string; offsetHours: number });
     }
     dom.selectedTimezoneDetailsEl.classList.remove('hidden');
@@ -369,9 +392,43 @@ function updateShipCard(ship: ShipClock | null): void {
  * line when there is nothing to say.
  */
 function setShipVoyageLine(voyage: ShipVoyage | null, key: string | null): void {
-    const line = voyageLine(voyage, key);
+    // Suppressed when this ship is also the anchor, because the green card is
+    // already showing the same line for the same vessel and two copies of one
+    // ETA side by side is noise, not emphasis. A DIFFERENT ship selected while
+    // aboard keeps its line: two destinations are two facts.
+    const aboard = aboardShip();
+    const duplicate = key !== null && aboard !== null && shipKey(aboard) === key;
+    const line = duplicate ? '' : voyageLine(voyage, key);
     dom.selectedShipVoyageEl.textContent = line;
     dom.selectedShipVoyageEl.classList.toggle('hidden', line === '');
+}
+
+/**
+ * The anchor card's third line, while aboard.
+ *
+ * Fetched on the key changing rather than on every repaint: the slot repaints
+ * once a second by design, and a voyage is a per-voyage fact. voyageForShip
+ * caches, but asking it sixty times a minute would still churn a promise for
+ * nothing.
+ */
+let anchorVoyageKey: string | null = null;
+
+function setAnchorVoyageLine(key: string | null): void {
+    if (key === anchorVoyageKey) return;
+    anchorVoyageKey = key;
+
+    dom.userShipVoyageEl.textContent = '';
+    dom.userShipVoyageEl.classList.add('hidden');
+    if (!key) return;
+
+    void voyageForShip(key).then((resolved) => {
+        // The anchor may have moved on while this was in flight — stepping
+        // ashore, or boarding another vessel.
+        if (anchorVoyageKey !== key) return;
+        const line = voyageLine(resolved, key);
+        dom.userShipVoyageEl.textContent = line;
+        dom.userShipVoyageEl.classList.toggle('hidden', line === '');
+    }).catch(() => {});
 }
 
 /**
