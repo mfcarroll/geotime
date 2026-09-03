@@ -102,7 +102,17 @@ function updateCard(
   nameEl: HTMLElement,
   valueEl: HTMLElement,
   tzid: string | null,
-  valueType: 'offset' | 'time'
+  valueType: 'offset' | 'time',
+  /**
+   * Which of the three slots this is.
+   *
+   * Only the selected slot changes colour with its contents. The hovered slot
+   * is white whatever it holds, because white is not saying what the zone IS —
+   * it is saying the pointer is over it, which the map echoes with a white
+   * outline. Colouring it would break that pairing, and did: the first version
+   * of this coloured every card the same way and turned hover gold.
+   */
+  role: 'selected' | 'hovered' = 'selected',
 ) {
   if (tzid) {
     nameEl.textContent = getDisplayTimezoneName(tzid);
@@ -114,23 +124,14 @@ function updateCard(
       valueEl.textContent = relativeTextForZone(tzid);
     }
 
-    // Blue when the zone selected is the one you are standing in, gold
-
-
-    // otherwise. The colour answers 'what is this' rather than 'how did it
-
-
-    // get here', so it always agrees with the marks above the map.
-
-
-    const isGround = tzid === state.gpsTzid;
-
-
-    cardEl.classList.toggle('border-blue-500', isGround);
-
-
-    cardEl.classList.toggle('border-yellow-500', !isGround);
-
+    if (role === 'selected') {
+      // Blue when the zone selected is the one you are standing in, gold
+      // otherwise. The colour answers "what is this" rather than "how did it get
+      // here", so it always agrees with the marks above the map.
+      const isGround = tzid === state.gpsTzid;
+      cardEl.classList.toggle('border-blue-500', isGround);
+      cardEl.classList.toggle('border-yellow-500', !isGround);
+    }
 
     cardEl.classList.remove('hidden');
   } else {
@@ -579,18 +580,19 @@ async function setupTimezoneMapListeners() {
     updateCard(
       dom.hoveredTimezoneDetailsEl, dom.hoveredTimezoneNameEl, dom.hoveredTimezoneOffsetEl,
       isAlreadyShown ? null : tzid,
-      'offset'
+      'offset',
+      'hovered'
     );
   });
 
   document.getElementById('timezone-map')!.addEventListener('mouseleave', () => {
     if (isTouchDevice) return;
     setHoveredZone(null);
-    updateCard(dom.hoveredTimezoneDetailsEl, dom.hoveredTimezoneNameEl, dom.hoveredTimezoneOffsetEl, null, 'offset');
+    updateCard(dom.hoveredTimezoneDetailsEl, dom.hoveredTimezoneNameEl, dom.hoveredTimezoneOffsetEl, null, 'offset', 'hovered');
   });
 
   state.timezoneMap.data.addListener('click', (event: google.maps.Data.MouseEvent) => {
-    updateCard(dom.hoveredTimezoneDetailsEl, dom.hoveredTimezoneNameEl, dom.hoveredTimezoneOffsetEl, null, 'offset');
+    updateCard(dom.hoveredTimezoneDetailsEl, dom.hoveredTimezoneNameEl, dom.hoveredTimezoneOffsetEl, null, 'offset', 'hovered');
     selectZone(event.feature.getProperty('tzid') as string);
   });
 }
