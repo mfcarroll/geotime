@@ -57,7 +57,14 @@ export default defineConfig(({ mode }) => ({
   },
   preview: {
     https: true,
-    proxy: rcclDevProxy()
+    proxy: rcclDevProxy(),
+    // Stands in for a ship's gateway stamping our own origin, which is the one
+    // thing browser ship mode rests on and the one thing a desk cannot produce.
+    // Set SHIP_MARKER=ship to be aboard; leave it unset to be ashore.
+    //
+    // Only ever in --mode shiptest, so an ordinary `vite preview` cannot
+    // accidentally claim to be at sea.
+    headers: shipMarkerHeaders(mode),
   },
   define: {
     // Compiled to `null` in every mode but `shiptest`, so a release build has
@@ -87,6 +94,26 @@ export default defineConfig(({ mode }) => ({
  *      fails the build rather than being ignored, since a gateway pointing
  *      somewhere public is a mistake worth stopping.
  */
+/**
+ * Fake gateway headers for `vite preview`, so the aboard path can be exercised in
+ * a browser without a ship.
+ *
+ * The marker is the entire basis of browser detection and a shore machine cannot
+ * produce one, so without this the only way to see ship mode in a browser is to
+ * hand-roll a server that injects it. This replaces that errand.
+ *
+ *   SHIP_MARKER=ship npx vite preview --mode shiptest   # aboard Star of the Seas
+ *   npx vite preview --mode shiptest                    # ashore
+ *
+ * Both halves matter: leaving is as much a transition as boarding, and it is the
+ * one that has to work on a bad connection.
+ */
+function shipMarkerHeaders(mode) {
+  if (mode !== 'shiptest' || process.env.SHIP_MARKER !== 'ship') return {};
+  console.warn('\n[shiptest] preview reports ABOARD Star of the Seas (ST).\n');
+  return { 'environment-marker': 'ship', 'environment-ship-code': 'ST' };
+}
+
 function shipGateway(mode) {
   if (mode !== 'shiptest') return null;
 

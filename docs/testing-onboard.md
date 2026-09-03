@@ -206,20 +206,46 @@ you back off.
 
 ## Testing ship mode in a browser
 
-The gateway now serves browsers as well as native, and `--mode shiptest` admits
-its origin to the CSP, so the whole aboard path can be exercised where it
-reloads in a second:
+This is the quickest surface to test on — no store queue, no emulator, seconds
+per reload — so it is worth doing here first even for changes that will ship
+native.
+
+The awkward part used to be that "serve `dist/` from something that stamps the
+marker" was left as an exercise. `vite preview` now does the stamping itself, so
+boarding and leaving are one command each:
 
 ```
-node scripts/ship-gateway.mjs
-VITE_SHIP_GATEWAY=http://localhost:8899 npx vite build --mode shiptest
+node scripts/ship-gateway.mjs      # once, in its own terminal
+npm run shiptest:web               # aboard Star of the Seas
+npm run shiptest:web:ashore        # ashore
 ```
 
-Serve `dist/` and open it. Two independent signals can put the app aboard, and
-BOTH must say shore to get it back:
+Verified working end to end: boarding sets `aboardShipKey` and swings the anchor
+to the ship; leaving clears it, drops the "Ship time" label, and leaves the ship
+in the list as an ordinary saved clock — which is right, since a ship you sailed
+on is still a clock you might want.
 
-  the gateway         `echo shore > /tmp/ship-mode`
-  the origin's own headers   whatever is serving `dist/`
+### Both signals, or neither
 
-Testing "ashore" with only one of them set is the mistake to avoid — it looks
-like stickiness misbehaving and is simply the other signal still saying ship.
+Two independent signals can put the app aboard, and BOTH must say shore to get
+it back:
+
+  the gateway              `echo shore > /tmp/ship-mode`
+  the origin's own headers `SHIP_MARKER`, which the npm scripts set for you
+
+Testing "ashore" with only one of them cleared is the mistake to avoid — it
+looks like stickiness misbehaving and is simply the other signal still saying
+ship. The scripts only cover the second; the gateway is yours to set.
+
+### Why the preview is HTTPS, and what to do about it
+
+`preview.https` is on for parity with the deployed site, and a self-signed cert
+is refused outright by some embedded browsers rather than offering a bypass. If
+the preview will not load, serve `dist/` over plain HTTP instead and stamp the
+same two headers by hand — `localhost` is a secure context either way, so the
+service worker and geolocation still work.
+
+### What it still cannot tell us
+
+Whether a real ship's gateway stamps OUR origin, or only `api.rccl.com`. Nothing
+on shore can answer that; `?shipprobe` asks it in one page, aboard.
