@@ -9,7 +9,7 @@ record why each was built the way it was.
 | | Status |
 | --- | --- |
 | 1. Ship destination is misleading | done |
-| 2. Ship time as the reference while aboard | **resolver done, view + Android open** |
+| 2. Ship time as the reference while aboard | done |
 | 3. Red x on the wrong row | done |
 
 ---
@@ -103,7 +103,7 @@ is worth noting: the stale ETA was never specific to one voyage.
 
 ---
 
-## 2. Ship time as the reference while aboard
+## 2. Ship time as the reference while aboard — DONE
 
 ### The proposal
 
@@ -286,12 +286,30 @@ So standing in Vancouver with a ship alongside, your own pinned row read "Star o
 the Seas" and Vancouver was nowhere — silently, since the matching clocks made
 the time right either way.
 
-### Effort
+### Where it landed
 
-The arithmetic is a day. The label discipline, the two rules above and testing
-the transition are the rest, and they are where this could go wrong quietly.
+All four surfaces measure from the anchor:
 
----
+| Surface | |
+| --- | --- |
+| `ZoneRowResolver` | 41 tests, mutation-checked |
+| iOS widget view | reads the anchor's label; markers compose |
+| `GeoTimeWidgetProvider` | hand port of the same ten rules |
+| Main app | `anchorOffsetHours()` in `src/time.ts`, used by the World Clock rows and both map chips |
+
+Only things expressing a DIFFERENCE re-base. The Local, Ship and Device cards
+each state a real clock and are labelled, so none of them moved, and the blue
+GPS band still means "where you are".
+
+**Android is compile-verified only.** Its `buildRows` is a hand port of logic
+the Swift suite tests and the Java side does not — exactly the drift the
+resolver's own comment warns about. The shared case table that would prevent it
+still does not exist, and is the obvious next piece of work if this is ever
+touched again.
+
+**Also unverified: the widget's own aboard/ashore transition on Android.** The
+gateway harness can drive it (`echo shore > /tmp/ship-mode`), and it has been
+exercised on iOS but not here.
 
 ## 3. Red × appears on the wrong row — DONE
 
