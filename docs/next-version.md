@@ -163,9 +163,18 @@ said not to do that:
 > abbreviating a vessel.
 
 A guest aboard knows which ship they are on. They cannot recover a name the
-layout has eaten. So the anchor label is optional like every other, and the ship
-mark carries the meaning when the words will not fit — which is exactly how
-"Local time" has always behaved ashore.
+layout has eaten.
+
+Making the label merely *optional* was not enough, because the budget that grants
+it is not sound. The city font is sized from a scale computed WITHOUT labels, and
+`max(9, ...)` can override even that — so a label is granted without ever being
+checked against the row it lands on. Ashore that rarely bites, since "Local time"
+sits on a short name. Aboard it lands on the longest name in the list.
+
+So on a single-line row a SHIP anchor shows no label at all. The ship mark is
+already there and says as much. Rich rows keep it, on line 2, where it costs
+nothing. The underlying budget flaw is left alone — it predates this work and no
+arithmetic is worth spending on a garnish.
 
 ### Where the baseline actually lives
 

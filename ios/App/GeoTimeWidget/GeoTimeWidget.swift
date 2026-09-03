@@ -180,15 +180,20 @@ struct GeoTimeWidgetView: View {
                         // aboard — is a garnish like every other, and the width
                         // budget may refuse it.
                         //
-                        // It was briefly made mandatory aboard, on the theory that
-                        // without it the offsets below lose their reference. On a
-                        // real widget that theory cost the vessel its NAME: the
-                        // row rendered "St.. Ship time" because the label was
-                        // spent before the name. A guest aboard knows which ship
-                        // they are on; they cannot recover a name the layout ate.
-                        // The rule above already said as much — names before
-                        // labels — and this is simply obeying it.
-                        if localLabel { reserved += width(r.relativeText, detailFont) + hGap }
+                        // Never on a SHIP anchor in a single-line row. Two things
+                        // stack against it there: the font is sized from a scale
+                        // computed WITHOUT labels, and max(9,...) can override
+                        // that fit outright — so a label granted here is not
+                        // actually checked against the row it lands on. Aboard,
+                        // that row holds the longest name in the list, and the
+                        // result was "St.. Ship time".
+                        //
+                        // No arithmetic is worth spending on it, because the label
+                        // is not carrying much: a guest aboard knows which ship
+                        // they are on, and the ship mark is already on the row.
+                        // In rich rows the label lives on line 2, where it is free
+                        // and still shown.
+                        if localLabel && !r.isShip { reserved += width(r.relativeText, detailFont) + hGap }
                     } else if inlineOffset {
                         reserved += width(r.relativeText, detailFont) + hGap
                         if r.isDevice && deviceLabel { reserved += width("· Device time", detailFont) + hGap }
@@ -346,10 +351,11 @@ private struct RowView: View {
                 //
                 // The anchor prints its own label rather than a constant, because
                 // what it says is now a fact about the world: "Local time" ashore,
-                // "Ship time" aboard. Optional either way — a name outranks a
-                // label, and the ship mark still says which row is which.
+                // "Ship time" aboard. Suppressed on a ship anchor here — the mark
+                // says it, and the name is worth more than the words. Rich rows
+                // still show it, on line 2 where it costs nothing.
                 if row.isAnchor {
-                    if metrics.showLocalLabel { detailText(row.relativeText) }
+                    if metrics.showLocalLabel && !row.isShip { detailText(row.relativeText) }
                 } else if metrics.inlineOffset {
                     detailText(row.relativeText)
                     if row.isDevice && metrics.showDeviceLabel { detailText("· Device time") }
