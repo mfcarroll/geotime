@@ -40,7 +40,19 @@ import {
 import { fetchActiveVoyage, shipTimeAvailable, sniffSameOriginEnvironment, todayStamp, type Environment } from './rccl';
 
 /** The last definite environment reading, with when it arrived. */
-let lastEnvironment: (Environment & { at: number }) | null = null;
+/**
+ * How the last reading was arrived at.
+ *
+ * Worth recording because the diagnostics dump is read by somebody on a ship
+ * trying to establish what is true. A position inference and a gateway header
+ * produce the same Environment on purpose — that is what lets one code path
+ * serve both — but reporting an inference as "marker: ship" would invite the
+ * reader to conclude the gateway stamped something, which on the web it never
+ * does.
+ */
+type Via = 'header' | 'position';
+
+let lastEnvironment: (Environment & { at: number; via: Via }) | null = null;
 
 /**
  * What the last stamped response said about where we are.
@@ -50,7 +62,7 @@ let lastEnvironment: (Environment & { at: number }) | null = null;
  * code rather than the wire, so a copyable dump from a real ship is worth more
  * than any amount of inference.
  */
-export function currentEnvironment(): (Environment & { at: number }) | null {
+export function currentEnvironment(): (Environment & { at: number; via: Via }) | null {
   return lastEnvironment;
 }
 
@@ -63,10 +75,13 @@ export function currentEnvironment(): (Environment & { at: number }) | null {
  * is still the best answer available. Only a definite marker changes anything,
  * which is what gives stickiness and liveness at once with no threshold to tune.
  */
-async function noteEnvironment(env: Environment | null | undefined): Promise<void> {
+async function noteEnvironment(
+  env: Environment | null | undefined,
+  via: Via = 'header',
+): Promise<void> {
   if (!shipTimeAvailable()) return;
   if (!env || env.marker === null) return;
-  lastEnvironment = { ...env, at: Date.now() };
+  lastEnvironment = { ...env, at: Date.now(), via };
 
   if (env.marker === 'shore') {
     // Ashore. The ship is NOT removed from the list — nothing tells us the guest
@@ -358,7 +373,7 @@ async function sniffBrowserEnvironment(): Promise<void> {
   // inference, and it cannot be: noteEnvironment ignores a null, and position
   // returns null whenever it is not sure.
   if (env?.marker == null) {
-    await noteEnvironment(await sniffPositionEnvironment(state.deviceFix));
+    await noteEnvironment(await sniffPositionEnvironment(state.deviceFix), 'position');
   }
 }
 

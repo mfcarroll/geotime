@@ -18,6 +18,7 @@ import { state } from './state';
 import { shipKey } from './ships';
 import { probeRaw, shipTimeAvailable } from './rccl';
 import { currentEnvironment } from './shiptime';
+import { isUsableFix, lastPositionVerdict } from './ship-position';
 
 /**
  * Everything worth knowing, as plain text.
@@ -41,12 +42,35 @@ export async function shipTimeReport(): Promise<string> {
   add('aboard ship key', state.aboardShipKey ?? '(not aboard / unknown)');
   const env = currentEnvironment();
   if (env) {
-    add('last marker', env.marker);
+    add('last marker', `${env.marker}  (${env.via === 'position' ? 'INFERRED from position, no header involved' : 'from a gateway header'})`);
     add('last ship code', env.shipCode ?? '(none)');
     add('last ship-time header', env.shipTime ?? '(absent)');
     add('last marker seen', new Date(env.at).toISOString());
   } else {
     lines.push('last marker: (never — no definite reading yet)');
+  }
+
+  lines.push('', '--- position detection (browser) ---');
+  const fix = state.deviceFix;
+  if (!fix) {
+    lines.push('device fix: (none yet — detection has nothing to work with)');
+  } else {
+    add('device fix', `${fix.lat.toFixed(5)}, ${fix.lon.toFixed(5)}  accuracy ${fix.accuracy}m`);
+    // The single most common reason detection stays silent, and the one that
+    // looks like a bug rather than a refusal: a network fix is rejected outright
+    // because a ship's wifi is Starlink and can place you on another continent.
+    const why = fix.sensor ? 'sensor, but too imprecise' : 'network fix, not sensor';
+    add('fix usable', isUsableFix(fix) ? 'yes (sensor)' : `NO — ${why}`);
+  }
+  const verdict = lastPositionVerdict();
+  if (!verdict) {
+    lines.push('verdict: (never ran — no usable fix, or throttled)');
+  } else if (verdict.kind === 'aboard') {
+    add('verdict', `aboard ${verdict.ship.name} (${verdict.ship.code}), ${verdict.km.toFixed(2)} km`);
+  } else if (verdict.kind === 'ashore') {
+    add('verdict', 'ashore — nothing afloat within reach');
+  } else {
+    add('verdict', `unknown — ${verdict.why}`);
   }
 
   lines.push('', '--- stored ships ---');
@@ -93,6 +117,14 @@ export async function shipTimeReport(): Promise<string> {
  */
 export function installDiagnostics(trigger: HTMLElement): void {
   if (!shipTimeAvailable()) return;
+
+  // Also reachable at ?diag, for someone who cannot be talked through six taps
+  // over a satellite connection. Delayed rather than immediate: the interesting
+  // fields are filled in by detection, which needs a fix and a round trip, and a
+  // report captured before that has nothing in it but blanks.
+  if (window.location.search.includes('diag')) {
+    window.setTimeout(() => { void showReport(); }, 6000);
+  }
 
   let taps = 0;
   let resetAt = 0;
