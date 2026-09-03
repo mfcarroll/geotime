@@ -154,3 +154,27 @@ the deliberate way back to the raster path.
 Verified on device: both maps report zero raster tiles and render to canvas, the
 444-feature timezone layer still draws and styles, and markers and polylines are
 unaffected. Building the layers was marginally faster than raster.
+
+## A shiptest build is per-platform, and that is a trap
+
+`--mode shiptest` bakes the gateway address into the bundle, and the two
+platforms need different ones:
+
+    VITE_SHIP_GATEWAY=http://localhost:8899   iOS simulator
+    VITE_SHIP_GATEWAY=http://10.0.2.2:8899    Android emulator
+
+So there is no single build both can run. Rebuilding for one leaves the other on
+whatever it had, and nothing warns you — the stale side keeps working, just with
+older logic. It showed up as the two platforms disagreeing about the same ship:
+Android saying "Ship time" where iOS still said "+2 hrs".
+
+If the two disagree about anything, compare the bundle names before looking for
+a bug:
+
+```
+ls dist/assets/main-*.js \
+   ios/App/App/public/assets/main-*.js \
+   android/app/src/main/assets/public/assets/main-*.js
+```
+
+Three different hashes means three different builds, not three different bugs.
