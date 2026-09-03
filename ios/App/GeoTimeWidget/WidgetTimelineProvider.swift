@@ -64,6 +64,7 @@ struct Provider: TimelineProvider {
                                                         now: date,
                                                         localPlaceName: WidgetSharedStore.loadLocalPlaceName(),
                                                         labels: WidgetSharedStore.loadLabels(),
-                                                        ships: ships))
+                                                        ships: ships,
+                                                        aboardShipKey: WidgetSharedStore.loadAboardShipKey()))
     }
 }

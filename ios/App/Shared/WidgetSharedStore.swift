@@ -11,6 +11,7 @@ enum WidgetSharedStore {
     static let labelsKey = "worldClockLabels"
     static let shipsKey = "shipClocks"
     static let appKeyKey = "rcclAppKey"
+    static let aboardShipKey = "aboardShipKey"
 
     static func save(_ zones: [String]) {
         guard let defaults = UserDefaults(suiteName: suiteName) else { return }
@@ -65,6 +66,23 @@ enum WidgetSharedStore {
     // The nearest town to the app's last GPS fix, inside that fix's own zone —
     // "Nelson" rather than "Vancouver". Resolved by the app, because the city
     // index it comes from is far too large to parse in an extension.
+    /// The ship we are aboard, or nil ashore. Cleared rather than stored empty,
+    /// so "no key" and "the empty key" cannot be told apart by accident.
+    static func saveAboardShipKey(_ key: String?) {
+        guard let defaults = UserDefaults(suiteName: suiteName) else { return }
+        if let key, !key.isEmpty {
+            defaults.set(key, forKey: aboardShipKey)
+        } else {
+            defaults.removeObject(forKey: aboardShipKey)
+        }
+    }
+
+    static func loadAboardShipKey() -> String? {
+        guard let defaults = UserDefaults(suiteName: suiteName) else { return nil }
+        let value = defaults.string(forKey: aboardShipKey)
+        return (value?.isEmpty ?? true) ? nil : value
+    }
+
     static func saveLocalPlaceName(_ name: String?) {
         guard let defaults = UserDefaults(suiteName: suiteName) else { return }
         if let name = name, !name.isEmpty {

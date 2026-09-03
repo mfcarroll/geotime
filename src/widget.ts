@@ -52,6 +52,19 @@ export interface WidgetPayload {
   localPlaceName: string | null;
   /** Ships with a resolved offset. See WidgetShip. */
   ships: WidgetShip[];
+  /**
+   * The ship a wifi marker says we are aboard, or null ashore.
+   *
+   * A key rather than a flag because the list may hold several ships and only
+   * one is underfoot. It is what makes the widget measure its offsets from the
+   * ship's clock instead of the ground — see ZoneRowResolver.
+   *
+   * Only ever set from a definite answer (see setAboardShip), so a phone that
+   * has lost the network keeps the last known value rather than falling ashore
+   * the moment it goes offline, which is exactly when a guest is most likely to
+   * be looking.
+   */
+  aboardShipKey: string | null;
 }
 
 export interface WidgetBridgePlugin {
@@ -71,6 +84,7 @@ export interface SyncOptions {
   localTimezone: string | null;
   localPlaceName: string | null;
   ships: ShipClock[];
+  aboardShipKey: string | null;
 }
 
 // localTimezone is the app's GPS-derived "true" local zone (the widget uses it
@@ -85,6 +99,7 @@ export function syncWidgetTimezones({
   localTimezone,
   localPlaceName,
   ships,
+  aboardShipKey,
 }: SyncOptions): void {
   if (!Capacitor.isNativePlatform()) return;
   // Sent as an array parallel to `timezones` rather than a map, because the
@@ -95,6 +110,7 @@ export function syncWidgetTimezones({
     labels: timezones.map((tz) => labels[tz] ?? ''),
     localTimezone,
     localPlaceName,
+    aboardShipKey,
     // An unresolved ship is withheld rather than sent with a placeholder
     // offset. The widget has no way to say "we don't know yet", so a sentinel
     // would render as a confident wrong time — and a row that is briefly absent

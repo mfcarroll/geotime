@@ -33,6 +33,7 @@ public class WidgetBridgePlugin: CAPPlugin, CAPBridgedPlugin {
         WidgetSharedStore.saveLocalTimezone(call.getString("localTimezone"))
         WidgetSharedStore.saveLocalPlaceName(call.getString("localPlaceName"))
         WidgetSharedStore.saveShips(Self.decodeShips(call.getArray("ships")))
+        WidgetSharedStore.saveAboardShipKey(call.getString("aboardShipKey"))
         if #available(iOS 14.0, *) {
             WidgetCenter.shared.reloadAllTimelines()
         }

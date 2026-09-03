@@ -245,3 +245,8 @@
   .two-map-only { display: block; }
   #location-map.two-map-only { display: flex; }
 }
+
+/* The last word of a clock's name plus its ship mark, kept on one line so the
+   mark never wraps alone. See the comment on .city-tail in index.html — the
+   split itself happens in map.ts, since only JS knows where the last word is. */
+.city-tail { white-space: nowrap; }

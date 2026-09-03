@@ -207,6 +207,7 @@ export function syncWidget(): void {
         localTimezone: state.localTimezone,
         localPlaceName: state.localPlaceName,
         ships: state.shipClocks,
+        aboardShipKey: state.aboardShipKey,
     });
 }
 

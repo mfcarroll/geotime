@@ -24,6 +24,7 @@ public class WidgetBridgePlugin extends Plugin {
     static final String PREFS_KEY = "worldClocks";
     static final String PREFS_LOCAL_TZ_KEY = "localTimezone";
     static final String PREFS_LOCAL_PLACE_KEY = "localPlaceName";
+    static final String PREFS_ABOARD_SHIP_KEY = "aboardShipKey";
     static final String PREFS_LABELS_KEY = "worldClockLabels";
     static final String PREFS_SHIPS_KEY = "shipClocks";
     /**
@@ -76,6 +77,9 @@ public class WidgetBridgePlugin extends Plugin {
            .putString(PREFS_SHIPS_KEY, ships == null ? "[]" : ships.toString())
            .putString(PREFS_LOCAL_TZ_KEY, call.getString("localTimezone")) // may be null -> cleared
            .putString(PREFS_LOCAL_PLACE_KEY, call.getString("localPlaceName"))
+           // Stored now so the provider has it the day its rules are ported;
+           // GeoTimeWidgetProvider still measures everything from the ground.
+           .putString(PREFS_ABOARD_SHIP_KEY, call.getString("aboardShipKey"))
            .apply();
         GeoTimeWidgetProvider.refreshAll(ctx);
         call.resolve();

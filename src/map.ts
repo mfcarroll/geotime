@@ -849,7 +849,14 @@ function createClockElement(entry: ClockEntry): HTMLElement {
         clockDiv.classList.remove('bg-yellow-800', 'bg-opacity-50');
     }
 
-    clone.querySelector('.city')!.textContent = clockLabel(entry);
+    // Split so the ship mark cannot wrap away from the name it belongs to.
+    // Everything up to and including the final space goes in the wrapping part;
+    // the last word joins the mark in a nowrap group. See index.html.
+    const label = clockLabel(entry);
+    const lastSpace = label.lastIndexOf(' ');
+    clone.querySelector('.city')!.textContent = lastSpace === -1 ? '' : label.slice(0, lastSpace + 1);
+    clone.querySelector('.city-last')!.textContent =
+        lastSpace === -1 ? label : label.slice(lastSpace + 1);
     // When the row is named after a place rather than its zone ("Nelson"), name
     // the zone underneath so the mapping is visible ("Vancouver"). A ship has no
     // zone, so it names its line instead.

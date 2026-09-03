@@ -172,7 +172,17 @@
                  leading icon leaves the second line hanging under it with
                  nothing beside the mark. The search dropdown keeps it on the
                  left, where every row is a single line. -->
-            <span class="city"></span><i class="ship-icon fas fa-ship fa-fw ml-1 text-sm text-gray-300 hidden"></i>
+            <!-- The mark rides with the LAST WORD, not with the whole name.
+                 Font Awesome renders the <i> as an <svg>, and a line break is
+                 permitted before a replaced element, so a name that wraps could
+                 otherwise strand the ship alone on the second line. Keeping the
+                 final word and the mark in one nowrap group moves them together:
+                 "Anthem of the / Seas [ship]" rather than
+                 "Anthem of the Seas / [ship]".
+                 A word joiner (U+2060) between them was tried first and does
+                 nothing — measured, not assumed. nowrap on the whole line would
+                 work but would stop the name wrapping at all, which is worse. -->
+            <span class="city"></span><span class="city-tail"><span class="city-last"></span><i class="ship-icon fas fa-ship fa-fw ml-1 text-sm text-gray-300 hidden"></i></span>
           </p>
           <p class="region text-sm text-gray-400 truncate"></p>
         </div>
