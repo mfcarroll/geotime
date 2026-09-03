@@ -116,6 +116,13 @@ const TTL = {
   /** A position is the one thing here that is genuinely live. */
   fleet: 60,
   /**
+   * Detection, unlike the map, does not animate. Its own model already reasons
+   * in minutes of drift, and no ship changes berth inside five of them — so the
+   * shortest useful life here is far longer than the fleet feed's, and every
+   * multiple of it is one fewer request upstream.
+   */
+  nearby: 5 * 60,
+  /**
    * The detail bundle carries both the route (fixed for the whole voyage) and
    * the breadcrumb track (a new point roughly hourly). One upstream response
    * means one TTL, so this is pitched at the track — the route being staler than
@@ -611,14 +618,14 @@ export default {
         cacheKey(`/nearby/${cLat.toFixed(2)},${cLon.toFixed(2)}`),
         `${ORIGIN}/map/ships.json${query}`,
         shapeNearby,
-        TTL.fleet
+        TTL.nearby
       );
       return new Response(body, {
         status,
         headers: {
           ...cors,
           'Content-Type': 'application/json; charset=utf-8',
-          'Cache-Control': status === 200 ? `public, max-age=${TTL.fleet}` : 'no-store',
+          'Cache-Control': status === 200 ? `public, max-age=${TTL.nearby}` : 'no-store',
         },
       });
     }

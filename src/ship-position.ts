@@ -159,36 +159,90 @@ function decide(
 let lastVerdict: PositionVerdict | null = null;
 
 /**
- * How often to ask, and why it is not one interval.
+ * The cheap question, asked before the expensive one.
  *
- * watchPosition fires continuously — a fix a second while moving — and each
- * answer here is a request. The Worker caches per grid cell so upstream is
- * unaffected, but a browser tab left open should not spend the day asking a
- * question whose answer changes on the scale of a voyage.
+ * Aboard can only ever name a ship WE can serve a clock for, so if none of our
+ * own 45 is within reach, no answer from the wider query could change anything.
+ * That matters because the two requests do not cost the same: /fleet is a
+ * single globally-shared cache entry that every user on earth hits together,
+ * while /nearby is per-location and only shared with people standing near you.
  *
- * Ashore is the cheap case and the overwhelmingly common one: someone at home
- * is not about to be on a ship, and the ten-minute back-off costs a guest
- * nothing worse than boarding being noticed a few minutes late. Aboard and
- * unknown stay brisk, because those are the states that actually turn over —
- * an unknown alongside becomes a clean answer the moment the neighbour sails.
+ * So the common case — somebody at home, nowhere near a cruise ship — is
+ * settled by the shared request alone and never reaches the other one.
+ *
+ * Both endpoints read the same upstream positions, so gating on one and
+ * deciding on the other cannot disagree about where a ship is.
  */
-const ASK_INTERVAL_MS = { ashore: 10 * 60_000, other: 60_000 };
+export type FleetGate =
+  | { kind: 'ask'; nearestKm: number }
+  | { kind: 'ashore'; nearestKm: number }
+  | { kind: 'unknown'; nearestKm: null };
 
-/** Far enough to be somewhere else, and worth re-asking regardless of the clock. */
+export function fleetGate(
+  fix: DeviceFix,
+  ours: Array<{ lat: number; lon: number }>,
+): FleetGate {
+  // An empty fleet is a failed request, not an empty sea. Saying "ashore" here
+  // would clear the aboard state every time the network hiccuped.
+  if (ours.length === 0) return { kind: 'unknown', nearestKm: null };
+
+  let nearestKm = Infinity;
+  for (const o of ours) {
+    const km = distance(fix.lat, fix.lon, o.lat, o.lon);
+    if (km < nearestKm) nearestKm = km;
+  }
+  return nearestKm <= ACCEPT_KM
+    ? { kind: 'ask', nearestKm }
+    : { kind: 'ashore', nearestKm };
+}
+
+/**
+ * How often to look, scaled by how near the nearest of our ships is.
+ *
+ * The first version of this backed off on the VERDICT — ten minutes once
+ * ashore — and that was wrong in a way worth recording. Someone standing at a
+ * terminal eleven kilometres from their ship reads as ashore, then walks four
+ * hundred metres up the gangway. A verdict-based back-off would not look again
+ * for ten minutes, and a distance-based one keyed to tens of kilometres would
+ * never look again at all: they boarded without travelling far enough to
+ * qualify.
+ *
+ * Distance to the nearest hull is the honest measure of how likely the answer
+ * is to change. Far from any ship it cannot change quickly; next to one it can
+ * change in the time it takes to walk aboard.
+ */
+export function askIntervalMs(nearestKm: number | null): number {
+  if (nearestKm === null) return 60_000;
+  if (nearestKm <= ACCEPT_KM) return 60_000;        // aboard, or close enough to board
+  if (nearestKm <= 50) return 2 * 60_000;           // same port, same stretch of coast
+  return 15 * 60_000;                               // nowhere near a ship
+}
+
+/** Far enough to be somewhere else, and worth looking again regardless of the clock. */
 const MOVED_KM = 2;
 
 let lastAsk: { at: number; lat: number; lon: number } | null = null;
+let lastNearestKm: number | null = null;
+
+/** Records what the gate last measured, which is what sets the cadence. */
+export function noteNearest(km: number | null): void {
+  lastNearestKm = km;
+}
 
 export function shouldAsk(fix: DeviceFix): boolean {
   const now = Date.now();
   if (!lastAsk) { lastAsk = { at: now, lat: fix.lat, lon: fix.lon }; return true; }
 
-  const wait = lastVerdict?.kind === 'ashore' ? ASK_INTERVAL_MS.ashore : ASK_INTERVAL_MS.other;
   const moved = distance(fix.lat, fix.lon, lastAsk.lat, lastAsk.lon);
-  if (now - lastAsk.at < wait && moved < MOVED_KM) return false;
+  if (now - lastAsk.at < askIntervalMs(lastNearestKm) && moved < MOVED_KM) return false;
 
   lastAsk = { at: now, lat: fix.lat, lon: fix.lon };
   return true;
+}
+
+/** Recorded by the gate's own short-circuit, which never reaches verdictFor. */
+export function noteVerdict(verdict: PositionVerdict): void {
+  lastVerdict = verdict;
 }
 
 /** The last verdict, for the diagnostics page. Detection is invisible when it works. */

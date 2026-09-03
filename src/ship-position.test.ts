@@ -10,7 +10,9 @@
 
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { verdictFor, isUsableFix, type DeviceFix } from './ship-position';
+import {
+  verdictFor, isUsableFix, fleetGate, askIntervalMs, type DeviceFix,
+} from './ship-position';
 import type { NearbyVessel } from './shiptrack';
 import type { ShipRef } from './ships';
 
@@ -138,5 +140,50 @@ describe('the boundary itself', () => {
     const far = verdictFor(at(25.0, -80.0), [vessel({ lat: 25.0 + 10.5 * KM, lon: -80.0 })], ROSTER, NOW);
     assert.equal(near.kind, 'aboard');
     assert.equal(far.kind, 'ashore');
+  });
+});
+
+describe('the fleet gate spends the cheap request before the expensive one', () => {
+  const here = at(25.0, -80.0);
+
+  test('one of ours within reach -> ask the wider question', () => {
+    const g = fleetGate(here, [{ lat: 25.0, lon: -80.0 }]);
+    assert.equal(g.kind, 'ask');
+  });
+
+  test('nothing of ours within reach -> ashore, without asking further', () => {
+    // Aboard can only ever name a ship we serve, so this is decidable from the
+    // shared feed alone. Everyone at home settles here and never touches the
+    // per-location request.
+    const g = fleetGate(here, [{ lat: 25.0 + 200 * KM, lon: -80.0 }]);
+    assert.equal(g.kind, 'ashore');
+  });
+
+  test('an empty fleet is a failed request, not an empty sea', () => {
+    // Saying ashore here would clear the aboard state on every network hiccup.
+    assert.equal(fleetGate(here, []).kind, 'unknown');
+  });
+});
+
+describe('how often to look', () => {
+  test('next to a hull, look often', () => {
+    assert.equal(askIntervalMs(0.2), 60_000);
+    assert.equal(askIntervalMs(9), 60_000);
+  });
+
+  test('somebody at a terminal is still checked briskly enough to board', () => {
+    // The case that broke the first design. Eleven km from her ship reads as
+    // ashore; she then walks 400 m up the gangway. A ten-minute verdict-based
+    // back-off would miss it, and a 20 km distance-based one would never look
+    // again at all.
+    assert.ok(askIntervalMs(11) <= 2 * 60_000);
+  });
+
+  test('nowhere near a ship, barely look at all', () => {
+    assert.equal(askIntervalMs(2000), 15 * 60_000);
+  });
+
+  test('an unknown distance is not treated as far away', () => {
+    assert.equal(askIntervalMs(null), 60_000);
   });
 });

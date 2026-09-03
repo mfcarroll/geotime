@@ -25,8 +25,11 @@
 import { Capacitor } from '@capacitor/core';
 import { Network } from '@capacitor/network';
 import { addShipClock, patchShipClock, persistShipClocks, setAboardShip, state } from './state';
-import { isUsableFix, shouldAsk, verdictFor, type DeviceFix } from './ship-position';
-import { nearbyVessels } from './shiptrack';
+import {
+  fleetGate, isUsableFix, noteNearest, noteVerdict, shouldAsk, verdictFor,
+  type DeviceFix,
+} from './ship-position';
+import { fleetFixes, nearbyVessels } from './shiptrack';
 import {
   loadShipRoster,
   refreshShipRoster,
@@ -310,6 +313,18 @@ function originIsKnownStamped(): boolean {
 export async function sniffPositionEnvironment(fix: DeviceFix | null): Promise<Environment | null> {
   if (!isUsableFix(fix)) return null;
   if (!shouldAsk(fix)) return null;
+
+  // The shared request first. If none of our own ships is within reach, nobody
+  // is aboard one of them and the per-location request would only confirm it.
+  const fleet = await fleetFixes();
+  const gate = fleetGate(fix, [...fleet.values()]);
+  noteNearest(gate.nearestKm);
+
+  if (gate.kind === 'unknown') return null;
+  if (gate.kind === 'ashore') {
+    noteVerdict({ kind: 'ashore' });
+    return { marker: 'shore', shipCode: null, shipTime: null };
+  }
 
   const vessels = await nearbyVessels(fix.lat, fix.lon);
   if (!vessels) return null;
