@@ -5,6 +5,7 @@
 //   node scripts/ship-gateway.mjs            # aboard Star of the Seas
 //   node scripts/ship-gateway.mjs --ship ID  # aboard Independence
 //   echo shore > /tmp/ship-mode              # step ashore, no restart needed
+//   echo none  > /tmp/ship-mode              # emit no markers: what a browser sees
 //
 // Then build the app for it (the mode is what unlocks the hook; see
 // shipGateway() in vite.config.js):
@@ -70,10 +71,20 @@ if (!KEY) {
   process.exit(1);
 }
 
-/** 'ship' unless the mode file says otherwise, so the default is the useful one. */
+/**
+ * 'ship' unless the mode file says otherwise, so the default is the useful one.
+ *
+ * 'none' emits no environment headers at all, which is not a third kind of place
+ * — it is what a BROWSER sees everywhere. The probe run aboard Star of the Seas
+ * showed the ship's gateway stamps RCCL's hosts and not ours, so on the web
+ * these headers never arrive and detection falls to position instead. Without
+ * this mode the harness cannot reproduce the one case the web build actually
+ * lives in, and a position test silently measures the header path instead.
+ */
 function mode() {
   try {
-    return readFileSync(MODE_FILE, 'utf8').trim() === 'shore' ? 'shore' : 'ship';
+    const raw = readFileSync(MODE_FILE, 'utf8').trim();
+    return raw === 'shore' || raw === 'none' ? raw : 'ship';
   } catch {
     return 'ship';
   }
@@ -99,10 +110,14 @@ createServer(async (req, res) => {
       'access-control-expose-headers':
         'environment-marker, environment-ship-code, ship-time, date',
       // The three a real gateway adds. Ashore it reports the marker and a
-      // shipCode of "none", which is what the live API sends from land.
-      'environment-marker': aboard ? 'ship' : 'shore',
-      'environment-ship-code': aboard ? SHIP : 'none',
-      ...(aboard ? { 'ship-time': SHIP_TIME } : {}),
+      // shipCode of "none", which is what the live API sends from land. In
+      // 'none' the whole group is absent — a browser's condition, where these
+      // never arrive and detection has to fall back to position.
+      ...(mode() === 'none' ? {} : {
+        'environment-marker': aboard ? 'ship' : 'shore',
+        'environment-ship-code': aboard ? SHIP : 'none',
+        ...(aboard ? { 'ship-time': SHIP_TIME } : {}),
+      }),
     });
     res.end(body);
     console.log(`${upstream.status} ${aboard ? 'ship ' + SHIP : 'shore'}  ${req.url}`);

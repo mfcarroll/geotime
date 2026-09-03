@@ -19,6 +19,7 @@
     "deploy:ship-track": "wrangler deploy --config workers/ship-track/wrangler.jsonc",
     "deploy:workers": "npm run deploy:utc-time && npm run deploy:rccl-proxy && npm run deploy:ship-track",
     "typecheck:workers": "tsc --noEmit -p workers/tsconfig.json",
+    "typecheck:tests": "tsc --noEmit -p tsconfig.test.json",
     "test": "node --import ./scripts/ts-resolve.mjs --test src/**/*.test.ts",
     "test:shared": "cd ios/SharedKit && swift test"
   },

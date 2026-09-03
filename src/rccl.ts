@@ -137,7 +137,6 @@ function loadAppKey(): Promise<string | null> {
  * Onboard-simulation gateway, injected at build time and `null` in every build
  * but `--mode shiptest`. See shipGateway() in vite.config.js for the guards.
  */
-declare const __SHIP_GATEWAY__: string | null;
 
 function apiBase(): string {
   // The stand-in for a ship's gateway, when a build asked for one. Checked

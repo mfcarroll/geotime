@@ -1,0 +1,10 @@
+{
+  // Tests run on Node and may use node: builtins; the app must not, which is why
+  // the base config pins `types` to the browser set and excludes these files.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["node", "vite/client", "google.maps"],
+    "noEmit": true
+  },
+  "include": ["src/**/*.test.ts", "src/**/*.ts"]
+}

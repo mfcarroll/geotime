@@ -103,7 +103,15 @@ async function startApp() {
   installDiagnostics(dom.deviceTimezoneEl);
 
   // Start watching for location immediately.
-  if (Capacitor.isNativePlatform()) {
+  //
+  // A test build can be told where to stand instead. Position is the only input
+  // to browser ship detection and a desk is not on a ship, so without this the
+  // aboard path is unreachable in the one place it is quickest to look at.
+  // Compiled out of every ordinary build along with __SHIP_GATEWAY__, which is
+  // null unless --mode shiptest.
+  if (__SHIP_GATEWAY__ && standAt()) {
+    // standAt() has already delivered the fix; no watch is started.
+  } else if (Capacitor.isNativePlatform()) {
     let options: PositionOptions = {}
     if (Capacitor.getPlatform() === 'android') {
       options.enableHighAccuracy = true;
@@ -296,3 +304,28 @@ async function startApp() {
 }
 
 startApp();
+
+/**
+ * `?fix=lat,lon` in a shiptest build: pretend the device is there.
+ *
+ * Reports altitude, speed and heading so the fix reads as sensor-derived. Ship
+ * detection refuses a network fix on purpose — a ship's wifi is Starlink, and
+ * one of those can place you on another continent — so a stand-in that skipped
+ * that would be exercising a path no real device takes.
+ */
+function standAt(): boolean {
+  const raw = new URLSearchParams(window.location.search).get('fix');
+  if (!raw) return false;
+  const [lat, lon] = raw.split(',').map(Number);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return false;
+
+  console.warn(`[shiptest] standing at ${lat}, ${lon} — real geolocation is off.`);
+  void onLocationSuccess({
+    coords: {
+      latitude: lat, longitude: lon, accuracy: 8,
+      altitude: 12, altitudeAccuracy: 5, speed: 0, heading: 0,
+    },
+    timestamp: Date.now(),
+  } as unknown as GeolocationPosition);
+  return true;
+}
