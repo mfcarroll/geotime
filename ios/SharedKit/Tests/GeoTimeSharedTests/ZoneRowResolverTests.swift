@@ -138,15 +138,19 @@ final class ZoneRowResolverInvariants: XCTestCase {
 
     /// CHANGED, and this is the consequence worth having in front of you.
     ///
-    /// Ashore, a ship on the list whose clock matches your own no longer folds
-    /// into your row lending it its name — it is an ordinary entry now, and the
-    /// offset rule drops it. So the vessel disappears from the widget entirely
-    /// on the days its clock happens to agree with yours, and reappears when it
-    /// shifts. The app still lists it throughout.
+    /// Ashore, a ship whose clock matches your own is an ordinary entry now, and
+    /// the offset rule drops it. It reappears when its clock shifts; the app
+    /// lists it throughout.
     ///
-    /// The old fold hid this by showing the ship's name on the local row. That
-    /// was only ever justified by the mid-ocean case, which is now handled
-    /// precisely — see testTheGroundMergesIntoTheShipOnlyWhenItHasNoNameOfItsOwn.
+    /// What the fold did here was worse than losing it. It did not add the
+    /// ship's name to your row, it REPLACED your place name with it —
+    /// `agreeingShip?.name ?? localPlaceName` — so this very case rendered as
+    /// "Star of the Seas" under a pin, with Brooklyn nowhere, while you stood in
+    /// Brooklyn. Silently, since the matching clocks made the time right either
+    /// way. Hence the assertion below on the NAME as much as on the count.
+    ///
+    /// Mid-ocean is where that rule was defensible, and it is kept there — see
+    /// testTheGroundMergesIntoTheShipOnlyWhenItHasNoNameOfItsOwn.
     func testAshoreAShipSharingYourOffsetIsDroppedFromTheWidget() throws {
         let star = Fixture.ship("R/ST", "Star of the Seas", offsetHours: -4, short: "Star")
         let rows = ZoneRowResolver.resolve(

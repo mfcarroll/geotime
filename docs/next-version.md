@@ -229,14 +229,33 @@ Three reversals of long-standing behaviour, all deliberate:
   an offset-sorted list, which meant whichever cities lay furthest west — an
   accident of the sort order rather than a decision.
 
-### The consequence to keep an eye on
+### The consequence, stated accurately
 
-Ashore, a ship on the list whose clock matches your own is now dropped from the
-widget entirely, where the old fold at least showed its name on your row. It
-reappears when its clock shifts, and the app lists it throughout. Asserted in
-`testAshoreAShipSharingYourOffsetIsDroppedFromTheWidget` so it is a decision
-rather than a surprise. Exempting ships from the offset dedup is a one-line
-change if it reads badly on a real device.
+Ashore, a ship whose clock matches your own is now dropped from the widget. It
+reappears when its clock shifts, and the app lists it throughout.
+
+This was first written up as a loss against the old fold, which is wrong and
+worth correcting, because the old behaviour was the worse of the two. The fold
+did not add the ship's name to your row — it *replaced* your location's name
+with it:
+
+```swift
+name: agreeingShip?.name ?? localPlaceName ?? TimezoneDisplay.displayName(...)
+```
+
+So ashore in Brooklyn, with a ship on the list that happened to share your
+offset, your own row read "Star of the Seas" under a pin, and Brooklyn was
+nowhere. Silently, too: with the clocks matching, the time was right either way,
+so only the name gave it away.
+
+Losing a vessel from a summary surface is a smaller harm than mislabelling the
+row you are standing in. Mid-ocean is the one place the old rule was defensible
+— no place name, so the ship replaced "UTC−5" rather than a real town — and that
+is precisely the case rule 3 kept.
+
+Asserted in `testAshoreAShipSharingYourOffsetIsDroppedFromTheWidget`, so it stays
+a decision. Exempting ships from the dedup is a one-line change if it reads badly
+on a device.
 
 ### Effort
 
