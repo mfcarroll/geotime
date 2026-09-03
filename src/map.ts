@@ -97,6 +97,19 @@ export function showLocationUnavailable() {
   dom.accuracyDisplayEl.classList.remove('hidden');
 }
 
+/**
+ * Writes a card's value line, monospaced only when it holds a clock reading.
+ *
+ * A time wants tabular figures so the digits stop shuffling as the minute
+ * changes — the anchor card has had them all along, and a ship's time in the
+ * selected slot is the same kind of thing. An offset is prose: "Local time",
+ * "−1 hr". Setting it in the clock face would be borrowing the wrong voice.
+ */
+function setCardValue(el: HTMLElement, text: string, mono: boolean): void {
+  el.textContent = text;
+  el.classList.toggle('font-mono', mono);
+}
+
 function updateCard(
   cardEl: HTMLElement,
   nameEl: HTMLElement,
@@ -121,23 +134,28 @@ function updateCard(
       // Measured from the anchor, like every offset in the list below it — a map
       // that disagreed with the World Clock beneath it would be worse than
       // either answer on its own.
-      valueEl.textContent = relativeTextForZone(tzid);
+      setCardValue(valueEl, relativeTextForZone(tzid), false);
     }
 
-    if (role === 'selected') {
-      // Blue when the zone selected is the one you are standing in, gold
-      // otherwise. The colour answers "what is this" rather than "how did it get
-      // here", so it always agrees with the marks above the map.
-      const isGround = tzid === state.gpsTzid;
-      cardEl.classList.toggle('border-blue-500', isGround);
-      cardEl.classList.toggle('border-yellow-500', !isGround);
-    }
+    // The selected slot is gold, always — including when the zone picked is the
+    // one you are standing in.
+    //
+    // It used to go blue in that case, which contradicted both the map and the
+    // list: resolveZoneStyle tests `tzid === selectedTzid` FIRST, so the zone
+    // under your feet turns gold the moment you pick it, and only the band
+    // around it stays blue. Blue is where you are; gold is what you chose; a
+    // zone can be both and the choice is what this slot reports.
+    //
+    // The rule was never seen until now because the card was hidden in exactly
+    // the case that triggered it — selecting the GPS zone set
+    // gpsTimezoneSelected, which emptied this slot. Unfolding the slot exposed
+    // a branch that had never rendered.
 
     cardEl.classList.remove('hidden');
   } else {
     cardEl.classList.add('hidden');
     nameEl.textContent = '';
-    valueEl.textContent = '';
+    setCardValue(valueEl, '', false);
   }
 }
 
@@ -181,6 +199,12 @@ export function updateUserTimezoneDetails(tzid: string) {
     const paint = () => {
         const ship = aboardShip();
         const aboard = ship !== null && ship.offsetHours !== null;
+
+        // The selected slot can now hold a clock reading too, and a reading has
+        // to keep up with the minute. Painting it only on selection was enough
+        // while it held an offset: that moves when a ship's clock is re-resolved,
+        // not as time passes.
+        refreshSelectedShipTime();
 
         dom.userTimezoneDetailsEl.classList.toggle('border-green-500', aboard);
         dom.userTimezoneDetailsEl.classList.toggle('border-blue-500', !aboard);
@@ -338,6 +362,26 @@ export function selectShip(key: string): void {
 }
 
 /**
+ * Keeps the selected ship's time ticking.
+ *
+ * Only the ship you are ON shows a time here — every other selection shows an
+ * offset, which does not move on its own. Deliberately narrow: it rewrites one
+ * line and nothing else, because updateShipCard clears the voyage line on its
+ * way through and calling that once a second would blank the destination
+ * forever.
+ */
+function refreshSelectedShipTime(): void {
+    const key = state.selectedShipKey;
+    if (!key) return;
+
+    const aboard = aboardShip();
+    if (!aboard || shipKey(aboard) !== key || aboard.offsetHours === null) return;
+
+    setCardValue(dom.selectedTimezoneOffsetEl, formatFixedOffsetTime(
+        aboard.offsetHours, { hour: 'numeric', minute: '2-digit' }), true);
+}
+
+/**
  * Names the selected ship on the map's detail card, or hides it.
  *
  * Reuses the zone card rather than adding a second one: it already means "the
@@ -368,18 +412,18 @@ function updateShipCard(ship: ShipClock | null): void {
         // The same wording the clock row uses, for the same reason: no offset
         // means nothing sensible to show, and the embark port's zone is the
         // obvious wrong answer.
-        dom.selectedTimezoneOffsetEl.textContent = 'Finding ship time…';
+        setCardValue(dom.selectedTimezoneOffsetEl, 'Finding ship time…', false);
     } else if (aboardShip() && shipKey(aboardShip()!) === shipKey(ship)) {
         // The ship you are ON, picked deliberately. "Ship time" is a list-row
         // label — it earns its place there because the list has no colour to
         // mark the reference — and in a card that is already green-and-leftmost
         // it says nothing while occupying the one line that could. An offset
         // would be worse still: measured from itself, always +0.
-        dom.selectedTimezoneOffsetEl.textContent = formatFixedOffsetTime(
-            ship.offsetHours, { hour: 'numeric', minute: '2-digit' });
+        setCardValue(dom.selectedTimezoneOffsetEl, formatFixedOffsetTime(
+            ship.offsetHours, { hour: 'numeric', minute: '2-digit' }), true);
     } else {
-        dom.selectedTimezoneOffsetEl.textContent =
-            relativeTextForShip(ship as { brand: string; code: string; offsetHours: number });
+        setCardValue(dom.selectedTimezoneOffsetEl,
+            relativeTextForShip(ship as { brand: string; code: string; offsetHours: number }), false);
     }
     dom.selectedTimezoneDetailsEl.classList.remove('hidden');
 }
@@ -413,18 +457,42 @@ function setShipVoyageLine(voyage: ShipVoyage | null, key: string | null): void 
  */
 let anchorVoyageKey: string | null = null;
 
+/**
+ * When a lookup that came back empty may be tried again; 0 once one has settled.
+ *
+ * Latching on the key alone was wrong, and wrong in a way that hid itself.
+ * voyageForShip returns null IMMEDIATELY when the ship has no IMO yet — which is
+ * exactly the state a freshly auto-added vessel is in, since the identity is
+ * backfilled from the roster a moment later. Latching then meant the first
+ * attempt failed, the guard refused every attempt after it, and the line stayed
+ * blank for the rest of the session. Selecting the ship masked it by driving a
+ * second lookup through a different path.
+ */
+let anchorVoyageRetryAt = 0;
+const ANCHOR_VOYAGE_RETRY_MS = 5000;
+
 function setAnchorVoyageLine(key: string | null): void {
-    if (key === anchorVoyageKey) return;
-    anchorVoyageKey = key;
+    const sameShip = key === anchorVoyageKey;
+    if (sameShip && anchorVoyageRetryAt === 0) return;              // settled
+    if (sameShip && Date.now() < anchorVoyageRetryAt) return;       // waiting to retry
 
-    dom.userShipVoyageEl.textContent = '';
-    dom.userShipVoyageEl.classList.add('hidden');
-    if (!key) return;
+    if (!sameShip) {
+        anchorVoyageKey = key;
+        dom.userShipVoyageEl.textContent = '';
+        dom.userShipVoyageEl.classList.add('hidden');
+    }
+    if (!key) { anchorVoyageRetryAt = 0; return; }
 
+    anchorVoyageRetryAt = Date.now() + ANCHOR_VOYAGE_RETRY_MS;
     void voyageForShip(key).then((resolved) => {
         // The anchor may have moved on while this was in flight — stepping
         // ashore, or boarding another vessel.
         if (anchorVoyageKey !== key) return;
+        // No voyage yet is not the same as no voyage. Leave the retry window
+        // standing so the next tick asks again once the identity resolves.
+        if (!resolved) return;
+
+        anchorVoyageRetryAt = 0;
         const line = voyageLine(resolved, key);
         dom.userShipVoyageEl.textContent = line;
         dom.userShipVoyageEl.classList.toggle('hidden', line === '');
