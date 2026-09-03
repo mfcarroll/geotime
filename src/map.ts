@@ -2,7 +2,7 @@
 
 import * as dom from './dom';
 import { state, persistTimezones, setLocalPlaceName, syncWidget } from './state';
-import { timezoneForCoordinates, findTimezoneFromGeoJSON, startClocks, getTimezoneOffset, getFormattedTime, getUtcOffset, getDisplayTimezoneName, getZoneLabel, updateAllClocks, formatOffsetDiff } from './time';
+import { timezoneForCoordinates, findTimezoneFromGeoJSON, startClocks, relativeTextForZone, relativeTextForShip, getFormattedTime, getUtcOffset, getDisplayTimezoneName, getZoneLabel, updateAllClocks, formatOffsetDiff } from './time';
 import { locationMapStyles, worldTimezoneMapStyles } from './map-styles';
 import { distance, formatAccuracy, fold } from './utils';
 import { loadCityIndex, nearestPlace } from './cities';
@@ -108,8 +108,10 @@ function updateCard(
     nameEl.textContent = getDisplayTimezoneName(tzid);
 
     if (valueType === 'offset') {
-      const referenceTz = state.gpsTzid || Intl.DateTimeFormat().resolvedOptions().timeZone;
-      valueEl.textContent = getTimezoneOffset(tzid, referenceTz);
+      // Measured from the anchor, like every offset in the list below it — a map
+      // that disagreed with the World Clock beneath it would be worse than
+      // either answer on its own.
+      valueEl.textContent = relativeTextForZone(tzid);
     }
 
     cardEl.classList.remove('hidden');
@@ -287,9 +289,8 @@ function updateShipCard(ship: ShipClock | null): void {
         // obvious wrong answer.
         dom.selectedTimezoneOffsetEl.textContent = 'Finding ship time…';
     } else {
-        const referenceTz = state.gpsTzid || Intl.DateTimeFormat().resolvedOptions().timeZone;
-        dom.selectedTimezoneOffsetEl.textContent =
-            formatOffsetDiff(ship.offsetHours - getUtcOffset(referenceTz));
+                dom.selectedTimezoneOffsetEl.textContent =
+            relativeTextForShip(ship as { brand: string; code: string; offsetHours: number });
     }
     dom.selectedTimezoneDetailsEl.classList.remove('hidden');
 }

@@ -118,8 +118,16 @@ public class GeoTimeWidgetProvider extends AppWidgetProvider {
         List<Row> specials = new ArrayList<>();
         List<Row> others = new ArrayList<>();
         for (Row r : rows) {
-            if (r.isLocal || r.isDevice || r.isShip) specials.add(r); else others.add(r);
+            if (r.isAnchor || r.isLocal || r.isDevice || r.isShip) specials.add(r); else others.add(r);
         }
+        // What survives when space runs out: the zones nearest the anchor.
+        // Keeping the first N of an offset-sorted list kept whichever lay
+        // furthest west, which was an accident of the sort rather than a choice.
+        long anchorOffsetMin = 0;
+        for (Row r : rows) if (r.isAnchor) { anchorOffsetMin = r.offsetMin; break; }
+        final long anchorForSort = anchorOffsetMin;
+        Collections.sort(others, (a, b) -> Long.compare(
+                Math.abs(a.offsetMin - anchorForSort), Math.abs(b.offsetMin - anchorForSort)));
         List<Row> visible = new ArrayList<>(specials);
         for (Row r : others) {
             if (visible.size() >= budget) break;
@@ -146,7 +154,13 @@ public class GeoTimeWidgetProvider extends AppWidgetProvider {
             // Mirrors marker(for:) in GeoTimeWidget.swift.
             row.setViewVisibility(R.id.row_ship, r.isShip ? View.VISIBLE : View.GONE);
             row.setViewVisibility(R.id.row_pin, r.isLocal ? View.VISIBLE : View.GONE);
-            row.setViewVisibility(R.id.row_local_label, (r.isLocal && showLocalLabel) ? View.VISIBLE : View.GONE);
+            // The anchor's own words — "Local time" ashore, "Ship time" aboard —
+            // rather than the string baked into the layout. Never on a SHIP
+            // anchor: the mark is already on the row, and spending the width on
+            // the label costs the vessel its name. Mirrors GeoTimeWidget.swift.
+            boolean anchorLabel = r.isAnchor && showLocalLabel && !r.isShip;
+            if (anchorLabel) row.setTextViewText(R.id.row_local_label, r.offset);
+            row.setViewVisibility(R.id.row_local_label, anchorLabel ? View.VISIBLE : View.GONE);
             row.setViewVisibility(R.id.row_device, r.isDevice ? View.VISIBLE : View.GONE);
             if (r.dayLabel != null) {
                 row.setTextViewText(R.id.row_day, useFullDay ? r.dayLabelFull : r.dayLabel);
@@ -205,17 +219,28 @@ public class GeoTimeWidgetProvider extends AppWidgetProvider {
         final boolean isLocal;     // GPS-derived base zone (green pin)
         final boolean isDevice;    // device OS zone when it differs from local (phone)
         final boolean isShip;      // a cruise ship's crew-set clock (ship mark)
+        /**
+         * The row every other row's `offset` is measured from.
+         *
+         * Ashore this is the same row as isLocal, which is why one flag did for
+         * both until now. Aboard they come apart: the ship anchors the
+         * arithmetic while the GPS zone still marks the ground. Mirrors
+         * WidgetRow.isAnchor in ZoneRowResolver.swift.
+         */
+        final boolean isAnchor;
         final String dayLabel;     // "Tue" — null unless the calendar day differs
         final String dayLabelFull; // "Tuesday" — used when there's room
         final String offset;       // "+3 hrs" relative to local; "" for local
 
         Row(String label, String tzId, long offsetMin, boolean isLocal, boolean isDevice,
             String dayLabel, String dayLabelFull, String offset) {
-            this(label, null, tzId, offsetMin, isLocal, isDevice, false, dayLabel, dayLabelFull, offset);
+            this(label, null, tzId, offsetMin, isLocal, isDevice, false, false,
+                 dayLabel, dayLabelFull, offset);
         }
 
         Row(String label, String shortLabel, String tzId, long offsetMin, boolean isLocal,
-            boolean isDevice, boolean isShip, String dayLabel, String dayLabelFull, String offset) {
+            boolean isDevice, boolean isShip, boolean isAnchor,
+            String dayLabel, String dayLabelFull, String offset) {
             this.label = label;
             this.shortLabel = shortLabel;
             this.tzId = tzId;
@@ -223,96 +248,137 @@ public class GeoTimeWidgetProvider extends AppWidgetProvider {
             this.isLocal = isLocal;
             this.isDevice = isDevice;
             this.isShip = isShip;
+            this.isAnchor = isAnchor;
             this.dayLabel = dayLabel;
             this.dayLabelFull = dayLabelFull;
             this.offset = offset;
         }
     }
 
+    /**
+     * The ten rules, kept identical to ZoneRowResolver.resolve in
+     * ios/App/Shared/ZoneRowResolver.swift. The two are tested on iOS only, so
+     * this side is the one that can drift — read them side by side before
+     * changing either.
+     *
+     *   anchor = the ship when a marker confirms we are aboard, else the ground
+     *   every offset is measured from the anchor
+     *   the ground always shows, with its pin
+     *   aboard, the ship always shows, with its mark
+     *   the phone takes a row only when it agrees with neither; otherwise it
+     *     marks the row it agrees with, and ashore it is not marked at all
+     *   saved zones fill the rest, never repeating a clock already shown
+     *   ships are outside that rule in both directions — a vessel is not a
+     *     timezone, so a city never hides a ship and a ship never hides a city
+     */
     private static List<Row> buildRows(Context ctx) {
         long now = System.currentTimeMillis();
-        TimeZone baseTz = localBaseTimeZone(ctx);   // GPS-derived local
+        TimeZone baseTz = localBaseTimeZone(ctx);   // GPS-derived ground
         String baseId = baseTz.getID();
-        long baseOffset = baseTz.getOffset(now) / 60000L;
+        long geographicOffset = baseTz.getOffset(now) / 60000L;
+        TimeZone osTz = TimeZone.getDefault();
+        long deviceOffset = osTz.getOffset(now) / 60000L;
 
         List<String> stored = readStored(ctx);
-        // Names the user actually picked, parallel to `stored`. Searching
-        // "San Francisco" stores America/Los_Angeles, and the widget should say
-        // San Francisco rather than re-deriving Los Angeles from the id.
         List<String> labels = readList(ctx, WidgetBridgePlugin.PREFS_LABELS_KEY);
+        List<Ship> ships = readShips(ctx);
+
+        String aboardKey = ctx.getSharedPreferences(WidgetBridgePlugin.PREFS_NAME, Context.MODE_PRIVATE)
+                .getString(WidgetBridgePlugin.PREFS_ABOARD_SHIP_KEY, null);
+        Ship aboardShip = null;
+        if (aboardKey != null && !aboardKey.isEmpty()) {
+            for (Ship ship : ships) {
+                if (aboardKey.equals(ship.key)) { aboardShip = ship; break; }
+            }
+        }
+        long anchorOffset = aboardShip != null ? aboardShip.offsetMin : geographicOffset;
+        TimeZone anchorTz = TimeZone.getTimeZone(offsetTzId(anchorOffset));
+
+        // Ship and ground are separate rows even when their clocks agree — two
+        // facts, two lines. The exception is the case the old fold was really
+        // for: mid-ocean the ground has no name, so its row would read "UTC-5"
+        // beside a ship showing the same hour.
+        String localPlace = localPlaceName(ctx);
+        boolean groundIsNameless = localPlace == null && !baseId.contains("/");
+        boolean mergeGroundIntoShip = aboardShip != null
+                && anchorOffset == geographicOffset
+                && groundIsNameless;
 
         List<Row> rows = new ArrayList<>();
-        Set<String> seen = new HashSet<>();
-        seen.add(baseId); // local pre-claims its slot
+        Set<Long> claimedOffsets = new HashSet<>();
 
-        // ONE RULE for every special row: the base always shows, and device and
-        // ship each appear only when they add information — when their offset
-        // differs from the base. Kept identical to iOS ZoneRowResolver.resolve.
-        //
-        // The deliberate asymmetry is how "agreeing" resolves. An agreeing
-        // device is hidden: knowing your phone concurs is not worth a row. An
-        // agreeing ship is folded INTO the base row, because it brings what a
-        // device cannot — a name. Mid-ocean the base row would otherwise read
-        // "UTC-5", the nearest-town lookup being capped at 150 km and correctly
-        // finding nothing, so lending it "Star" is the difference between naming
-        // where you are and naming a number.
-        List<Ship> ships = readShips(ctx);
-        Ship agreeingShip = null;
-        for (Ship ship : ships) {
-            if (ship.offsetMin == baseOffset) { agreeingShip = ship; break; }
+        if (aboardShip != null) {
+            rows.add(new Row(aboardShip.name, aboardShip.shortName, offsetTzId(anchorOffset),
+                    anchorOffset, mergeGroundIntoShip, deviceOffset == anchorOffset, true, true,
+                    null, null, "Ship time"));
         }
 
-        // The town the app last placed you in ("Nelson"), else the zone's own name.
-        String localPlace = localPlaceName(ctx);
-        String baseLabel = agreeingShip != null ? agreeingShip.name
-                : (localPlace != null ? localPlace : cityLabel(baseId));
-        rows.add(new Row(baseLabel, agreeingShip != null ? agreeingShip.shortName : null,
-                baseId, baseOffset, true, false, agreeingShip != null, null, null, ""));
+        if (!mergeGroundIntoShip) {
+            boolean isAnchor = aboardShip == null;
+            boolean differs = !isAnchor && dayDiffers(baseTz, anchorTz, now);
+            rows.add(new Row(localPlace != null ? localPlace : cityLabel(baseId), null, baseId,
+                    geographicOffset, true,
+                    deviceOffset == geographicOffset && !isAnchor, false, isAnchor,
+                    differs ? formatDay(baseTz, now, false) : null,
+                    differs ? formatDay(baseTz, now, true) : null,
+                    isAnchor ? "Local time" : relativeOffset(geographicOffset, anchorOffset)));
+            claimedOffsets.add(geographicOffset);
+        }
 
-        // Device OS zone, shown separately when it differs from the GPS-local zone.
-        TimeZone osTz = TimeZone.getDefault();
-        long osOffset = osTz.getOffset(now) / 60000L;
-        if (osOffset != baseOffset) {
-            seen.add(osTz.getID());
-            boolean d = dayDiffers(osTz, baseTz, now);
-            rows.add(new Row(cityLabel(osTz.getID()), osTz.getID(), osOffset, false, true,
+        if (deviceOffset != anchorOffset && deviceOffset != geographicOffset) {
+            boolean d = dayDiffers(osTz, anchorTz, now);
+            rows.add(new Row(cityLabel(osTz.getID()), null, osTz.getID(), deviceOffset,
+                    false, true, false, false,
                     d ? formatDay(osTz, now, false) : null,
                     d ? formatDay(osTz, now, true) : null,
-                    relativeOffset(osOffset, baseOffset)));
+                    relativeOffset(deviceOffset, anchorOffset)));
+            claimedOffsets.add(deviceOffset);
         }
 
         // Indexed, because `labels` is parallel to `stored` — skipping an entry
         // must not shift the rest of the names by one.
+        Set<String> seenIds = new HashSet<>();
+        seenIds.add(baseId);
         for (int i = 0; i < stored.size(); i++) {
             String id = stored.get(i);
             if (id.isEmpty() || id.equals(baseId)) continue;
             Resolved rz = resolveTimeZone(id);
+            if (seenIds.contains(rz.tzId)) continue;
             long off = rz.tz.getOffset(now) / 60000L;
-            if (seen.contains(rz.tzId)) continue; // local / device / earlier zone wins the slot
-            seen.add(rz.tzId);
-            boolean differs = dayDiffers(rz.tz, baseTz, now);
-            String dayShort = differs ? formatDay(rz.tz, now, false) : null;
-            String dayFull = differs ? formatDay(rz.tz, now, true) : null;
-            // The name the user chose, where there is one.
+            if (claimedOffsets.contains(off)) continue;
+            seenIds.add(rz.tzId);
+            claimedOffsets.add(off);
+            boolean differs = dayDiffers(rz.tz, anchorTz, now);
             String chosen = (i < labels.size() && !labels.get(i).isEmpty()) ? labels.get(i) : null;
-            rows.add(new Row(chosen != null ? chosen : cityLabel(id), rz.tzId, off, false, false,
-                    dayShort, dayFull, relativeOffset(off, baseOffset)));
+            rows.add(new Row(chosen != null ? chosen : cityLabel(id), null, rz.tzId, off,
+                    false, false, false, false,
+                    differs ? formatDay(rz.tz, now, false) : null,
+                    differs ? formatDay(rz.tz, now, true) : null,
+                    relativeOffset(off, anchorOffset)));
         }
 
-        // Ships that do NOT match the base offset get their own row; the one
-        // that does was folded in above, so a detected ship appears exactly once.
+        // Ships neither fold nor cause folding: a city keeping ship time is a
+        // useful thing to be told, not a duplicate of the ship.
         for (Ship ship : ships) {
-            if (ship.offsetMin == baseOffset) continue;
+            if (ship == aboardShip) continue;
             TimeZone tz = TimeZone.getTimeZone(ship.tzId());
-            boolean differs = dayDiffers(tz, baseTz, now);
-            rows.add(new Row(ship.name, ship.shortName, ship.tzId(), ship.offsetMin, false, false, true,
+            boolean differs = dayDiffers(tz, anchorTz, now);
+            rows.add(new Row(ship.name, ship.shortName, ship.tzId(), ship.offsetMin,
+                    false, false, true, false,
                     differs ? formatDay(tz, now, false) : null,
                     differs ? formatDay(tz, now, true) : null,
-                    relativeOffset(ship.offsetMin, baseOffset)));
+                    relativeOffset(ship.offsetMin, anchorOffset)));
         }
 
         Collections.sort(rows, OFFSET_ORDER);
         return rows;
+    }
+
+    /** "GMT+HH:MM" for a minutes-from-UTC offset — a real fixed-offset zone. */
+    private static String offsetTzId(long offsetMin) {
+        long abs = Math.abs(offsetMin);
+        return String.format(java.util.Locale.US, "GMT%s%02d:%02d",
+                offsetMin < 0 ? "-" : "+", abs / 60, abs % 60);
     }
 
     /**
@@ -326,12 +392,14 @@ public class GeoTimeWidgetProvider extends AppWidgetProvider {
      */
     private static class Ship {
         /** Full name, used wherever the layout has room. */
+        final String key;
         final String name;
         /** Abbreviated form, used only when the full name will not fit. */
         final String shortName;
         final long offsetMin;
 
-        Ship(String name, String shortName, long offsetMin) {
+        Ship(String key, String name, String shortName, long offsetMin) {
+            this.key = key;
             this.name = name;
             this.shortName = shortName;
             this.offsetMin = offsetMin;
@@ -364,7 +432,7 @@ public class GeoTimeWidgetProvider extends AppWidgetProvider {
                 // Falls back to the full name so a store written by an older
                 // build still renders, just without the ability to abbreviate.
                 String shortName = o.optString("short", name);
-                out.add(new Ship(name, shortName, o.optLong("offsetMinutes")));
+                out.add(new Ship(o.optString("key", ""), name, shortName, o.optLong("offsetMinutes")));
             }
         } catch (JSONException e) {
             // Malformed store: no ships rather than a wrong clock.

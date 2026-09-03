@@ -4,6 +4,7 @@ import * as dom from './dom';
 import { aboardShip, state } from './state';
 import { getDisplayTimezoneName, isValidTimezone } from './utils';
 import { clockKey, fixedOffsetWeekday, formatFixedOffsetTime, isUnresolved, visibleClocks } from './clocks';
+import { shipKey } from './ships';
 import { isUnresolvable } from './shiptime';
 import { point as turfPoint } from '@turf/helpers';
 import { booleanPointInPolygon } from '@turf/boolean-point-in-polygon';
@@ -156,7 +157,6 @@ export function updateAllClocks() {
     dom.localTimeEl.textContent = "Error";
   }
 
-  const localOffset = getUtcOffset(localTimezone);
 
   visibleClocks().forEach((entry) => {
     // Looked up by data attribute, not by rebuilding the id — zone ids contain
@@ -189,11 +189,11 @@ export function updateAllClocks() {
       const offset = entry.ship.offsetHours as number;
       timeString = formatFixedOffsetTime(offset, { hour: 'numeric', minute: '2-digit' });
       dateString = fixedOffsetWeekday(offset);
-      timeDiff = formatOffsetDiff(offset - localOffset);
+      timeDiff = relativeTextForShip(entry.ship as { brand: string; code: string; offsetHours: number });
     } else {
       timeString = getFormattedTime(entry.tzid, { hour: 'numeric', minute: '2-digit' });
       dateString = correctedTime.toLocaleDateString('en-US', { timeZone: entry.tzid, weekday: 'short' });
-      timeDiff = getTimezoneOffset(entry.tzid, localTimezone);
+      timeDiff = relativeTextForZone(entry.tzid);
     }
 
     el.querySelector('.time')!.textContent = timeString;
@@ -287,6 +287,44 @@ function renderShipTime(): void {
     minute: '2-digit',
     second: '2-digit',
   });
+}
+
+/**
+ * The clock every offset is measured from.
+ *
+ * Ashore that is the ground you stand on. Aboard — and only when the wifi marker
+ * has confirmed it — it is the ship, because ship time is what every
+ * announcement, dinner booking and gangway time is quoted in, while the
+ * geographic zone under a hull is often one nobody observes.
+ *
+ * Absolute times are untouched by this. The Local, Ship and Device cards each
+ * state a real clock and are labelled; only things expressing a DIFFERENCE
+ * re-base, which is what keeps the change to one idea.
+ */
+export function anchorOffsetHours(): number {
+  const ship = aboardShip();
+  if (ship && ship.offsetHours !== null) return ship.offsetHours;
+  return state.localTimezone ? getUtcOffset(state.localTimezone) : 0;
+}
+
+/** A saved zone's standing relative to the anchor. */
+export function relativeTextForZone(tzid: string): string {
+  const ship = aboardShip();
+  // Ashore the anchor IS the local zone, and the existing helper already says
+  // "Local time" rather than "+0 hrs" for it.
+  if (!ship || ship.offsetHours === null) return getTimezoneOffset(tzid, state.localTimezone);
+  try {
+    return formatOffsetDiff(getUtcOffset(tzid) - ship.offsetHours);
+  } catch {
+    return 'Offset N/A';
+  }
+}
+
+/** A ship's standing. The one underfoot names itself instead of measuring. */
+export function relativeTextForShip(ship: { brand: string; code: string; offsetHours: number }): string {
+  const aboard = aboardShip();
+  if (aboard && shipKey(aboard) === shipKey(ship)) return 'Ship time';
+  return formatOffsetDiff(ship.offsetHours - anchorOffsetHours());
 }
 
 export function getTimezoneOffset(tz1: string, tz2: string | null): string {
