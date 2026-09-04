@@ -207,6 +207,7 @@ export function updateUserTimezoneDetails(tzid: string) {
         refreshSelectedShipTime();
         refreshHoveredShipTime();
         applyShipReserve();
+        syncAboardChart();
 
         dom.userTimezoneDetailsEl.classList.toggle('border-green-500', aboard);
         dom.userTimezoneDetailsEl.classList.toggle('border-blue-500', !aboard);
@@ -289,7 +290,7 @@ function selectZone(newTzid: string | null) {
     // The ship selection was just cleared above; its marker has to stop looking
     // selected and its chart has to go, or the map shows two answers at once.
     refreshShipMarkers();
-    clearShipChart();
+    resetShipChart();
     // Cleared, not just hidden: leaving one ship's ETA in a hidden element is a
     // trap for whoever next changes when this line is shown.
     setShipVoyageLine(null, null);
@@ -341,7 +342,7 @@ export function selectShip(key: string): void {
     document.dispatchEvent(new CustomEvent('temporarytimezonechanged'));
 
     if (isDeselecting) {
-        clearShipChart();
+        resetShipChart();
         return;
     }
 
@@ -361,6 +362,43 @@ export function selectShip(key: string): void {
         // destination under a new ship's name is worse than none.
         if (state.selectedShipKey === key) setShipVoyageLine(resolved, key);
     }).catch(() => {});
+}
+
+/** The chart currently drawn on the aboard ship's behalf, if any. */
+let aboardChartKey: string | null = null;
+
+/**
+ * Keeps the ship you are ON drawn on the map whether or not she is selected.
+ *
+ * The chart used to be a response to a selection and nothing else, so aboard you
+ * saw your own route only while you happened to have your own ship picked. Your
+ * itinerary is not a thing you look up while aboard — it is the shape of the
+ * week — so it stays.
+ *
+ * A selection still wins the canvas. There is one chart, and drawing two would
+ * put two routes over each other; the selected one is the question just asked,
+ * and deselecting brings the aboard one straight back.
+ */
+function syncAboardChart(): void {
+    // Nothing to draw on yet. Returning BEFORE the latch matters: drawShipChart
+    // gives up silently without a map, and latching first would record a chart
+    // that was never drawn and then refuse to draw it once the map arrived.
+    // Same shape as the voyage-line bug — a failure recorded as a success.
+    if (!state.timezoneMap) return;
+
+    const key = state.selectedShipKey ? null : state.aboardShipKey;
+    if (key === aboardChartKey) return;
+    aboardChartKey = key;
+    // No fitToShip here: the chart appearing must never move the map under
+    // someone who did not ask for it.
+    if (key) void drawShipChart(key, voyageForShip(key));
+}
+
+/** Tears the chart down and lets the aboard ship's own reclaim the canvas. */
+function resetShipChart(): void {
+    clearShipChart();
+    aboardChartKey = null;
+    syncAboardChart();
 }
 
 /**
@@ -395,8 +433,38 @@ function shipCardValue(ship: ShipClock): { text: string; mono: boolean } {
     };
 }
 
-/** The hull the pointer is over, so a late voyage cannot land on the wrong card. */
-let hoveredShipKey: string | null = null;
+/** The zone under the pointer, remembered even while a hull is over the top of it. */
+let hoveredZoneTzid: string | null = null;
+
+/**
+ * Repaints the white card from both hover sources, ship first.
+ *
+ * The two used to write to it independently and fought for it. A hull sits ON a
+ * zone, so crossing onto one fires enter for the marker AND keeps firing
+ * mouseover for the region underneath — which overwrote the ship with the zone
+ * while the pointer had not moved off the ship at all. Leaving a hull then
+ * cleared the card outright rather than falling back to the region it is
+ * standing on.
+ *
+ * Both are remembered; this decides. The ship wins because it is the smaller,
+ * more specific target, and the one you had to aim at.
+ */
+function paintHoverCard(): void {
+    if (state.hoveredShipKey) {
+        const ship = state.shipClocks.find((sc) => shipKey(sc) === state.hoveredShipKey);
+        if (ship) {
+            dom.hoveredTimezoneNameEl.textContent = ship.name;
+            const value = shipCardValue(ship);
+            setCardValue(dom.hoveredTimezoneOffsetEl, value.text, value.mono);
+            dom.hoveredTimezoneDetailsEl.classList.remove('hidden');
+            return;
+        }
+    }
+
+    setVoyageLine(dom.hoveredShipVoyageEl, '');
+    updateCard(dom.hoveredTimezoneDetailsEl, dom.hoveredTimezoneNameEl,
+               dom.hoveredTimezoneOffsetEl, hoveredZoneTzid, 'offset', 'hovered');
+}
 
 /**
  * Puts a ship in the white card.
@@ -405,27 +473,18 @@ let hoveredShipKey: string | null = null;
  * map you can point at that is not a region — silently unexplained.
  */
 export function setHoveredShip(key: string | null): void {
-    if (key === hoveredShipKey) return;
-    hoveredShipKey = key;
+    if (key === state.hoveredShipKey) return;
+    state.hoveredShipKey = key;
 
-    if (!key) {
-        updateCard(dom.hoveredTimezoneDetailsEl, dom.hoveredTimezoneNameEl,
-                   dom.hoveredTimezoneOffsetEl, null, 'offset', 'hovered');
-        setVoyageLine(dom.hoveredShipVoyageEl, '');
-        return;
-    }
-
-    const ship = state.shipClocks.find((s) => shipKey(s) === key);
-    if (!ship) return;
-
-    dom.hoveredTimezoneNameEl.textContent = ship.name;
-    const value = shipCardValue(ship);
-    setCardValue(dom.hoveredTimezoneOffsetEl, value.text, value.mono);
-    dom.hoveredTimezoneDetailsEl.classList.remove('hidden');
-
+    // The hull itself changes, the way a zone's outline does — pointing at
+    // something should show that it has been pointed at.
+    refreshShipMarkers();
     setVoyageLine(dom.hoveredShipVoyageEl, '');
+    paintHoverCard();
+    if (!key) return;
+
     void voyageForShip(key).then((resolved) => {
-        if (hoveredShipKey !== key) return;   // pointer moved on
+        if (state.hoveredShipKey !== key) return;   // pointer moved on
         setVoyageLine(dom.hoveredShipVoyageEl, voyageLine(resolved, key));
     }).catch(() => {});
 }
@@ -435,8 +494,8 @@ export function setHoveredShip(key: string | null): void {
  * does: a reading that stops reading is worse than an offset that never moved.
  */
 function refreshHoveredShipTime(): void {
-    if (!hoveredShipKey) return;
-    const ship = state.shipClocks.find((s) => shipKey(s) === hoveredShipKey);
+    if (!state.hoveredShipKey) return;
+    const ship = state.shipClocks.find((s) => shipKey(s) === state.hoveredShipKey);
     if (!ship) return;
     const value = shipCardValue(ship);
     setCardValue(dom.hoveredTimezoneOffsetEl, value.text, value.mono);
@@ -525,10 +584,6 @@ const RESERVED = '\u00A0';
 const VOYAGE_LINES = () => [
     dom.userShipVoyageEl, dom.selectedShipVoyageEl, dom.hoveredShipVoyageEl,
 ];
-const NAME_LINES = () => [
-    dom.userTimezoneNameEl, dom.selectedTimezoneNameEl, dom.hoveredTimezoneNameEl,
-];
-
 /**
  * Holds the card row at its full height whenever a ship could appear in it.
  *
@@ -546,7 +601,7 @@ const NAME_LINES = () => [
 function applyShipReserve(): void {
     const reserve = state.shipClocks.length > 0;
 
-    for (const el of NAME_LINES()) el.classList.toggle('reserve-ship-name', reserve);
+    dom.userTimezoneDetailsEl.parentElement?.classList.toggle('cards-reserve-ship', reserve);
 
     for (const el of VOYAGE_LINES()) {
         const text = el.textContent ?? '';
@@ -818,23 +873,20 @@ async function setupTimezoneMapListeners() {
     // was already named by another card, which meant sweeping the pointer over
     // your own zone gave nothing back while every neighbour answered — the one
     // place the map's white outline had no card to match it.
-    setHoveredShip(null);
-    updateCard(
-      dom.hoveredTimezoneDetailsEl, dom.hoveredTimezoneNameEl, dom.hoveredTimezoneOffsetEl,
-      tzid, 'offset', 'hovered'
-    );
+    hoveredZoneTzid = tzid;
+    paintHoverCard();
   });
 
   document.getElementById('timezone-map')!.addEventListener('mouseleave', () => {
     if (isTouchDevice) return;
     setHoveredZone(null);
-    setHoveredShip(null);
-    updateCard(dom.hoveredTimezoneDetailsEl, dom.hoveredTimezoneNameEl, dom.hoveredTimezoneOffsetEl, null, 'offset', 'hovered');
+    hoveredZoneTzid = null;
+    paintHoverCard();
   });
 
   state.timezoneMap.data.addListener('click', (event: google.maps.Data.MouseEvent) => {
-    setHoveredShip(null);
-    updateCard(dom.hoveredTimezoneDetailsEl, dom.hoveredTimezoneNameEl, dom.hoveredTimezoneOffsetEl, null, 'offset', 'hovered');
+    hoveredZoneTzid = null;
+    paintHoverCard();
     selectZone(event.feature.getProperty('tzid') as string);
   });
 }

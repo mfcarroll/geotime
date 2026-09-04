@@ -69,6 +69,14 @@ export interface AppState {
     // them interchangeable and let the map overwrite a specific choice
     // (America/Vancouver) with a band's representative zone.
     hoveredTzid: string | null;
+    /**
+     * The hull the pointer is over, beside the zone it is over.
+     *
+     * Here rather than in map.ts because the marker layer has to style itself from
+     * it and must not import from map.ts — map.ts imports from IT. Same reason
+     * hoveredTzid sits here.
+     */
+    hoveredShipKey: string | null;
     selectedTzid: string | null;
     temporaryTimezone: string | null;
     gpsTimezoneSelected: boolean;
@@ -195,6 +203,7 @@ export const state: AppState = {
     geoJsonData: null,
     geoJsonLoaded: false,
     hoveredTzid: null,
+    hoveredShipKey: null,
     selectedTzid: null,
     temporaryTimezone: null,
     gpsTimezoneSelected: false,
