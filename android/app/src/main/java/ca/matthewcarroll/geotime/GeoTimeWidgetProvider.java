@@ -152,6 +152,8 @@ public class GeoTimeWidgetProvider extends AppWidgetProvider {
         boolean useFullDay = decideFullDay(ctx, visible, opts, rich);
         boolean showLocalLabel = decideLocalLabel(ctx, visible, opts);
         boolean showDeviceLabel = decideDeviceLabel(ctx, visible, opts);
+        boolean showQualifier = decideQualifier(ctx, visible, opts, is24, useFullShipName,
+                                                useFullDay, showLocalLabel, showDeviceLabel, rich);
         for (Row r : visible) {
             RemoteViews row = new RemoteViews(ctx.getPackageName(),
                     rich ? R.layout.widget_row_rich : R.layout.widget_row);
@@ -160,7 +162,7 @@ public class GeoTimeWidgetProvider extends AppWidgetProvider {
             // name either way. Only what ELSE is on that line differs, which
             // rowFurniture accounts for.
             Fitted fitted = fitCity(ctx, r, opts, is24, useFullShipName, useFullDay,
-                                    showLocalLabel, showDeviceLabel, rich);
+                                    showLocalLabel, showDeviceLabel, showQualifier, rich);
             row.setTextViewText(R.id.row_city, fitted.label);
             row.setString(R.id.row_time, "setTimeZone", r.tzId);   // @RemotableViewMethod
             row.setString(R.id.row_period, "setTimeZone", r.tzId);
@@ -192,7 +194,7 @@ public class GeoTimeWidgetProvider extends AppWidgetProvider {
                 // budget that grants the label without checking the row it lands on,
                 // so aboard it ate the vessel's name. Android measures the name it
                 // will actually draw (see fitCity), so the label cannot displace it.
-                boolean anchorLabel = r.isAnchor && showLocalLabel && fitted.showQualifier;
+                boolean anchorLabel = r.isAnchor && showLocalLabel && showQualifier;
                 if (anchorLabel) row.setTextViewText(R.id.row_local_label, r.offset);
                 row.setViewVisibility(R.id.row_local_label, anchorLabel ? View.VISIBLE : View.GONE);
 
@@ -201,7 +203,7 @@ public class GeoTimeWidgetProvider extends AppWidgetProvider {
                 // ground is an ordinary distance from the ship and must say so, or
                 // the one row a guest checks before stepping ashore is the only row
                 // with no offset on it.
-                if (!r.isAnchor && fitted.showQualifier) {
+                if (!r.isAnchor && showQualifier) {
                     row.setTextViewText(R.id.row_offset, r.offset);
                     row.setViewVisibility(R.id.row_offset, View.VISIBLE);
                 } else {
@@ -645,19 +647,18 @@ public class GeoTimeWidgetProvider extends AppWidgetProvider {
      */
     private static final class Fitted {
         final CharSequence label;
+        /** Per row, unlike the qualifier: only one row ever carries the phone. */
         final boolean deviceMark;
-        final boolean showQualifier;
-        Fitted(CharSequence label, boolean deviceMark, boolean showQualifier) {
+        Fitted(CharSequence label, boolean deviceMark) {
             this.label = label;
             this.deviceMark = deviceMark;
-            this.showQualifier = showQualifier;
         }
     }
 
     private static Fitted fitCity(Context ctx, Row r, Bundle opts, boolean is24,
                                   boolean useFullShipName, boolean useFullDay,
                                   boolean showLocalLabel, boolean showDeviceLabel,
-                                  boolean rich) {
+                                  boolean showQualifier, boolean rich) {
         String name = (!useFullShipName && r.shortLabel != null) ? r.shortLabel : r.label;
 
         android.util.DisplayMetrics dm = ctx.getResources().getDisplayMetrics();
@@ -676,22 +677,13 @@ public class GeoTimeWidgetProvider extends AppWidgetProvider {
         //
         // Both of the first two are derivable from what remains on the row. A
         // truncated name is not derivable from anything.
+        // The phone stays a per-ROW decision: only one row ever carries it, so
+        // dropping it cannot leave a ragged column behind.
         boolean deviceMark = true;
-        boolean showQualifier = true;
         float furniture = rowFurniture(ctx, r, is24, useFullDay, showLocalLabel,
                                        showDeviceLabel, deviceMark, showQualifier, rich);
-
         if (r.isDevice && city.measureText(name) + furniture > usable) {
             deviceMark = false;
-            furniture = rowFurniture(ctx, r, is24, useFullDay, showLocalLabel,
-                                     showDeviceLabel, deviceMark, showQualifier, rich);
-        }
-        // The anchor's label goes the same way as an ordinary row's offset. It
-        // reads as more precious than it is: "Ship time" beside a ship mark, on
-        // the leftmost row, is nearly a restatement — and anything it does add is
-        // one tap away in the app, which the whole widget is a shortcut to.
-        if (city.measureText(name) + furniture > usable) {
-            showQualifier = false;
             furniture = rowFurniture(ctx, r, is24, useFullDay, showLocalLabel,
                                      showDeviceLabel, deviceMark, showQualifier, rich);
         }
@@ -701,7 +693,45 @@ public class GeoTimeWidgetProvider extends AppWidgetProvider {
         // Below this the name is unreadable anyway and the row has bigger problems.
         room = Math.max(room, 36 * dm.density);
         CharSequence shown = TextUtils.ellipsize(name, city, room, TextUtils.TruncateAt.END);
-        return new Fitted(shown, deviceMark, showQualifier);
+        return new Fitted(shown, deviceMark);
+    }
+
+    /**
+     * Whether the grey text after the name — an offset, or the anchor's own words
+     * — is shown at all. One answer for the whole widget, never per row.
+     *
+     * Per row was the obvious implementation and the wrong one: a column where
+     * some rows carry "+2 hrs" and others do not reads as a bug rather than as
+     * economy. So the question is asked of every row at once, and one row needing
+     * the width takes it from all of them.
+     *
+     * Ranked below the name for the reason the phone mark is: an offset is a
+     * relation between two times that are both still on the screen, and the app
+     * is one tap away for whatever else. A truncated name is recoverable from
+     * nothing.
+     */
+    private static boolean decideQualifier(Context ctx, List<Row> rows, Bundle opts,
+                                           boolean is24, boolean useFullShipName,
+                                           boolean useFullDay, boolean showLocalLabel,
+                                           boolean showDeviceLabel, boolean rich) {
+        android.util.DisplayMetrics dm = ctx.getResources().getDisplayMetrics();
+        int widthDp = opts.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, 180);
+        float usable = (widthDp - 24) * dm.density;
+        TextPaint city = new TextPaint();
+        city.setTextSize(15 * dm.scaledDensity);
+
+        for (Row r : rows) {
+            String name = (!useFullShipName && r.shortLabel != null) ? r.shortLabel : r.label;
+            // The phone has already yielded on the row that carries it, so price
+            // this against the row as it will actually be drawn.
+            boolean mark = !r.isDevice
+                    || city.measureText(name) + rowFurniture(ctx, r, is24, useFullDay,
+                            showLocalLabel, showDeviceLabel, true, true, rich) <= usable;
+            float furniture = rowFurniture(ctx, r, is24, useFullDay, showLocalLabel,
+                                           showDeviceLabel, mark, true, rich);
+            if (city.measureText(name) + furniture > usable) return false;
+        }
+        return true;
     }
 
     private static boolean decideFullShipName(Context ctx, List<Row> rows, Bundle opts,

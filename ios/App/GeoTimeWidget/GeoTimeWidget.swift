@@ -31,7 +31,7 @@ private struct RowMetrics {
     let subtitleFont: CGFloat  // offset under the city in rich (two-line) mode
     let pinSize: CGFloat
     let rich: Bool             // two-line row (offset under the city name)
-    let inlineOffset: Bool     // offset inline after the city (compact medium/large)
+    let inlineOffset: Bool     // offset inline after the city; all rows or none
     let useFullDay: Bool       // full weekday name ("Tuesday") vs short ("Tue")
     let useFullShipName: Bool  // "Star of the Seas" vs "Star"
     let showLocalLabel: Bool   // anchor label ("Local time" / "Ship time") on a
@@ -139,7 +139,9 @@ struct GeoTimeWidgetView: View {
     // (plus its inline offset, where shown).
     private func metrics(for rows: [WidgetRow], usableW: CGFloat, rich: Bool) -> RowMetrics {
         let timeFont = timeSize(rich: rich)
-        let inlineOffset = !isSmall && !rich
+        // Two-line rows put the offset on line 2, where it costs the name
+        // nothing and is always shown; only a single-line row has to decide.
+        let offsetPossible = !rich
         let hasPeriod = rows.contains { !$0.timePeriod.isEmpty }
         let periodColW = hasPeriod ? width("PM", detailFont, weight: .medium, mono: true) + 2 : 0
         let timeColW = width("88:88", timeFont, mono: true) + (hasPeriod ? periodColW + 2 : 0)
@@ -161,7 +163,8 @@ struct GeoTimeWidgetView: View {
         // they don't shrink the city — city size wins the trade-off.
         let clusterW = usableW - timeColW - (hGap * 2 + 4)
         func cityScale(fullDay: Bool, localLabel: Bool, deviceLabel: Bool,
-                       fullShipName: Bool, deviceMark: Bool = true) -> CGFloat {
+                       fullShipName: Bool, deviceMark: Bool = true,
+                       inlineOffset: Bool) -> CGFloat {
             var scale: CGFloat = 1
             for r in rows {
                 var reserved: CGFloat = 0
@@ -223,10 +226,10 @@ struct GeoTimeWidgetView: View {
         // "Star" only on the small widget where width really has run out.
         let shortNameBase = min(1, cityScale(fullDay: false, localLabel: false,
                                              deviceLabel: false, fullShipName: false,
-                                             deviceMark: false))
+                                             deviceMark: false, inlineOffset: offsetPossible))
         let useFullShipName = min(1, cityScale(fullDay: false, localLabel: false,
                                                deviceLabel: false, fullShipName: true,
-                                               deviceMark: false))
+                                               deviceMark: false, inlineOffset: offsetPossible))
             >= shortNameBase - 0.001
 
         // The phone mark ranks with the labels, not with the other marks.
@@ -244,28 +247,48 @@ struct GeoTimeWidgetView: View {
         // same way useFullShipName is measured against the short-name floor.
         let namesBase = min(1, cityScale(fullDay: false, localLabel: false,
                                          deviceLabel: false, fullShipName: useFullShipName,
-                                         deviceMark: false))
+                                         deviceMark: false, inlineOffset: offsetPossible))
         let showDeviceMark = min(1, cityScale(fullDay: false, localLabel: false,
                                               deviceLabel: false, fullShipName: useFullShipName,
-                                              deviceMark: true)) >= namesBase - 0.001
+                                              deviceMark: true, inlineOffset: offsetPossible)) >= namesBase - 0.001
+
+        // The inline offset is granted or refused for the WHOLE widget, never per
+        // row.
+        //
+        // It used to be settled by family — shown on medium, never on small — so
+        // a long name on medium was truncated to keep a "+2 hrs" it could have
+        // done without. Measuring it fixes that, but measuring it per row would
+        // trade one fault for a worse one: a column where some rows carry an
+        // offset and others do not reads as a bug, not as economy. So one row
+        // needing the width takes it from all of them.
+        //
+        // Ranked below the name for the reason the phone mark is: "+2 hrs" is a
+        // relation between two times that are both still on the screen, and the
+        // app is one tap away for the rest. A truncated name is recoverable from
+        // nothing.
+        let inlineOffset = offsetPossible
+            && min(1, cityScale(fullDay: false, localLabel: false,
+                                deviceLabel: false, fullShipName: useFullShipName,
+                                deviceMark: showDeviceMark,
+                                inlineOffset: true)) >= namesBase - 0.001
 
         // Optional labels (full day names, "Local time" / "Device time") are added
         // only when they don't shrink the city — city size wins the trade-off.
         let clampedBase = min(1, cityScale(fullDay: false, localLabel: false,
                                            deviceLabel: false, fullShipName: useFullShipName,
-                                           deviceMark: showDeviceMark))
+                                           deviceMark: showDeviceMark, inlineOffset: inlineOffset))
         let useFullDay = min(1, cityScale(fullDay: true, localLabel: false,
                                           deviceLabel: false, fullShipName: useFullShipName,
-                                          deviceMark: showDeviceMark)) >= clampedBase - 0.001
+                                          deviceMark: showDeviceMark, inlineOffset: inlineOffset)) >= clampedBase - 0.001
         let showLocalLabel = !rich && min(1, cityScale(fullDay: false, localLabel: true,
                                                        deviceLabel: false, fullShipName: useFullShipName,
-                                                       deviceMark: showDeviceMark)) >= clampedBase - 0.001
+                                                       deviceMark: showDeviceMark, inlineOffset: inlineOffset)) >= clampedBase - 0.001
         // In rich, the label lives on line 2: fine on large, too narrow on small.
         let showDeviceLabel = rich
             ? !isSmall
             : min(1, cityScale(fullDay: false, localLabel: false,
                                deviceLabel: true, fullShipName: useFullShipName,
-                               deviceMark: showDeviceMark)) >= clampedBase - 0.001
+                               deviceMark: showDeviceMark, inlineOffset: inlineOffset)) >= clampedBase - 0.001
 
         let cityFont = max(9, min(cityBase, cityBase * clampedBase))
 
