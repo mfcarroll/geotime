@@ -155,10 +155,12 @@ public class GeoTimeWidgetProvider extends AppWidgetProvider {
         for (Row r : visible) {
             RemoteViews row = new RemoteViews(ctx.getPackageName(),
                     rich ? R.layout.widget_row_rich : R.layout.widget_row);
-            Fitted fitted = rich
-                    ? new Fitted((!useFullShipName && r.shortLabel != null) ? r.shortLabel : r.label, true)
-                    : fitCity(ctx, r, opts, is24, useFullShipName, useFullDay,
-                              showLocalLabel, showDeviceLabel);
+            // Both layouts, because the trade-off is the same in both: the name
+            // and its marks share line 1 either way, so the phone yields to the
+            // name either way. Only what ELSE is on that line differs, which
+            // rowFurniture accounts for.
+            Fitted fitted = fitCity(ctx, r, opts, is24, useFullShipName, useFullDay,
+                                    showLocalLabel, showDeviceLabel, rich);
             row.setTextViewText(R.id.row_city, fitted.label);
             row.setString(R.id.row_time, "setTimeZone", r.tzId);   // @RemotableViewMethod
             row.setString(R.id.row_period, "setTimeZone", r.tzId);
@@ -587,7 +589,7 @@ public class GeoTimeWidgetProvider extends AppWidgetProvider {
      */
     private static float rowFurniture(Context ctx, Row r, boolean is24, boolean useFullDay,
                                       boolean showLocalLabel, boolean showDeviceLabel,
-                                      boolean deviceMark) {
+                                      boolean deviceMark, boolean rich) {
         android.util.DisplayMetrics dm = ctx.getResources().getDisplayMetrics();
         float gap = 6 * dm.density;
         TextPaint city = new TextPaint();
@@ -600,14 +602,20 @@ public class GeoTimeWidgetProvider extends AppWidgetProvider {
                 + ((r.isDevice && deviceMark) ? 1 : 0);
         need += marks * (12 * dm.density + gap);
 
-        if (r.isAnchor) {
-            if (showLocalLabel) need += detail.measureText(r.offset) + gap;
-        } else {
-            need += detail.measureText(r.offset) + gap;
-        }
-        if (r.isDevice && showDeviceLabel) need += detail.measureText("\u00B7 Device time") + gap;
-        if (r.dayLabel != null) {
-            need += detail.measureText(useFullDay ? r.dayLabelFull : r.dayLabel) + gap;
+        // Line 1 of a two-line row carries the name, its marks and the clock, and
+        // nothing else — the offset and the anchor's label are on line 2, the
+        // weekday under the time. Charging them here would shrink a name that is
+        // not actually competing with them.
+        if (!rich) {
+            if (r.isAnchor) {
+                if (showLocalLabel) need += detail.measureText(r.offset) + gap;
+            } else {
+                need += detail.measureText(r.offset) + gap;
+            }
+            if (r.isDevice && showDeviceLabel) need += detail.measureText("\u00B7 Device time") + gap;
+            if (r.dayLabel != null) {
+                need += detail.measureText(useFullDay ? r.dayLabelFull : r.dayLabel) + gap;
+            }
         }
         need += city.measureText(is24 ? "88:88" : "8:88") + gap;
         if (!is24) need += detail.measureText("PM") + gap;
@@ -643,7 +651,8 @@ public class GeoTimeWidgetProvider extends AppWidgetProvider {
 
     private static Fitted fitCity(Context ctx, Row r, Bundle opts, boolean is24,
                                   boolean useFullShipName, boolean useFullDay,
-                                  boolean showLocalLabel, boolean showDeviceLabel) {
+                                  boolean showLocalLabel, boolean showDeviceLabel,
+                                  boolean rich) {
         String name = (!useFullShipName && r.shortLabel != null) ? r.shortLabel : r.label;
 
         android.util.DisplayMetrics dm = ctx.getResources().getDisplayMetrics();
@@ -654,11 +663,11 @@ public class GeoTimeWidgetProvider extends AppWidgetProvider {
 
         boolean deviceMark = true;
         float furniture = rowFurniture(ctx, r, is24, useFullDay, showLocalLabel,
-                                       showDeviceLabel, true);
+                                       showDeviceLabel, true, rich);
         if (r.isDevice && city.measureText(name) + furniture > usable) {
             deviceMark = false;
             furniture = rowFurniture(ctx, r, is24, useFullDay, showLocalLabel,
-                                     showDeviceLabel, false);
+                                     showDeviceLabel, false, rich);
         }
 
         float room = usable - furniture;
