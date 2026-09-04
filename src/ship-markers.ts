@@ -20,6 +20,7 @@
 import { state } from './state';
 import { shipKey, type ShipClock } from './ships';
 import { shipTimeAvailable } from './rccl';
+import { findTimezoneFromGeoJSON, getUtcOffset } from './time';
 import {
   fleetFixes,
   fixForShip,
@@ -70,6 +71,31 @@ const ABOARD = '#34C759';
 // White, and only ever a rim — hover says "the pointer is here", never "this is
 // what the thing is", so it must not replace the colour that answers that.
 const HOVER_RING = '#FFFFFF';
+
+/**
+ * A port's ring says whether that port keeps the ship's clock. Nothing else.
+ *
+ * Painting every port in the vessel's colour was wrong in a way worth spelling
+ * out: it made a claim rather than a decoration. Aboard Liberty of the Seas the
+ * whole itinerary went green, and green means "this is the clock you are living
+ * by" — but Lisbon, which she had just left, and Southampton, where she ends,
+ * are both an hour off ship time. The map was stating something false about the
+ * one question a passenger actually has at a port: do I change my watch here.
+ *
+ * So the ring answers that and only that. Green when the port keeps ship time,
+ * turquoise when it does not, whether or not the vessel is selected — a fact
+ * about the world does not change because you clicked something. Selection is
+ * carried by the hull and the route, which are the things you picked.
+ *
+ * Null offsets — a port we cannot place, a clock not yet resolved — read as "not
+ * the same", because unknown is not a match.
+ */
+function portColour(port: { lat: number; lon: number }, shipOffset: number | null): string {
+  if (shipOffset === null) return HULL;
+  const tz = findTimezoneFromGeoJSON(port.lat, port.lon);
+  if (!tz) return HULL;
+  return getUtcOffset(tz) === shipOffset ? ABOARD : HULL;
+}
 
 /**
  * The colour a ship — and everything that belongs to her — is drawn in.
@@ -299,11 +325,9 @@ export function refreshShipMarkers(): void {
 const CASING = '#0B1219';
 
 // One colour for the whole track, solid behind and dashed ahead. Solid for
-// travelled and dashed for planned is a convention that needs no legend, and
-// spending a second hue on it would put the route in competition with the gold —
-// which on this map means one thing only: the thing you selected. Gold is
-// therefore left to the band, the ship and its ports.
-const TRACK = '#E8EEF4';
+// travelled and dashed for planned is a convention that needs no legend, and the
+// hue is the vessel's own — see shipColour — so a route reads as belonging to
+// the ship it leaves, rather than as a third thing on the map.
 
 /**
  * Everything the chart owns, so it can be torn down without hunting.
@@ -377,8 +401,10 @@ export async function drawShipChart(key: string, voyage: Promise<ShipVoyage | nu
   // selection can invalidate it.
   if (state.selectedShipKey !== key && state.aboardShipKey !== key) return;
 
-  // Ports and route wear the vessel's own colour — see shipColour.
-  const portColour = shipColour(key);
+  // Her ROUTE wears the vessel's colour; her ports answer a different question
+  // entirely — see portColour.
+  const routeColour = shipColour(key);
+  const shipOffset = state.shipClocks.find((c) => shipKey(c) === key)?.offsetHours ?? null;
 
   clearChart();
   if (!resolved) return;
@@ -399,7 +425,7 @@ export async function drawShipChart(key: string, voyage: Promise<ShipVoyage | nu
       icons: [{
         icon: {
           path: 'M 0,-1 0,1',
-          strokeColor: TRACK,
+          strokeColor: routeColour,
           strokeOpacity: 0.85,
           strokeWeight: 2,
           scale: 2.5,
@@ -419,7 +445,7 @@ export async function drawShipChart(key: string, voyage: Promise<ShipVoyage | nu
   const wake = voyageTrack(resolved);
   if (wake.length >= 2) {
     polyline(map, wake.map(toLatLng), {
-      strokeColor: TRACK,
+      strokeColor: routeColour,
       strokeOpacity: 0.95,
       strokeWeight: 2.5,
       zIndex: 20,
@@ -431,7 +457,8 @@ export async function drawShipChart(key: string, voyage: Promise<ShipVoyage | nu
     ring.className = 'ship-port';
     ring.innerHTML =
       `<svg viewBox="-8 -8 16 16" width="16" height="16"><circle r="4" fill="${CASING}" ` +
-      `fill-opacity="0.9" stroke="${portColour}" stroke-width="2" stroke-opacity="0.95"/></svg>`;
+      `fill-opacity="0.9" stroke="${portColour(port, shipOffset)}" stroke-width="2" ` +
+      `stroke-opacity="0.95"/></svg>`;
     chart.push(new google.maps.marker.AdvancedMarkerElement({
       map,
       position: { lat: port.lat, lng: port.lon },

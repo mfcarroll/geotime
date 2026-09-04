@@ -587,6 +587,12 @@ const VOYAGE_LINES = () => [
 /**
  * Holds the card row at its full height whenever a ship could appear in it.
  *
+ * One blank line is the whole mechanism. A min-height on the row was tried and
+ * removed: measured at 1280 and 375, aboard and ashore, it changed nothing about
+ * the jump and cost 28px of dead space under every card. The line that appears
+ * on hover is the only thing that grows the row, so holding that one line is
+ * exactly enough.
+ *
  * Applied centrally, on the tick, rather than from the writers — and that is the
  * point. Both writers dedupe on their key, and both of them dedupe away their
  * very FIRST call: setAnchorVoyageLine(null) and setHoveredShip(null) each see
@@ -601,7 +607,6 @@ const VOYAGE_LINES = () => [
 function applyShipReserve(): void {
     const reserve = state.shipClocks.length > 0;
 
-    dom.userTimezoneDetailsEl.parentElement?.classList.toggle('cards-reserve-ship', reserve);
 
     for (const el of VOYAGE_LINES()) {
         const text = el.textContent ?? '';

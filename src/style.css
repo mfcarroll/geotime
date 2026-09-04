@@ -25,24 +25,6 @@
   @apply p-3 rounded-lg border-2 bg-gray-900/80;
 }
 
-/*
-  Holds the CARD ROW at its full height while any ship is on the list.
-
-  The three cards share one grid row with the map directly beneath, so a line
-  appearing on any of them shoves the map down — tolerable on a click, wrong
-  while a pointer merely crosses a hull. Two things grow a card: the voyage line,
-  and the name, since "Liberty of the Seas" wraps where "Toronto" does not.
-
-  Reserved on the ROW rather than on the name, which was the first attempt and
-  put the slack in the worst possible place: a visible gap between the title and
-  the time on every card, ship or not. Cards stretch to the row, content stacks
-  from the top, and the slack falls below the last line where it reads as
-  padding.
-
-  8rem is two lines of text-lg (3.5rem), one of text-xl (1.75rem), one of text-xs
-  (1rem), and the card's own 1.5rem of padding.
-*/
-.cards-reserve-ship { min-height: 8rem; }
 
 /*
   Add padding to the top of the app container to avoid the
