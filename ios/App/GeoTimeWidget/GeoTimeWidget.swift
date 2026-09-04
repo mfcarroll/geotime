@@ -364,16 +364,29 @@ private struct RowView: View {
             // to itself. Stacking everywhere is the same shape Android draws, and
             // one shape across both platforms and all three families beats a
             // family-specific variant that has to be remembered.
+            // maxWidth: .infinity on the leading block of each line, never a
+            // Spacer — the same reason as the single-line row below. Beside a
+            // Spacer the leading Text is proposed less width than the line
+            // actually has left, truncates to that proposal, and the Spacer takes
+            // the difference as visible slack.
+            //
+            // Fixed here without having seen it misbehave: two lines with more
+            // room each are simply a weaker case of one line, not a different
+            // mechanism, and leaving the known-bad pattern in place to wait for a
+            // report is how the single-line version survived this long.
             VStack(alignment: .leading, spacing: 1) {
                 HStack(alignment: .firstTextBaseline, spacing: metrics.hGap) {
                     cityLine
-                    Spacer(minLength: 4)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     time
                 }
                 HStack(alignment: .firstTextBaseline, spacing: metrics.hGap) {
+                    // Expanded whether or not a weekday follows: with one it
+                    // pushes the day to the trailing edge, without one it is a
+                    // leading-aligned block of its own width either way.
                     subtitle
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     if let weekday = row.weekdayFull {
-                        Spacer(minLength: 4)
                         Text(weekday)
                             .font(.system(size: metrics.detailFont))
                             .foregroundColor(.widgetSecondary)
