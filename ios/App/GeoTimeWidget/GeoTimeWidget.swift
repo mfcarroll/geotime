@@ -139,9 +139,18 @@ struct GeoTimeWidgetView: View {
     // (plus its inline offset, where shown).
     private func metrics(for rows: [WidgetRow], usableW: CGFloat, rich: Bool) -> RowMetrics {
         let timeFont = timeSize(rich: rich)
-        // Two-line rows put the offset on line 2, where it costs the name
-        // nothing and is always shown; only a single-line row has to decide.
-        let offsetPossible = !rich
+        // Where an inline offset is possible at all, before asking whether it
+        // fits.
+        //
+        // Two-line rows put it on line 2, where it costs the name nothing and is
+        // always shown. Small never carries one inline: at that width the row is
+        // name, mark and time, and a "+2 hrs" wedged between them is noise on the
+        // one family with no room to spare — which is why this was a family rule
+        // to begin with. The measurement below REFINES that rule, it does not
+        // replace it; dropping the !isSmall clause started putting offsets on the
+        // small widget for the first time, which is not what measuring them was
+        // for.
+        let offsetPossible = !rich && !isSmall
         let hasPeriod = rows.contains { !$0.timePeriod.isEmpty }
         let periodColW = hasPeriod ? width("PM", detailFont, weight: .medium, mono: true) + 2 : 0
         let timeColW = width("88:88", timeFont, mono: true) + (hasPeriod ? periodColW + 2 : 0)
@@ -252,6 +261,26 @@ struct GeoTimeWidgetView: View {
                                               deviceLabel: false, fullShipName: useFullShipName,
                                               deviceMark: true, inlineOffset: offsetPossible)) >= namesBase - 0.001
 
+        // Past this point the scale comparisons below stop measuring anything.
+        //
+        // cityFont is max(9, ...), so once that floor binds, every candidate
+        // scale yields the SAME font — which makes each garnish look free ("it
+        // does not shrink the city") and grants all of them at once, onto a row
+        // whose name is already being cut to fit. Watched on the small widget:
+        // "San Francisco" rendered as a bare ellipsis with "-2 hrs" intact
+        // beside it, the ranking exactly inverted.
+        //
+        // The file already warned about this for the anchor label. It was never
+        // specific to that label — it is a property of comparing clamped values,
+        // and it reached the offset the moment the offset became a measured
+        // decision. So when the floor binds, the optional things are refused
+        // outright instead of compared.
+        //
+        // Measured against the NAME-ONLY scale: if names alone already hit the
+        // floor, nothing optional can be afforded, and the question of which
+        // garnish is cheapest does not arise.
+        let atFloor = min(cityBase, cityBase * namesBase) < 9
+
         // The inline offset is granted or refused for the WHOLE widget, never per
         // row.
         //
@@ -266,7 +295,7 @@ struct GeoTimeWidgetView: View {
         // relation between two times that are both still on the screen, and the
         // app is one tap away for the rest. A truncated name is recoverable from
         // nothing.
-        let inlineOffset = offsetPossible
+        let inlineOffset = offsetPossible && !atFloor
             && min(1, cityScale(fullDay: false, localLabel: false,
                                 deviceLabel: false, fullShipName: useFullShipName,
                                 deviceMark: showDeviceMark,
@@ -277,16 +306,16 @@ struct GeoTimeWidgetView: View {
         let clampedBase = min(1, cityScale(fullDay: false, localLabel: false,
                                            deviceLabel: false, fullShipName: useFullShipName,
                                            deviceMark: showDeviceMark, inlineOffset: inlineOffset))
-        let useFullDay = min(1, cityScale(fullDay: true, localLabel: false,
+        let useFullDay = !atFloor && min(1, cityScale(fullDay: true, localLabel: false,
                                           deviceLabel: false, fullShipName: useFullShipName,
                                           deviceMark: showDeviceMark, inlineOffset: inlineOffset)) >= clampedBase - 0.001
-        let showLocalLabel = !rich && min(1, cityScale(fullDay: false, localLabel: true,
+        let showLocalLabel = !rich && !atFloor && min(1, cityScale(fullDay: false, localLabel: true,
                                                        deviceLabel: false, fullShipName: useFullShipName,
                                                        deviceMark: showDeviceMark, inlineOffset: inlineOffset)) >= clampedBase - 0.001
         // In rich, the label lives on line 2: fine on large, too narrow on small.
         let showDeviceLabel = rich
             ? !isSmall
-            : min(1, cityScale(fullDay: false, localLabel: false,
+            : !atFloor && min(1, cityScale(fullDay: false, localLabel: false,
                                deviceLabel: true, fullShipName: useFullShipName,
                                deviceMark: showDeviceMark, inlineOffset: inlineOffset)) >= clampedBase - 0.001
 
