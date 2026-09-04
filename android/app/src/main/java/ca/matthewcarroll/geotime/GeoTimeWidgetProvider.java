@@ -201,7 +201,7 @@ public class GeoTimeWidgetProvider extends AppWidgetProvider {
                 // ground is an ordinary distance from the ship and must say so, or
                 // the one row a guest checks before stepping ashore is the only row
                 // with no offset on it.
-                if (!r.isAnchor) {
+                if (!r.isAnchor && fitted.showOffset) {
                     row.setTextViewText(R.id.row_offset, r.offset);
                     row.setViewVisibility(R.id.row_offset, View.VISIBLE);
                 } else {
@@ -589,7 +589,7 @@ public class GeoTimeWidgetProvider extends AppWidgetProvider {
      */
     private static float rowFurniture(Context ctx, Row r, boolean is24, boolean useFullDay,
                                       boolean showLocalLabel, boolean showDeviceLabel,
-                                      boolean deviceMark, boolean rich) {
+                                      boolean deviceMark, boolean showOffset, boolean rich) {
         android.util.DisplayMetrics dm = ctx.getResources().getDisplayMetrics();
         float gap = 6 * dm.density;
         TextPaint city = new TextPaint();
@@ -609,7 +609,7 @@ public class GeoTimeWidgetProvider extends AppWidgetProvider {
         if (!rich) {
             if (r.isAnchor) {
                 if (showLocalLabel) need += detail.measureText(r.offset) + gap;
-            } else {
+            } else if (showOffset) {
                 need += detail.measureText(r.offset) + gap;
             }
             if (r.isDevice && showDeviceLabel) need += detail.measureText("\u00B7 Device time") + gap;
@@ -643,9 +643,11 @@ public class GeoTimeWidgetProvider extends AppWidgetProvider {
     private static final class Fitted {
         final CharSequence label;
         final boolean deviceMark;
-        Fitted(CharSequence label, boolean deviceMark) {
+        final boolean showOffset;
+        Fitted(CharSequence label, boolean deviceMark, boolean showOffset) {
             this.label = label;
             this.deviceMark = deviceMark;
+            this.showOffset = showOffset;
         }
     }
 
@@ -661,13 +663,33 @@ public class GeoTimeWidgetProvider extends AppWidgetProvider {
         TextPaint city = new TextPaint();
         city.setTextSize(15 * dm.scaledDensity);
 
+        // What a row gives up, in order, so that a place name survives whole.
+        //
+        //   1. the phone mark — the reader's own clock is in the status bar a few
+        //      millimetres above this widget
+        //   2. the offset — "+2 hrs" is a relation BETWEEN two times that are both
+        //      still on screen; the reader can see it without being told
+        //   3. only then, characters off the name, which nothing else recovers
+        //
+        // Both of the first two are derivable from what remains on the row. A
+        // truncated name is not derivable from anything.
         boolean deviceMark = true;
+        boolean showOffset = true;
         float furniture = rowFurniture(ctx, r, is24, useFullDay, showLocalLabel,
-                                       showDeviceLabel, true, rich);
+                                       showDeviceLabel, deviceMark, showOffset, rich);
+
         if (r.isDevice && city.measureText(name) + furniture > usable) {
             deviceMark = false;
             furniture = rowFurniture(ctx, r, is24, useFullDay, showLocalLabel,
-                                     showDeviceLabel, false, rich);
+                                     showDeviceLabel, deviceMark, showOffset, rich);
+        }
+        // Not on the anchor: its "offset" slot holds its own words — "Local time",
+        // "Ship time" — which are a label, already rationed by showLocalLabel, and
+        // not a relation anybody can read off the other rows.
+        if (!r.isAnchor && city.measureText(name) + furniture > usable) {
+            showOffset = false;
+            furniture = rowFurniture(ctx, r, is24, useFullDay, showLocalLabel,
+                                     showDeviceLabel, deviceMark, showOffset, rich);
         }
 
         float room = usable - furniture;
@@ -675,7 +697,7 @@ public class GeoTimeWidgetProvider extends AppWidgetProvider {
         // Below this the name is unreadable anyway and the row has bigger problems.
         room = Math.max(room, 36 * dm.density);
         CharSequence shown = TextUtils.ellipsize(name, city, room, TextUtils.TruncateAt.END);
-        return new Fitted(shown, deviceMark);
+        return new Fitted(shown, deviceMark, showOffset);
     }
 
     private static boolean decideFullShipName(Context ctx, List<Row> rows, Bundle opts,
