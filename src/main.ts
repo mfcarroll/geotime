@@ -5,7 +5,7 @@ import './style.css';
 import { Loader } from '@googlemaps/js-api-loader';
 import * as dom from './dom';
 import { state, persistTimezones, migrateStoredTimezones, setZoneLabel, syncWidget, addShipClock } from './state';
-import { refreshAnchorChip, refreshMapStyles, initMaps, onLocationError, onLocationSuccess, selectTimezone, selectShip, renderWorldClocks, addUniqueTimezoneToList, updateUserTimezoneDetails, showLocationUnavailable, loadTimezoneGeoJson } from './map';
+import { refreshAnchorChip, refreshMapStyles, initMaps, onLocationError, onLocationSuccess, selectTimezone, selectShip, setHoveredShip, renderWorldClocks, addUniqueTimezoneToList, updateUserTimezoneDetails, showLocationUnavailable, loadTimezoneGeoJson } from './map';
 import { updateAllClocks, syncClock, getDisplayTimezoneName, startClocks } from './time';
 import { Capacitor } from '@capacitor/core';
 import { getDeviceTimezone, onDeviceTimezoneChanged } from './widget';
@@ -240,6 +240,13 @@ async function startApp() {
   // already imports from it.
   document.addEventListener('shipmarkerclick', (e) => {
     selectShip((e as CustomEvent<{ key: string }>).detail.key);
+  });
+
+  // Pointing at a hull explains it, the same way pointing at a zone does. Muted
+  // on touch, where there is no pointing — only tapping, which selects.
+  document.addEventListener('shipmarkerhover', (e) => {
+    if (matchMedia('(hover: none)').matches) return;
+    setHoveredShip((e as CustomEvent<{ key: string | null }>).detail.key);
   });
 
   // The ship we are aboard has no row to tap — it collapsed into this card — so

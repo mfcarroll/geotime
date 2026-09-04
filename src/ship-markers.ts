@@ -209,6 +209,19 @@ export function refreshShipMarkers(): void {
       marker.addListener('gmp-click', () => {
         document.dispatchEvent(new CustomEvent('shipmarkerclick', { detail: { key } }));
       });
+
+      // Hover rides on the content element rather than a maps event: an
+      // AdvancedMarkerElement's content is ordinary DOM, and pointerenter is
+      // both simpler and free of the synthetic-event ordering the data layer
+      // has. Touch is filtered by the listener, not here — the same pointer
+      // that taps also fires enter, and a card that appears on tap is fine.
+      const hull = marker.content as HTMLElement;
+      hull.addEventListener('pointerenter', () => {
+        document.dispatchEvent(new CustomEvent('shipmarkerhover', { detail: { key } }));
+      });
+      hull.addEventListener('pointerleave', () => {
+        document.dispatchEvent(new CustomEvent('shipmarkerhover', { detail: { key: null } }));
+      });
       markers.set(key, marker);
     } else {
       marker.position = position;

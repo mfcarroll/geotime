@@ -205,6 +205,8 @@ export function updateUserTimezoneDetails(tzid: string) {
         // while it held an offset: that moves when a ship's clock is re-resolved,
         // not as time passes.
         refreshSelectedShipTime();
+        refreshHoveredShipTime();
+        applyShipReserve();
 
         dom.userTimezoneDetailsEl.classList.toggle('border-green-500', aboard);
         dom.userTimezoneDetailsEl.classList.toggle('border-blue-500', !aboard);
@@ -362,6 +364,85 @@ export function selectShip(key: string): void {
 }
 
 /**
+ * The value line for a ship, wherever it is shown.
+ *
+ * The ship underfoot reads as a TIME; every other reads as a distance from the
+ * anchor. Shared by the selected and hovered cards so the two cannot drift into
+ * saying the same fact two different ways.
+ *
+ * The time is there in place of "Ship time", which is a list-ROW label: it earns
+ * its place in the list because the list has no colour to mark which clock is
+ * the reference, and in a card that is already green-and-leftmost it says
+ * nothing while occupying the one line that could say something. An offset would
+ * be worse still — measured from itself, always +0.
+ */
+function shipCardValue(ship: ShipClock): { text: string; mono: boolean } {
+    // The same wording the clock row uses, for the same reason: no offset means
+    // nothing sensible to show, and the embark port's zone is the obvious wrong
+    // answer.
+    if (ship.offsetHours === null) return { text: 'Finding ship time…', mono: false };
+
+    const aboard = aboardShip();
+    if (aboard && shipKey(aboard) === shipKey(ship)) {
+        return {
+            text: formatFixedOffsetTime(ship.offsetHours, { hour: 'numeric', minute: '2-digit' }),
+            mono: true,
+        };
+    }
+    return {
+        text: relativeTextForShip(ship as { brand: string; code: string; offsetHours: number }),
+        mono: false,
+    };
+}
+
+/** The hull the pointer is over, so a late voyage cannot land on the wrong card. */
+let hoveredShipKey: string | null = null;
+
+/**
+ * Puts a ship in the white card.
+ *
+ * Hover reached only zones before, which left the hulls — the one thing on this
+ * map you can point at that is not a region — silently unexplained.
+ */
+export function setHoveredShip(key: string | null): void {
+    if (key === hoveredShipKey) return;
+    hoveredShipKey = key;
+
+    if (!key) {
+        updateCard(dom.hoveredTimezoneDetailsEl, dom.hoveredTimezoneNameEl,
+                   dom.hoveredTimezoneOffsetEl, null, 'offset', 'hovered');
+        setVoyageLine(dom.hoveredShipVoyageEl, '');
+        return;
+    }
+
+    const ship = state.shipClocks.find((s) => shipKey(s) === key);
+    if (!ship) return;
+
+    dom.hoveredTimezoneNameEl.textContent = ship.name;
+    const value = shipCardValue(ship);
+    setCardValue(dom.hoveredTimezoneOffsetEl, value.text, value.mono);
+    dom.hoveredTimezoneDetailsEl.classList.remove('hidden');
+
+    setVoyageLine(dom.hoveredShipVoyageEl, '');
+    void voyageForShip(key).then((resolved) => {
+        if (hoveredShipKey !== key) return;   // pointer moved on
+        setVoyageLine(dom.hoveredShipVoyageEl, voyageLine(resolved, key));
+    }).catch(() => {});
+}
+
+/**
+ * Keeps a hovered ship's time ticking, for the same reason the selected one
+ * does: a reading that stops reading is worse than an offset that never moved.
+ */
+function refreshHoveredShipTime(): void {
+    if (!hoveredShipKey) return;
+    const ship = state.shipClocks.find((s) => shipKey(s) === hoveredShipKey);
+    if (!ship) return;
+    const value = shipCardValue(ship);
+    setCardValue(dom.hoveredTimezoneOffsetEl, value.text, value.mono);
+}
+
+/**
  * Keeps the selected ship's time ticking.
  *
  * Only the ship you are ON shows a time here — every other selection shows an
@@ -374,11 +455,11 @@ function refreshSelectedShipTime(): void {
     const key = state.selectedShipKey;
     if (!key) return;
 
-    const aboard = aboardShip();
-    if (!aboard || shipKey(aboard) !== key || aboard.offsetHours === null) return;
+    const ship = state.shipClocks.find((s) => shipKey(s) === key);
+    if (!ship) return;
 
-    setCardValue(dom.selectedTimezoneOffsetEl, formatFixedOffsetTime(
-        aboard.offsetHours, { hour: 'numeric', minute: '2-digit' }), true);
+    const value = shipCardValue(ship);
+    setCardValue(dom.selectedTimezoneOffsetEl, value.text, value.mono);
 }
 
 /**
@@ -408,23 +489,8 @@ function updateShipCard(ship: ShipClock | null): void {
     // that distinguish nothing removed. Ambiguity is not a risk here, since the
     // user just picked this row.
     dom.selectedTimezoneNameEl.textContent = ship.name;
-    if (ship.offsetHours === null) {
-        // The same wording the clock row uses, for the same reason: no offset
-        // means nothing sensible to show, and the embark port's zone is the
-        // obvious wrong answer.
-        setCardValue(dom.selectedTimezoneOffsetEl, 'Finding ship time…', false);
-    } else if (aboardShip() && shipKey(aboardShip()!) === shipKey(ship)) {
-        // The ship you are ON, picked deliberately. "Ship time" is a list-row
-        // label — it earns its place there because the list has no colour to
-        // mark the reference — and in a card that is already green-and-leftmost
-        // it says nothing while occupying the one line that could. An offset
-        // would be worse still: measured from itself, always +0.
-        setCardValue(dom.selectedTimezoneOffsetEl, formatFixedOffsetTime(
-            ship.offsetHours, { hour: 'numeric', minute: '2-digit' }), true);
-    } else {
-        setCardValue(dom.selectedTimezoneOffsetEl,
-            relativeTextForShip(ship as { brand: string; code: string; offsetHours: number }), false);
-    }
+    const value = shipCardValue(ship);
+    setCardValue(dom.selectedTimezoneOffsetEl, value.text, value.mono);
     dom.selectedTimezoneDetailsEl.classList.remove('hidden');
 }
 
@@ -435,16 +501,66 @@ function updateShipCard(ship: ShipClock | null): void {
  * clocks to decide between them. This end only paints the result and hides the
  * line when there is nothing to say.
  */
+/**
+ * Writes a card's voyage line, holding the space open when it is empty.
+ *
+ * Three cards sit in one grid row, so the tallest sets the height of all of
+ * them — which means a line appearing on ANY of them shoves the map down. That
+ * is tolerable when you click something and intolerable when you merely sweep
+ * the pointer across a hull, which is now possible.
+ *
+ * So while there is a ship on the list at all, every card keeps a blank line in
+ * reserve. The row is then already as tall as it will ever need to be, and
+ * hovering changes what the cards say without changing where the map is. With
+ * no ships the line cannot appear, and the reserve would just be a gap.
+ */
+function setVoyageLine(el: HTMLElement, line: string): void {
+    el.textContent = line || RESERVED;
+    el.classList.toggle('hidden', line === '' && state.shipClocks.length === 0);
+}
+
+/** A line held open: present, occupying its height, saying nothing. */
+const RESERVED = '\u00A0';
+
+const VOYAGE_LINES = () => [
+    dom.userShipVoyageEl, dom.selectedShipVoyageEl, dom.hoveredShipVoyageEl,
+];
+const NAME_LINES = () => [
+    dom.userTimezoneNameEl, dom.selectedTimezoneNameEl, dom.hoveredTimezoneNameEl,
+];
+
+/**
+ * Holds the card row at its full height whenever a ship could appear in it.
+ *
+ * Applied centrally, on the tick, rather than from the writers — and that is the
+ * point. Both writers dedupe on their key, and both of them dedupe away their
+ * very FIRST call: setAnchorVoyageLine(null) and setHoveredShip(null) each see
+ * "same as current" before anything has been painted and return early. Hanging
+ * the reserve off them left exactly the cards that never hold a ship — the ones
+ * that most need the space held — without it, and the map still jumped by a
+ * line when a pointer crossed a hull.
+ *
+ * Only ever fills in a line that is already empty, so a real destination is
+ * never overwritten.
+ */
+function applyShipReserve(): void {
+    const reserve = state.shipClocks.length > 0;
+
+    for (const el of NAME_LINES()) el.classList.toggle('reserve-ship-name', reserve);
+
+    for (const el of VOYAGE_LINES()) {
+        const text = el.textContent ?? '';
+        if (text !== '' && text !== RESERVED) continue;   // a real line: leave it
+        el.textContent = RESERVED;
+        el.classList.toggle('hidden', !reserve);
+    }
+}
+
 function setShipVoyageLine(voyage: ShipVoyage | null, key: string | null): void {
-    // Suppressed when this ship is also the anchor, because the green card is
-    // already showing the same line for the same vessel and two copies of one
-    // ETA side by side is noise, not emphasis. A DIFFERENT ship selected while
-    // aboard keeps its line: two destinations are two facts.
-    const aboard = aboardShip();
-    const duplicate = key !== null && aboard !== null && shipKey(aboard) === key;
-    const line = duplicate ? '' : voyageLine(voyage, key);
-    dom.selectedShipVoyageEl.textContent = line;
-    dom.selectedShipVoyageEl.classList.toggle('hidden', line === '');
+    // Shown even when this ship is also the anchor. The two cards are then the
+    // same vessel at the same time, and making them differ — by withholding one
+    // line from one of them — reads as a discrepancy rather than as economy.
+    setVoyageLine(dom.selectedShipVoyageEl, voyageLine(voyage, key));
 }
 
 /**
@@ -478,8 +594,7 @@ function setAnchorVoyageLine(key: string | null): void {
 
     if (!sameShip) {
         anchorVoyageKey = key;
-        dom.userShipVoyageEl.textContent = '';
-        dom.userShipVoyageEl.classList.add('hidden');
+        setVoyageLine(dom.userShipVoyageEl, '');
     }
     if (!key) { anchorVoyageRetryAt = 0; return; }
 
@@ -493,9 +608,7 @@ function setAnchorVoyageLine(key: string | null): void {
         if (!resolved) return;
 
         anchorVoyageRetryAt = 0;
-        const line = voyageLine(resolved, key);
-        dom.userShipVoyageEl.textContent = line;
-        dom.userShipVoyageEl.classList.toggle('hidden', line === '');
+        setVoyageLine(dom.userShipVoyageEl, voyageLine(resolved, key));
     }).catch(() => {});
 }
 
@@ -701,22 +814,26 @@ async function setupTimezoneMapListeners() {
     const tzid = event.feature.getProperty('tzid') as string;
     setHoveredZone(tzid);
 
-    const isAlreadyShown = tzid === state.gpsTzid || tzid === state.temporaryTimezone;
+    // Shown whatever else is on screen. It used to be withheld when the zone
+    // was already named by another card, which meant sweeping the pointer over
+    // your own zone gave nothing back while every neighbour answered — the one
+    // place the map's white outline had no card to match it.
+    setHoveredShip(null);
     updateCard(
       dom.hoveredTimezoneDetailsEl, dom.hoveredTimezoneNameEl, dom.hoveredTimezoneOffsetEl,
-      isAlreadyShown ? null : tzid,
-      'offset',
-      'hovered'
+      tzid, 'offset', 'hovered'
     );
   });
 
   document.getElementById('timezone-map')!.addEventListener('mouseleave', () => {
     if (isTouchDevice) return;
     setHoveredZone(null);
+    setHoveredShip(null);
     updateCard(dom.hoveredTimezoneDetailsEl, dom.hoveredTimezoneNameEl, dom.hoveredTimezoneOffsetEl, null, 'offset', 'hovered');
   });
 
   state.timezoneMap.data.addListener('click', (event: google.maps.Data.MouseEvent) => {
+    setHoveredShip(null);
     updateCard(dom.hoveredTimezoneDetailsEl, dom.hoveredTimezoneNameEl, dom.hoveredTimezoneOffsetEl, null, 'offset', 'hovered');
     selectZone(event.feature.getProperty('tzid') as string);
   });

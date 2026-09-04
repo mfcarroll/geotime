@@ -41,6 +41,7 @@ export const selectedTimezoneNameEl = document.getElementById('selected-timezone
 export const selectedTimezoneOffsetEl = document.getElementById('selected-timezone-offset')!;
 export const selectedShipVoyageEl = document.getElementById('selected-ship-voyage')!;
 export const userShipVoyageEl = document.getElementById('user-ship-voyage')!;
+export const hoveredShipVoyageEl = document.getElementById('hovered-ship-voyage')!;
 
 export const hoveredTimezoneDetailsEl = document.getElementById('hovered-timezone-details')!;
 export const hoveredTimezoneNameEl = document.getElementById('hovered-timezone-name')!;

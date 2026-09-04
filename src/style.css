@@ -26,6 +26,24 @@
 }
 
 /*
+  Holds two lines of name open, applied to all three cards while any ship is on
+  the list.
+
+  The reserved voyage line alone was not enough. The three cards share one grid
+  row, so the tallest sets the height of all of them and the map sits directly
+  underneath — and a vessel's name is the OTHER thing that grows a card:
+  "Liberty of the Seas" wraps where "Toronto" does not. Reserving only the third
+  line still let the map jump the moment a pointer crossed a hull.
+
+  Two lines rather than a measured maximum because that is what the names in
+  this fleet actually take at these widths; a longer one in a narrow column
+  could still wrap to three, which would shift the map again by that much.
+
+  3.5rem is two lines of text-lg, whose line-height is 1.75rem.
+*/
+.reserve-ship-name { min-height: 3.5rem; }
+
+/*
   Add padding to the top of the app container to avoid the
   Dynamic Island/notch on native devices.
 */
