@@ -68,11 +68,11 @@ const HULL_PATH = 'M 0,-9 Q 4.5,-4.5 4.5,-1 L 4.5,6.5 L -4.5,6.5 L -4.5,-1 Q -4.
 // This end of the wheel is far from all four and claims no meaning of its own,
 // which is what a DEFAULT should do. The purple in the clock list is a different
 // surface and never shares a screen region with this.
-const HULL = '#C2004E';
+const HULL = '#A80040';
 // Lighter than the hull rather than darker: a stale mark is drawn at 0.55
 // opacity on top of this, and fading a dark colour on a dark map fades it to
 // nothing. Muted in saturation, not in lightness.
-const HULL_STALE = '#A85C7A';
+const HULL_STALE = '#644350';
 const OUTLINE = '#101922';
 // The same gold the zone layer paints a selected band with, so the marker and
 // the region it lit read as one answer rather than two.

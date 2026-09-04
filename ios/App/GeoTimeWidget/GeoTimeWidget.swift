@@ -37,6 +37,7 @@ private struct RowMetrics {
     let showLocalLabel: Bool   // anchor label ("Local time" / "Ship time") on a
                                // single-line row, when the width allows
     let showDeviceLabel: Bool  // "· Device time" tag on the device row (single-line only)
+    let showDeviceMark: Bool   // the phone glyph itself, dropped before a name truncates
     let dayUnderTime: Bool     // small two-line: day label under the time, not beside it
     let dayTimeGap: CGFloat    // extra space between day label and time
     let hGap: CGFloat          // base horizontal gap between elements (tighter on small)
@@ -162,14 +163,15 @@ struct GeoTimeWidgetView: View {
         // they don't shrink the city — city size wins the trade-off.
         let clusterW = usableW - timeColW - (hGap * 2 + 4)
         func cityScale(fullDay: Bool, localLabel: Bool, deviceLabel: Bool,
-                       fullShipName: Bool) -> CGFloat {
+                       fullShipName: Bool, deviceMark: Bool = true) -> CGFloat {
             var scale: CGFloat = 1
             for r in rows {
                 var reserved: CGFloat = 0
                 // The markers sit on line 1 in every layout, and a row can carry
                 // up to three of them — a ship in port keeps the pin, and a phone
                 // agreeing with either is marked there rather than given a row.
-                let marks = (r.isShip ? 1 : 0) + (r.isLocal ? 1 : 0) + (r.isDevice ? 1 : 0)
+                let marks = (r.isShip ? 1 : 0) + (r.isLocal ? 1 : 0)
+                    + ((r.isDevice && deviceMark) ? 1 : 0)
                 if marks > 0 { reserved += pinSize + hGap }
                 if marks > 1 { reserved += CGFloat(marks - 1) * (pinSize + hGap * 0.5) }
                 // Offset + optional labels are on line 1 only in single-line rows;
@@ -222,24 +224,51 @@ struct GeoTimeWidgetView: View {
         // constraint. In practice that means full names on medium and large, and
         // "Star" only on the small widget where width really has run out.
         let shortNameBase = min(1, cityScale(fullDay: false, localLabel: false,
-                                             deviceLabel: false, fullShipName: false))
+                                             deviceLabel: false, fullShipName: false,
+                                             deviceMark: false))
         let useFullShipName = min(1, cityScale(fullDay: false, localLabel: false,
-                                               deviceLabel: false, fullShipName: true))
+                                               deviceLabel: false, fullShipName: true,
+                                               deviceMark: false))
             >= shortNameBase - 0.001
+
+        // The phone mark ranks with the labels, not with the other marks.
+        //
+        // Decided here — after the names, before every garnish — because that is
+        // exactly its standing. The pin and the ship each say something available
+        // nowhere else: which zone you are standing in, which vessel you are on.
+        // The phone marks the clock the reader is already looking at; this widget
+        // sits on that phone's home screen with its clock in the status bar
+        // directly above it. Spending characters of a place name to keep a glyph
+        // that duplicates the status bar is a bad bargain, so the name wins and
+        // the phone goes.
+        //
+        // The baseline it is measured against therefore has the mark OFF, the
+        // same way useFullShipName is measured against the short-name floor.
+        let namesBase = min(1, cityScale(fullDay: false, localLabel: false,
+                                         deviceLabel: false, fullShipName: useFullShipName,
+                                         deviceMark: false))
+        let showDeviceMark = min(1, cityScale(fullDay: false, localLabel: false,
+                                              deviceLabel: false, fullShipName: useFullShipName,
+                                              deviceMark: true)) >= namesBase - 0.001
 
         // Optional labels (full day names, "Local time" / "Device time") are added
         // only when they don't shrink the city — city size wins the trade-off.
         let clampedBase = min(1, cityScale(fullDay: false, localLabel: false,
-                                           deviceLabel: false, fullShipName: useFullShipName))
+                                           deviceLabel: false, fullShipName: useFullShipName,
+                                           deviceMark: showDeviceMark))
         let useFullDay = min(1, cityScale(fullDay: true, localLabel: false,
-                                          deviceLabel: false, fullShipName: useFullShipName)) >= clampedBase - 0.001
+                                          deviceLabel: false, fullShipName: useFullShipName,
+                                          deviceMark: showDeviceMark)) >= clampedBase - 0.001
         let showLocalLabel = !rich && min(1, cityScale(fullDay: false, localLabel: true,
-                                                       deviceLabel: false, fullShipName: useFullShipName)) >= clampedBase - 0.001
+                                                       deviceLabel: false, fullShipName: useFullShipName,
+                                                       deviceMark: showDeviceMark)) >= clampedBase - 0.001
         // In rich, the label lives on line 2: fine on large, too narrow on small.
         let showDeviceLabel = rich
             ? !isSmall
             : min(1, cityScale(fullDay: false, localLabel: false,
-                               deviceLabel: true, fullShipName: useFullShipName)) >= clampedBase - 0.001
+                               deviceLabel: true, fullShipName: useFullShipName,
+                               deviceMark: showDeviceMark)) >= clampedBase - 0.001
+
         let cityFont = max(9, min(cityBase, cityBase * clampedBase))
 
         return RowMetrics(cityFont: cityFont, timeFont: timeFont, detailFont: detailFont,
@@ -247,6 +276,7 @@ struct GeoTimeWidgetView: View {
                           inlineOffset: inlineOffset, useFullDay: useFullDay,
                           useFullShipName: useFullShipName,
                           showLocalLabel: showLocalLabel, showDeviceLabel: showDeviceLabel,
+                          showDeviceMark: showDeviceMark,
                           dayUnderTime: dayUnderTime, dayTimeGap: dayTimeGap, hGap: hGap,
                           timeColW: timeColW, periodColW: periodColW)
     }
@@ -407,7 +437,7 @@ private struct RowView: View {
         HStack(spacing: metrics.hGap * 0.5) {
             if row.isShip { shipMark }
             if row.isLocal { pin }
-            if row.isDevice { phone }
+            if row.isDevice && metrics.showDeviceMark { phone }
         }
     }
 

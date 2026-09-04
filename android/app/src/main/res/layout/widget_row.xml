@@ -14,35 +14,23 @@
         android:orientation="horizontal"
         android:gravity="bottom">
 
-        <!-- The one child that yields when the row runs out of width.
+        <!-- The name, and everything that qualifies it, packed against the left.
 
-             LinearLayout does not negotiate: it measures children in order, and
-             anything past the edge is simply clipped. Every child here is
-             wrap_content with no weight, so nothing gave way and the overflow
-             fell off the end — where the phone mark is, being last. Aboard, the
-             ground row carries city, offset, pin AND phone, which is exactly
-             when it overflows.
+             No layout_weight here, deliberately. Weighting it did stop the marks
+             being clipped, but weight distributes POSITIVE delta too: on a wide
+             row the name stretched to eat the slack and shoved the offset and
+             marks across to the right, away from the name they describe — and
+             hard against the day label, which is where "+2 hrsFri" came from.
 
-             Weight distributes a NEGATIVE delta as readily as a positive one, so
-             this makes the name absorb the shortfall and ellipsize, rather than
-             a mark disappearing. A truncated name is still recognisable; a
-             missing mark is unrecoverable.
-
-             wrap_content, not 0dp: with 0dp the base width is zero and this
-             would take ALL the leftover space, stranding the marks against the
-             right edge away from the name they belong to. wrap_content keeps the
-             natural width as the base so weight only adjusts the difference —
-             short names are untouched.
-
-             This is also what the other two platforms already do. SwiftUI's
-             HStack shrinks its most flexible child, so iOS truncates the name
-             and keeps the mark with no configuration at all; CSS flex reflows.
-             Android was the only surface dropping content. -->
+             Instead the provider measures and ellipsizes this text itself before
+             it ever reaches the layout (see fitCity), so the row cannot overflow
+             and nothing needs to yield at layout time. The container above still
+             bounds the group; the slack now falls between the marks and the day,
+             which is where it belongs. -->
         <TextView
             android:id="@+id/row_city"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_weight="1"
             android:textColor="@color/widget_text_primary"
             android:textSize="15sp"
             android:maxLines="1"

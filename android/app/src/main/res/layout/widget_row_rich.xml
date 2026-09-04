@@ -1,0 +1,134 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The two-line row: name and marks on top, what qualifies them underneath.
+
+  Mirrors RowView's rich branch in GeoTimeWidget.swift. The gain is that line 1
+  carries only the name and its marks, so the name has the whole width to itself
+  and stops competing with an offset, a label and a weekday for it. Chosen per
+  widget, not per row — see the rich budget in GeoTimeWidgetProvider.
+
+  Column layout: name/offset on the left, time/day on the right, each pair
+  stacked and the two blocks meeting in the middle.
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="horizontal"
+    android:baselineAligned="false"
+    android:paddingTop="4dp"
+    android:paddingBottom="4dp">
+
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:orientation="vertical">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <TextView
+                android:id="@+id/row_city"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textColor="@color/widget_text_primary"
+                android:textSize="15sp"
+                android:maxLines="1"
+                android:ellipsize="end" />
+
+            <ImageView
+                android:id="@+id/row_ship"
+                android:layout_width="12dp"
+                android:layout_height="12dp"
+                android:layout_marginStart="5dp"
+                android:src="@drawable/ic_ship"
+                android:visibility="gone"
+                android:contentDescription="@null" />
+
+            <ImageView
+                android:id="@+id/row_pin"
+                android:layout_width="12dp"
+                android:layout_height="12dp"
+                android:layout_marginStart="5dp"
+                android:src="@drawable/ic_pin_local"
+                android:visibility="gone"
+                android:contentDescription="@null" />
+
+            <TextView
+                android:id="@+id/row_device"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="5dp"
+                android:text="📱"
+                android:textSize="11sp"
+                android:includeFontPadding="false"
+                android:visibility="gone" />
+        </LinearLayout>
+
+        <!-- Offset, and the anchor's own words, and the device tag: on line 2 they
+             cost the name nothing, which is why they are all shown here and
+             rationed on the single-line row. -->
+        <TextView
+            android:id="@+id/row_subtitle"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textColor="@color/widget_text_secondary"
+            android:textSize="11sp"
+            android:maxLines="1"
+            android:ellipsize="end"
+            android:visibility="gone" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="6dp"
+        android:orientation="vertical"
+        android:gravity="end">
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="end">
+
+            <TextClock
+                android:id="@+id/row_time"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textColor="@color/widget_text_primary"
+                android:textSize="17sp"
+                android:fontFeatureSettings="tnum"
+                android:format12Hour="h:mm"
+                android:format24Hour="HH:mm" />
+
+            <TextClock
+                android:id="@+id/row_period"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="2dp"
+                android:minWidth="18dp"
+                android:gravity="end"
+                android:textColor="@color/widget_text_secondary"
+                android:textSize="11sp"
+                android:fontFeatureSettings="tnum"
+                android:format12Hour="a"
+                android:format24Hour="" />
+        </LinearLayout>
+
+        <!-- Under the time and right-aligned with it, so a full weekday never
+             competes with the city name for line 1. -->
+        <TextView
+            android:id="@+id/row_day"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="end"
+            android:textColor="@color/widget_text_secondary"
+            android:textSize="11sp"
+            android:maxLines="1"
+            android:visibility="gone" />
+    </LinearLayout>
+</LinearLayout>

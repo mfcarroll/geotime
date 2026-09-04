@@ -8,6 +8,8 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.os.Bundle;
+import android.text.TextPaint;
+import android.text.TextUtils;
 import android.view.View;
 import android.widget.RemoteViews;
 
@@ -104,7 +106,16 @@ public class GeoTimeWidgetProvider extends AppWidgetProvider {
         Bundle opts = mgr.getAppWidgetOptions(widgetId);
         int heightDp = opts.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT, 0);
         if (heightDp <= 0) heightDp = opts.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, 110);
-        int budget = Math.max(1, Math.min(MAX_ROWS, (heightDp - 28) / 27));
+        // Two-line rows when EVERY row fits at the taller height, single-line
+        // otherwise. Mirrors the rule in GeoTimeWidget.swift: the two-line form is
+        // clearer — line 1 carries only the name and its marks, so the name stops
+        // competing with an offset, a label and a weekday for the same width — but
+        // it costs height, and a row dropped to "+N more" costs more than a row
+        // laid out tightly. So it is taken only when nothing is lost for it.
+        int singleBudget = Math.max(1, Math.min(MAX_ROWS, (heightDp - 28) / 27));
+        int richBudget = Math.max(1, Math.min(MAX_ROWS, (heightDp - 28) / RICH_ROW_DP));
+        boolean rich = rows.size() <= richBudget;
+        int budget = rich ? richBudget : singleBudget;
 
         RemoteViews root = new RemoteViews(ctx.getPackageName(), R.layout.widget_geotime);
         root.removeAllViews(R.id.widget_rows); // rows accumulate across updates otherwise
@@ -137,14 +148,18 @@ public class GeoTimeWidgetProvider extends AppWidgetProvider {
         int overflow = rows.size() - visible.size();
 
         boolean is24 = android.text.format.DateFormat.is24HourFormat(ctx);
-        boolean useFullShipName = decideFullShipName(ctx, visible, opts);
-        boolean useFullDay = decideFullDay(ctx, visible, opts);
+        boolean useFullShipName = decideFullShipName(ctx, visible, opts, rich);
+        boolean useFullDay = decideFullDay(ctx, visible, opts, rich);
         boolean showLocalLabel = decideLocalLabel(ctx, visible, opts);
         boolean showDeviceLabel = decideDeviceLabel(ctx, visible, opts);
         for (Row r : visible) {
-            RemoteViews row = new RemoteViews(ctx.getPackageName(), R.layout.widget_row);
-            row.setTextViewText(R.id.row_city,
-                    (!useFullShipName && r.shortLabel != null) ? r.shortLabel : r.label);
+            RemoteViews row = new RemoteViews(ctx.getPackageName(),
+                    rich ? R.layout.widget_row_rich : R.layout.widget_row);
+            Fitted fitted = rich
+                    ? new Fitted((!useFullShipName && r.shortLabel != null) ? r.shortLabel : r.label, true)
+                    : fitCity(ctx, r, opts, is24, useFullShipName, useFullDay,
+                              showLocalLabel, showDeviceLabel);
+            row.setTextViewText(R.id.row_city, fitted.label);
             row.setString(R.id.row_time, "setTimeZone", r.tzId);   // @RemotableViewMethod
             row.setString(R.id.row_period, "setTimeZone", r.tzId);
             row.setViewVisibility(R.id.row_period, is24 ? View.GONE : View.VISIBLE);
@@ -154,39 +169,55 @@ public class GeoTimeWidgetProvider extends AppWidgetProvider {
             // Mirrors marker(for:) in GeoTimeWidget.swift.
             row.setViewVisibility(R.id.row_ship, r.isShip ? View.VISIBLE : View.GONE);
             row.setViewVisibility(R.id.row_pin, r.isLocal ? View.VISIBLE : View.GONE);
-            // The anchor's own words — "Local time" ashore, "Ship time" aboard —
-            // rather than the string baked into the layout.
-            //
-            // Shown here even on a ship anchor, where iOS suppresses it. That is
-            // a real difference and not an oversight: iOS hand-rolls a width
-            // budget that grants the label without checking the row it lands on,
-            // so aboard it ate the vessel's name. Android lets the layout do the
-            // measuring, and the name survives beside the label. Copying the iOS
-            // workaround here would make this side worse for the sake of
-            // matching a defect.
-            boolean anchorLabel = r.isAnchor && showLocalLabel;
-            if (anchorLabel) row.setTextViewText(R.id.row_local_label, r.offset);
-            row.setViewVisibility(R.id.row_local_label, anchorLabel ? View.VISIBLE : View.GONE);
-            row.setViewVisibility(R.id.row_device, r.isDevice ? View.VISIBLE : View.GONE);
+            if (rich) {
+                // Line 2 carries everything that qualifies the name, because down
+                // here it costs the name nothing. The single-line row has to
+                // ration the same three things against the width they share.
+                StringBuilder sub = new StringBuilder(r.offset == null ? "" : r.offset);
+                if (r.isDevice) {
+                    if (sub.length() > 0) sub.append(" ");
+                    sub.append("\u00B7 Device time");
+                }
+                boolean hasSub = sub.length() > 0;
+                if (hasSub) row.setTextViewText(R.id.row_subtitle, sub.toString());
+                row.setViewVisibility(R.id.row_subtitle, hasSub ? View.VISIBLE : View.GONE);
+            } else {
+                // The anchor's own words — "Local time" ashore, "Ship time" aboard —
+                // rather than the string baked into the layout.
+                //
+                // Shown here even on a ship anchor, where iOS suppresses it. That is
+                // a real difference and not an oversight: iOS hand-rolls a width
+                // budget that grants the label without checking the row it lands on,
+                // so aboard it ate the vessel's name. Android measures the name it
+                // will actually draw (see fitCity), so the label cannot displace it.
+                boolean anchorLabel = r.isAnchor && showLocalLabel;
+                if (anchorLabel) row.setTextViewText(R.id.row_local_label, r.offset);
+                row.setViewVisibility(R.id.row_local_label, anchorLabel ? View.VISIBLE : View.GONE);
+
+                // Keyed on the ANCHOR, not on the pin. Ashore they are the same row
+                // and this read as "!isLocal" for years. Aboard they are not: the
+                // ground is an ordinary distance from the ship and must say so, or
+                // the one row a guest checks before stepping ashore is the only row
+                // with no offset on it.
+                if (!r.isAnchor) {
+                    row.setTextViewText(R.id.row_offset, r.offset);
+                    row.setViewVisibility(R.id.row_offset, View.VISIBLE);
+                } else {
+                    row.setViewVisibility(R.id.row_offset, View.GONE);
+                }
+                row.setViewVisibility(R.id.row_device_label,
+                        (r.isDevice && showDeviceLabel) ? View.VISIBLE : View.GONE);
+            }
+
+            row.setViewVisibility(R.id.row_device,
+                    (r.isDevice && fitted.deviceMark) ? View.VISIBLE : View.GONE);
             if (r.dayLabel != null) {
                 row.setTextViewText(R.id.row_day, useFullDay ? r.dayLabelFull : r.dayLabel);
                 row.setViewVisibility(R.id.row_day, View.VISIBLE);
             } else {
                 row.setViewVisibility(R.id.row_day, View.GONE);
             }
-            // Keyed on the ANCHOR, not on the pin. Ashore they are the same row
-            // and this read as "!isLocal" for years. Aboard they are not: the
-            // ground is an ordinary distance from the ship and must say so, or
-            // the one row a guest checks before stepping ashore is the only row
-            // with no offset on it.
-            if (!r.isAnchor) {
-                row.setTextViewText(R.id.row_offset, r.offset);
-                row.setViewVisibility(R.id.row_offset, View.VISIBLE);
-            } else {
-                row.setViewVisibility(R.id.row_offset, View.GONE);
-            }
-            row.setViewVisibility(R.id.row_device_label,
-                    (r.isDevice && showDeviceLabel) ? View.VISIBLE : View.GONE);
+
             root.addView(R.id.widget_rows, row);
         }
 
@@ -212,6 +243,15 @@ public class GeoTimeWidgetProvider extends AppWidgetProvider {
     // America/Los_Angeles read the same today and differ in November, and if both
     // were added the user asked for both. (The device row is still offset-gated;
     // that row exists to answer "is my phone showing a different time".)
+
+    /**
+     * Height of a two-line row in dp, against 27 for a single-line one.
+     *
+     * Measured from what the layout actually stacks: 15sp of name, 11sp beneath
+     * it, and 4dp of padding either side. Guessing this is how iOS refused a
+     * third row roughly 30pt before it stopped fitting.
+     */
+    private static final int RICH_ROW_DP = 41;
 
     private static final Comparator<Row> OFFSET_ORDER = new Comparator<Row>() {
         public int compare(Row a, Row b) {
@@ -537,7 +577,100 @@ public class GeoTimeWidgetProvider extends AppWidgetProvider {
      * full name fits on medium and large and only the small widget falls back
      * to "Star".
      */
-    private static boolean decideFullShipName(Context ctx, List<Row> rows, Bundle opts) {
+    /**
+     * How much of a single-line row is spoken for before the place name.
+     *
+     * Everything except the name itself: marks, offset, optional labels, the day,
+     * the clock and its AM/PM column. Mirrors what widget_row.xml actually lays
+     * out, so a change there needs a change here — the alternative is a layout
+     * that measures itself, which RemoteViews cannot do.
+     */
+    private static float rowFurniture(Context ctx, Row r, boolean is24, boolean useFullDay,
+                                      boolean showLocalLabel, boolean showDeviceLabel,
+                                      boolean deviceMark) {
+        android.util.DisplayMetrics dm = ctx.getResources().getDisplayMetrics();
+        float gap = 6 * dm.density;
+        TextPaint city = new TextPaint();
+        city.setTextSize(15 * dm.scaledDensity);
+        TextPaint detail = new TextPaint();
+        detail.setTextSize(11 * dm.scaledDensity);
+
+        float need = 0;
+        int marks = (r.isShip ? 1 : 0) + (r.isLocal ? 1 : 0)
+                + ((r.isDevice && deviceMark) ? 1 : 0);
+        need += marks * (12 * dm.density + gap);
+
+        if (r.isAnchor) {
+            if (showLocalLabel) need += detail.measureText(r.offset) + gap;
+        } else {
+            need += detail.measureText(r.offset) + gap;
+        }
+        if (r.isDevice && showDeviceLabel) need += detail.measureText("\u00B7 Device time") + gap;
+        if (r.dayLabel != null) {
+            need += detail.measureText(useFullDay ? r.dayLabelFull : r.dayLabel) + gap;
+        }
+        need += city.measureText(is24 ? "88:88" : "8:88") + gap;
+        if (!is24) need += detail.measureText("PM") + gap;
+        return need;
+    }
+
+    /**
+     * What a row actually shows: its name, possibly shortened, and whether the
+     * phone mark survives.
+     *
+     * The phone goes FIRST when width runs out, before a single character of the
+     * place name. The pin and the ship each say something available nowhere else
+     * — which zone you are standing in, which vessel you are on — but the phone
+     * marks the clock the reader is already looking at, on the device this widget
+     * is sitting on, with its clock in the status bar a few millimetres above.
+     * Spending letters of a city to keep a glyph that duplicates the status bar
+     * is a bad bargain. Same rule as showDeviceMark in GeoTimeWidget.swift.
+     *
+     * Ellipsised here rather than by the TextView because RemoteViews cannot be
+     * given a layout weight, and a weight was the only way to make the view yield
+     * on its own — which it did by stretching on wide rows and shoving the marks
+     * away from the name. Measuring here costs one Paint and keeps the row packed
+     * left.
+     */
+    private static final class Fitted {
+        final CharSequence label;
+        final boolean deviceMark;
+        Fitted(CharSequence label, boolean deviceMark) {
+            this.label = label;
+            this.deviceMark = deviceMark;
+        }
+    }
+
+    private static Fitted fitCity(Context ctx, Row r, Bundle opts, boolean is24,
+                                  boolean useFullShipName, boolean useFullDay,
+                                  boolean showLocalLabel, boolean showDeviceLabel) {
+        String name = (!useFullShipName && r.shortLabel != null) ? r.shortLabel : r.label;
+
+        android.util.DisplayMetrics dm = ctx.getResources().getDisplayMetrics();
+        int widthDp = opts.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, 180);
+        float usable = (widthDp - 24) * dm.density;      // inside the 12dp root padding
+        TextPaint city = new TextPaint();
+        city.setTextSize(15 * dm.scaledDensity);
+
+        boolean deviceMark = true;
+        float furniture = rowFurniture(ctx, r, is24, useFullDay, showLocalLabel,
+                                       showDeviceLabel, true);
+        if (r.isDevice && city.measureText(name) + furniture > usable) {
+            deviceMark = false;
+            furniture = rowFurniture(ctx, r, is24, useFullDay, showLocalLabel,
+                                     showDeviceLabel, false);
+        }
+
+        float room = usable - furniture;
+        // A floor, so a pathological row shows a few letters rather than nothing.
+        // Below this the name is unreadable anyway and the row has bigger problems.
+        room = Math.max(room, 36 * dm.density);
+        CharSequence shown = TextUtils.ellipsize(name, city, room, TextUtils.TruncateAt.END);
+        return new Fitted(shown, deviceMark);
+    }
+
+    private static boolean decideFullShipName(Context ctx, List<Row> rows, Bundle opts,
+                                              boolean rich) {
         boolean anyShip = false;
         for (Row r : rows) if (r.shortLabel != null) { anyShip = true; break; }
         if (!anyShip) return true;
@@ -559,8 +692,14 @@ public class GeoTimeWidgetProvider extends AppWidgetProvider {
             need += 12 * dm.density + gap;                       // ship marker
             // A merged local+ship row carries the pin as well.
             if (r.isLocal) need += 12 * dm.density + gap;
-            if (!r.isLocal) need += detailPaint.measureText(r.offset) + gap;
-            if (r.dayLabel != null) need += detailPaint.measureText(r.dayLabel) + gap;
+            // In a two-line row the offset and the weekday live on line 2 and the
+            // name has line 1 almost to itself — so they must not be charged
+            // against it here. Measuring the single-line row in both modes is why
+            // the two-line widget was showing "Star" beside a half-empty line.
+            if (!rich) {
+                if (!r.isLocal) need += detailPaint.measureText(r.offset) + gap;
+                if (r.dayLabel != null) need += detailPaint.measureText(r.dayLabel) + gap;
+            }
             need += cityPaint.measureText(is24 ? "88:88" : "8:88") + gap;
             if (!is24) need += detailPaint.measureText("PM") + gap;
             if (need > usable) return false;
@@ -568,7 +707,10 @@ public class GeoTimeWidgetProvider extends AppWidgetProvider {
         return true;
     }
 
-    private static boolean decideFullDay(Context ctx, List<Row> rows, Bundle opts) {
+    private static boolean decideFullDay(Context ctx, List<Row> rows, Bundle opts,
+                                         boolean rich) {
+        // Under the time in a two-line row, where it competes with nothing.
+        if (rich) return true;
         boolean anyDay = false;
         for (Row r : rows) if (r.dayLabelFull != null) { anyDay = true; break; }
         if (!anyDay) return true;
