@@ -481,7 +481,16 @@ export async function drawShipChart(key: string, voyage: Promise<ShipVoyage | nu
   // Star of the Seas within a single day, with two other vessels unaffected. So
   // no wake is a normal state, not a failure to report — the route still frames
   // the cruise and the marker still says where the ship is.
-  const wake = voyageTrack(resolved);
+  // Copied, not aliased: voyageTrack returns the stored array itself on several
+  // paths, and the fix appended below would then be written into the cached
+  // voyage — growing its track by one point on every redraw.
+  const wake = [...voyageTrack(resolved)];
+  // Carried through to the hull. The breadcrumbs stop at the last AIS fix the
+  // track feed happens to hold, which can be an hour behind the position the
+  // marker is drawn at — so the line ended in open water short of the ship it
+  // belongs to, and read as a wake that had come adrift. The current fix is the
+  // most recent breadcrumb there is; it just arrives by a different route.
+  if (fix) wake.push([fix.lon, fix.lat]);
   if (wake.length >= 2) {
     polyline(map, wake.map(toLatLng), {
       strokeColor: routeColour,

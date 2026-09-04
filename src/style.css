@@ -203,6 +203,22 @@
   line-height: 0;
   transform: translateY(50%);
 }
+
+/*
+  The blue dot is drawn over everything and reachable by nothing.
+
+  It sits at the highest z-index on purpose — "where am I" should never be
+  obscured — but it is not a control, and being on top made it swallow every
+  pointer aimed at whatever was beneath. Aboard, that is exactly the ship you
+  are standing on: the dot and the hull are at the SAME coordinate, so the one
+  marker a passenger most wants to tap is the one the dot covers completely.
+  The tap then fell through to the map surface and selected the zone instead,
+  which reads as the ship being unclickable.
+
+  pointer-events: none keeps it on top visually and takes it out of hit testing
+  entirely, so the hull underneath receives its own taps.
+*/
+.gps-dot { pointer-events: none; }
 .ship-hull svg,
 .ship-port svg,
 .gps-dot svg {
