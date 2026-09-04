@@ -525,11 +525,59 @@ export function routeAhead(
 
   if (!position) return route.slice(floor);
 
-  const at = nearestIndex(route, position, floor);
+  let at = nearestIndex(route, position, floor);
+
+  // The NEAREST vertex is not necessarily one still ahead. A route is a coarse
+  // polyline, and the vertex closest to a ship halfway along a leg is routinely
+  // the one she has just passed — so the line left the hull, hopped backwards to
+  // it, and only then set off, which looks like the route disagreeing with the
+  // ship about where she is.
+  //
+  // Progress toward the next port of call orders this correctly where proximity
+  // does not: a vertex still ahead is nearer that port than the ship is, and one
+  // already passed is not. So leading vertices that fail that test are dropped
+  // and the line runs from the hull to the first that passes.
+  //
+  // Bounded at the port's own vertex, which matters alongside: there the ship is
+  // essentially AT the target, no vertex is nearer than she is, and an unbounded
+  // walk would skip the whole leg and draw a line to the end of the itinerary.
+  const target = nextCall(voyage, now);
+  if (target) {
+    const targetIndex = nearestIndex(route, target, floor);
+    const shipGap = squaredDistance(position, target);
+    while (at < targetIndex && squaredDistance(route[at], target) >= shipGap) at++;
+  }
+
   // Begins at the vessel rather than at the nearest vertex: on a 10-point
   // polyline across an ocean, that vertex can be a hundred miles away, and the
   // gap between the ship and its own route reads as a rendering fault.
   return [position, ...route.slice(at)];
+}
+
+/**
+ * The port she is heading for: the first call not yet departed, or the last one,
+ * which has no departure because nobody leaves again.
+ *
+ * Unparseable departures are skipped rather than treated as future — an
+ * unreadable date says nothing about whether a port is behind us, and guessing
+ * "ahead" would aim the route at a port already visited.
+ */
+function nextCall(voyage: ShipVoyage, now: number): [number, number] | null {
+  for (const port of voyage.ports) {
+    if (!port.depart) return [port.lon, port.lat];
+    const departed = Date.parse(port.depart.replace(' ', 'T'));
+    if (!Number.isFinite(departed)) continue;
+    if (departed > now) return [port.lon, port.lat];
+  }
+  return null;
+}
+
+/** Comparable, not real: the same longitude-scaled metric nearestIndex uses. */
+function squaredDistance(a: [number, number], b: [number, number]): number {
+  const scale = Math.cos((b[1] * Math.PI) / 180) || 1;
+  const dx = (a[0] - b[0]) * scale;
+  const dy = a[1] - b[1];
+  return dx * dx + dy * dy;
 }
 
 /**
