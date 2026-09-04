@@ -4,16 +4,18 @@ Three items raised after 1.5.0 went out, plus a fourth that arrived by a
 different route — item 4 is the write-up of a question we could only answer
 from a ship, and we now have the answer.
 
-**Items 1, 2 and 3 are done.** Item 4 is not scheduled: it is a refinement of
-something that already works well enough without it, recorded so the
-measurements do not have to be taken twice.
+**All four are done.** Item 4 was written up as *not scheduled* — a refinement
+of something that already worked without it — and then built anyway, once the
+web became the surface being iterated on. What follows is the reasoning as it
+stood when the decision was still open; the section at the end records what
+shipped.
 
 | | Status |
 | --- | --- |
 | 1. Ship destination is misleading | done |
 | 2. Ship time as the reference while aboard | done |
 | 3. Red x on the wrong row | done |
-| 4. Browser ship detection | answered — not scheduled |
+| 4. Browser ship detection | done — built after all |
 
 ---
 
@@ -539,3 +541,15 @@ Near zero. Same endpoint, same headers, same Worker, one parameter widened.
 in `hover` ("Carnival Legend"), which is clean text — no markup, none empty.
 `imo` and `mmsi` are both populated on every record; `imo` is the identity key,
 and is what the fleet feed already uses.
+
+### What shipped
+
+Position matching, on the web only, exactly as scoped above: a tight acceptance
+radius, abstain on a stale fix, abstain where two hulls are in reach. The gate
+turned out to matter as much as the rule — `/fleet` is one globally-shared cache
+entry and `/nearby` is per-location, so asking the cheap one first means everyone
+ashore settles there and never touches the other.
+
+`?diag` reports the verdict and its reason, and says when a reading was inferred
+rather than stamped — the two produce the same Environment on purpose, and a dump
+read on a ship should not imply a gateway stamped something it did not.
