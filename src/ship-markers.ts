@@ -85,6 +85,20 @@ const ABOARD = '#34C759';
 const HOVER_RING = '#FFFFFF';
 
 /**
+ * Whether the wake's first crumb is close enough to the origin to be joined to it.
+ *
+ * The same window voyageTrack trims against, for the same reason: inside it the
+ * gap is the sampling interval and the join is drawing what happened; outside
+ * it the track does not begin at this origin at all, and a join would draw a
+ * straight line across an ocean the ship never sailed.
+ */
+function nearOrigin(crumb: [number, number], origin: [number, number]): boolean {
+  const NEAR_DEGREES = 0.4;
+  return Math.abs(crumb[0] - origin[0]) < NEAR_DEGREES
+      && Math.abs(crumb[1] - origin[1]) < NEAR_DEGREES;
+}
+
+/**
  * A port's ring says whether that port keeps the ship's clock. Nothing else.
  *
  * Painting every port in the vessel's colour was wrong in a way worth spelling
@@ -485,11 +499,20 @@ export async function drawShipChart(key: string, voyage: Promise<ShipVoyage | nu
   // paths, and the fix appended below would then be written into the cached
   // voyage — growing its track by one point on every redraw.
   const wake = [...voyageTrack(resolved)];
-  // Carried through to the hull. The breadcrumbs stop at the last AIS fix the
-  // track feed happens to hold, which can be an hour behind the position the
-  // marker is drawn at — so the line ended in open water short of the ship it
-  // belongs to, and read as a wake that had come adrift. The current fix is the
-  // most recent breadcrumb there is; it just arrives by a different route.
+  // Joined to the voyage at BOTH ends, because the breadcrumbs are a sample and
+  // neither end of a sample lands where the thing it samples begins or stops.
+  //
+  // Astern: voyageTrack trims to the first crumb within about 25 nm of the
+  // departure point, so the line started up to that far offshore of the port it
+  // sailed from. Ahead: the crumbs stop at the last fix the track feed holds,
+  // which can be an hour behind the position the hull is drawn at, so the line
+  // ended in open water short of its own ship.
+  //
+  // Both gaps are artefacts of sampling rather than facts about the voyage, and
+  // the two points that close them are already known — the route's own origin,
+  // and the fix the marker is standing on.
+  const origin = resolved.route[0];
+  if (origin && wake.length > 0 && nearOrigin(wake[0], origin)) wake.unshift(origin);
   if (fix) wake.push([fix.lon, fix.lat]);
   if (wake.length >= 2) {
     polyline(map, wake.map(toLatLng), {
