@@ -368,8 +368,20 @@ private struct RowView: View {
         } else {
             // Single line: everything sits on one shared baseline.
             HStack(alignment: .lastTextBaseline, spacing: metrics.hGap) {
+                // maxWidth: .infinity rather than a Spacer.
+                //
+                // With a Spacer the name was proposed less width than the row
+                // actually had left, truncated to that proposal, and the Spacer
+                // then absorbed the difference — which is why a gap the width of
+                // the arrow sat between the marker and the weekday while the name
+                // read "San Fr...". layoutPriority does not help: the name is not
+                // losing a fight over the space, it is never offered it.
+                //
+                // Letting the name block expand asks for the remaining width
+                // outright and pushes the day and time to the trailing edge, which
+                // is what the Spacer was there to do anyway.
                 cityLine
-                Spacer(minLength: 4)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 rightGroup
             }
         }
