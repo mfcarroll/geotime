@@ -30,6 +30,8 @@ private struct RowMetrics {
     let detailFont: CGFloat    // one consistent size for day label / AM-PM
     let subtitleFont: CGFloat  // offset under the city in rich (two-line) mode
     let pinSize: CGFloat
+    /// Width every mark is drawn at, and reserved at. See markW below.
+    let markW: CGFloat
     let rich: Bool             // two-line row (offset under the city name)
     let inlineOffset: Bool     // offset inline after the city; all rows or none
     let useFullDay: Bool       // full weekday name ("Tuesday") vs short ("Tue")
@@ -61,6 +63,9 @@ struct GeoTimeWidgetView: View {
     private var vPad: CGFloat { family == .systemLarge ? 14 : 0 }
     private var hPad: CGFloat { isSmall ? 0 : 12 }
     private var pinSize: CGFloat { isSmall ? 9 : 10 }
+    // The ship mark set this ratio with its own frame; the other two now match it
+    // so all three occupy the same width whatever glyph they happen to be.
+    private var markW: CGFloat { pinSize * 1.2 }
 
     // Font sizes live here so the height calculation and metrics() cannot drift.
     private func cityBase(rich: Bool) -> CGFloat { isSmall ? 14 : (rich ? 15 : 14) }
@@ -182,8 +187,19 @@ struct GeoTimeWidgetView: View {
                 // agreeing with either is marked there rather than given a row.
                 let marks = (r.isShip ? 1 : 0) + (r.isLocal ? 1 : 0)
                     + ((r.isDevice && deviceMark) ? 1 : 0)
-                if marks > 0 { reserved += pinSize + hGap }
-                if marks > 1 { reserved += CGFloat(marks - 1) * (pinSize + hGap * 0.5) }
+                // markW, not pinSize. pinSize is a FONT size, and nothing was
+                // holding a mark to that width: an SF Symbol draws wider than its
+                // point size, an emoji wider still, and the ship mark already
+                // carried an explicit 1.2x frame. So every row with a mark
+                // overflowed its allowance by a few points and minimumScaleFactor
+                // — a "backstop against measurement rounding" — quietly shrank it
+                // instead. That is why marked rows rendered smaller than their
+                // neighbours while cityFont was supposedly uniform.
+                //
+                // Now every mark is DRAWN at markW too, so reserved and drawn are
+                // the same number and the backstop goes back to catching rounding.
+                if marks > 0 { reserved += markW + hGap }
+                if marks > 1 { reserved += CGFloat(marks - 1) * (markW + hGap * 0.5) }
                 // Offset + optional labels are on line 1 only in single-line rows;
                 // in rich rows they live on line 2 (free of the city's width).
                 if !rich {
@@ -322,7 +338,7 @@ struct GeoTimeWidgetView: View {
         let cityFont = max(9, min(cityBase, cityBase * clampedBase))
 
         return RowMetrics(cityFont: cityFont, timeFont: timeFont, detailFont: detailFont,
-                          subtitleFont: subtitleFont, pinSize: pinSize, rich: rich,
+                          subtitleFont: subtitleFont, pinSize: pinSize, markW: markW, rich: rich,
                           inlineOffset: inlineOffset, useFullDay: useFullDay,
                           useFullShipName: useFullShipName,
                           showLocalLabel: showLocalLabel, showDeviceLabel: showDeviceLabel,
@@ -504,11 +520,14 @@ private struct RowView: View {
         Image(systemName: "location.fill")
             .font(.system(size: metrics.pinSize))
             .foregroundColor(.widgetAccent)
+            .frame(width: metrics.markW)
     }
 
     // Phone emoji marking the device's own timezone.
     @ViewBuilder private var phone: some View {
-        Text("📱").font(.system(size: metrics.pinSize))
+        Text("📱")
+            .font(.system(size: metrics.pinSize))
+            .frame(width: metrics.markW)
     }
 
     // Ship mark. A custom shape rather than an SF Symbol: `ferry.fill` and
@@ -519,7 +538,7 @@ private struct RowView: View {
     @ViewBuilder private var shipMark: some View {
         ShipShape()
             .fill(Color.widgetAccent)
-            .frame(width: metrics.pinSize * 1.2, height: metrics.pinSize * 1.2)
+            .frame(width: metrics.markW, height: metrics.markW)
     }
 }
 
