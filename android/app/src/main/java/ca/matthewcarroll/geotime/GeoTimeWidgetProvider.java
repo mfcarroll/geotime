@@ -192,7 +192,7 @@ public class GeoTimeWidgetProvider extends AppWidgetProvider {
                 // budget that grants the label without checking the row it lands on,
                 // so aboard it ate the vessel's name. Android measures the name it
                 // will actually draw (see fitCity), so the label cannot displace it.
-                boolean anchorLabel = r.isAnchor && showLocalLabel;
+                boolean anchorLabel = r.isAnchor && showLocalLabel && fitted.showQualifier;
                 if (anchorLabel) row.setTextViewText(R.id.row_local_label, r.offset);
                 row.setViewVisibility(R.id.row_local_label, anchorLabel ? View.VISIBLE : View.GONE);
 
@@ -201,7 +201,7 @@ public class GeoTimeWidgetProvider extends AppWidgetProvider {
                 // ground is an ordinary distance from the ship and must say so, or
                 // the one row a guest checks before stepping ashore is the only row
                 // with no offset on it.
-                if (!r.isAnchor && fitted.showOffset) {
+                if (!r.isAnchor && fitted.showQualifier) {
                     row.setTextViewText(R.id.row_offset, r.offset);
                     row.setViewVisibility(R.id.row_offset, View.VISIBLE);
                 } else {
@@ -589,7 +589,7 @@ public class GeoTimeWidgetProvider extends AppWidgetProvider {
      */
     private static float rowFurniture(Context ctx, Row r, boolean is24, boolean useFullDay,
                                       boolean showLocalLabel, boolean showDeviceLabel,
-                                      boolean deviceMark, boolean showOffset, boolean rich) {
+                                      boolean deviceMark, boolean showQualifier, boolean rich) {
         android.util.DisplayMetrics dm = ctx.getResources().getDisplayMetrics();
         float gap = 6 * dm.density;
         TextPaint city = new TextPaint();
@@ -607,9 +607,12 @@ public class GeoTimeWidgetProvider extends AppWidgetProvider {
         // weekday under the time. Charging them here would shrink a name that is
         // not actually competing with them.
         if (!rich) {
+            // The same slot in both cases: an offset on an ordinary row, the
+            // anchor's own words on the anchor. Both are the grey text after the
+            // name, and both yield to it.
             if (r.isAnchor) {
-                if (showLocalLabel) need += detail.measureText(r.offset) + gap;
-            } else if (showOffset) {
+                if (showLocalLabel && showQualifier) need += detail.measureText(r.offset) + gap;
+            } else if (showQualifier) {
                 need += detail.measureText(r.offset) + gap;
             }
             if (r.isDevice && showDeviceLabel) need += detail.measureText("\u00B7 Device time") + gap;
@@ -643,11 +646,11 @@ public class GeoTimeWidgetProvider extends AppWidgetProvider {
     private static final class Fitted {
         final CharSequence label;
         final boolean deviceMark;
-        final boolean showOffset;
-        Fitted(CharSequence label, boolean deviceMark, boolean showOffset) {
+        final boolean showQualifier;
+        Fitted(CharSequence label, boolean deviceMark, boolean showQualifier) {
             this.label = label;
             this.deviceMark = deviceMark;
-            this.showOffset = showOffset;
+            this.showQualifier = showQualifier;
         }
     }
 
@@ -674,22 +677,23 @@ public class GeoTimeWidgetProvider extends AppWidgetProvider {
         // Both of the first two are derivable from what remains on the row. A
         // truncated name is not derivable from anything.
         boolean deviceMark = true;
-        boolean showOffset = true;
+        boolean showQualifier = true;
         float furniture = rowFurniture(ctx, r, is24, useFullDay, showLocalLabel,
-                                       showDeviceLabel, deviceMark, showOffset, rich);
+                                       showDeviceLabel, deviceMark, showQualifier, rich);
 
         if (r.isDevice && city.measureText(name) + furniture > usable) {
             deviceMark = false;
             furniture = rowFurniture(ctx, r, is24, useFullDay, showLocalLabel,
-                                     showDeviceLabel, deviceMark, showOffset, rich);
+                                     showDeviceLabel, deviceMark, showQualifier, rich);
         }
-        // Not on the anchor: its "offset" slot holds its own words — "Local time",
-        // "Ship time" — which are a label, already rationed by showLocalLabel, and
-        // not a relation anybody can read off the other rows.
-        if (!r.isAnchor && city.measureText(name) + furniture > usable) {
-            showOffset = false;
+        // The anchor's label goes the same way as an ordinary row's offset. It
+        // reads as more precious than it is: "Ship time" beside a ship mark, on
+        // the leftmost row, is nearly a restatement — and anything it does add is
+        // one tap away in the app, which the whole widget is a shortcut to.
+        if (city.measureText(name) + furniture > usable) {
+            showQualifier = false;
             furniture = rowFurniture(ctx, r, is24, useFullDay, showLocalLabel,
-                                     showDeviceLabel, deviceMark, showOffset, rich);
+                                     showDeviceLabel, deviceMark, showQualifier, rich);
         }
 
         float room = usable - furniture;
@@ -697,7 +701,7 @@ public class GeoTimeWidgetProvider extends AppWidgetProvider {
         // Below this the name is unreadable anyway and the row has bigger problems.
         room = Math.max(room, 36 * dm.density);
         CharSequence shown = TextUtils.ellipsize(name, city, room, TextUtils.TruncateAt.END);
-        return new Fitted(shown, deviceMark, showOffset);
+        return new Fitted(shown, deviceMark, showQualifier);
     }
 
     private static boolean decideFullShipName(Context ctx, List<Row> rows, Bundle opts,
