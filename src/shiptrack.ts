@@ -506,11 +506,108 @@ function nearestIndex(
  */
 export function routeAhead(
   voyage: ShipVoyage,
-  position: [number, number] | null
+  position: [number, number] | null,
+  course: number | null = null,
 ): Array<[number, number]> {
   const route = voyage.route;
   if (route.length < 2) return route;
 
+  const floor = departedFloor(voyage, route);
+  if (!position) return route.slice(floor);
+
+  // Which SEGMENT she is on, not which vertex she is near.
+  //
+  // Snapping to the nearest vertex was wrong in a way that distance to the next
+  // port could not fix. A route is a coarse polyline; the vertex closest to a
+  // ship halfway along a leg is routinely the one she has just passed, so the
+  // line hooked backwards before setting off. Ordering by progress toward the
+  // next call corrected that where the call was near — Liberty, 237 km from
+  // Cadiz — and did nothing where it was far: Oasis, 1679 km from Cape Liberty,
+  // moved 8 km and still set off in the opposite direction to her course.
+  //
+  // Position ALONG THE POLYLINE is the ordering that actually means "ahead", and
+  // it needs no reference point to measure against. Find the segment she is
+  // nearest to and start at that segment's far end: everything before it she has
+  // sailed, by construction rather than by inference.
+  let bestSegment = floor;
+  let bestDistance = Infinity;
+  for (let i = floor; i < route.length - 1; i++) {
+    const distance = distanceToSegment(position, route[i], route[i + 1]);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      bestSegment = i;
+    }
+  }
+
+  // The next port of call is the one thing this line must not lose.
+  //
+  // Whatever else is uncertain — which leg of a round trip she is on, which
+  // vertex is behind her — the route ahead has to arrive at the place she is
+  // going. So her next call's vertex is a ceiling on where the line may start,
+  // not merely a stop condition for the walk below. Projection can overshoot it
+  // where the polyline doubles back, and without the clamp the drawn route
+  // simply skipped Cadiz and set off for the call after it.
+  const target = nextCall(voyage, Date.now());
+  const limit = target ? nearestIndex(route, target, floor) : route.length - 1;
+
+  let at = Math.min(Math.max(bestSegment + 1, floor), limit);
+
+  // Then discard anything still astern of her.
+  //
+  // Projection alone is not enough, and the reason is these itineraries: most
+  // are round trips, so the polyline passes through the same water twice and the
+  // segment she is nearest to may belong to the leg she is not on. Her own
+  // course settles it — a vertex more than a right angle off the bow is behind
+  // her whatever the index says.
+  //
+  // Stopping at the same ceiling means that alongside, where course is noise and
+  // every vertex reads as behind, this cannot walk past the port she is at.
+  if (course !== null) {
+    while (at < limit && astern(position, route[at], course)) at++;
+  }
+
+  // Begins at the vessel rather than at the vertex: on a 10-point polyline
+  // across an ocean that vertex can be a hundred miles away, and the gap between
+  // the ship and her own route reads as a rendering fault.
+  return [position, ...route.slice(at)];
+}
+
+/** The port she is heading for: the first call not yet departed, else the last. */
+function nextCall(voyage: ShipVoyage, now: number): [number, number] | null {
+  for (const port of voyage.ports) {
+    if (!port.depart) return [port.lon, port.lat];
+    const departed = Date.parse(port.depart.replace(' ', 'T'));
+    if (!Number.isFinite(departed)) continue;   // unreadable says nothing
+    if (departed > now) return [port.lon, port.lat];
+  }
+  return null;
+}
+
+/** More than a right angle off the bow, and therefore behind her. */
+function astern(from: [number, number], to: [number, number], course: number): boolean {
+  const scale = Math.cos((from[1] * Math.PI) / 180) || 1;
+  const bearing = (Math.atan2((to[0] - from[0]) * scale, to[1] - from[1]) * 180) / Math.PI;
+  const off = Math.abs(((bearing - course + 540) % 360) - 180);
+  return off > 90;
+}
+
+/**
+ * The vertex-snapping version, kept ONLY to be drawn beside the new one while
+ * this is being looked at. Delete with the ?routedebug branch in ship-markers.
+ */
+export function routeAheadLegacy(
+  voyage: ShipVoyage,
+  position: [number, number] | null
+): Array<[number, number]> {
+  const route = voyage.route;
+  if (route.length < 2) return route;
+  const floor = departedFloor(voyage, route);
+  if (!position) return route.slice(floor);
+  return [position, ...route.slice(nearestIndex(route, position, floor))];
+}
+
+/** The furthest route index belonging to a port we have already left. */
+function departedFloor(voyage: ShipVoyage, route: Array<[number, number]>): number {
   // Departure times are stated in each port's own local time with no zone. That
   // is fine here: this only has to decide which ports are behind us, and being
   // a few hours out cannot change the answer on a schedule measured in days.
@@ -522,62 +619,29 @@ export function routeAhead(
     if (!Number.isFinite(departed) || departed > now) continue;
     floor = Math.max(floor, nearestIndex(route, [port.lon, port.lat], 0));
   }
-
-  if (!position) return route.slice(floor);
-
-  let at = nearestIndex(route, position, floor);
-
-  // The NEAREST vertex is not necessarily one still ahead. A route is a coarse
-  // polyline, and the vertex closest to a ship halfway along a leg is routinely
-  // the one she has just passed — so the line left the hull, hopped backwards to
-  // it, and only then set off, which looks like the route disagreeing with the
-  // ship about where she is.
-  //
-  // Progress toward the next port of call orders this correctly where proximity
-  // does not: a vertex still ahead is nearer that port than the ship is, and one
-  // already passed is not. So leading vertices that fail that test are dropped
-  // and the line runs from the hull to the first that passes.
-  //
-  // Bounded at the port's own vertex, which matters alongside: there the ship is
-  // essentially AT the target, no vertex is nearer than she is, and an unbounded
-  // walk would skip the whole leg and draw a line to the end of the itinerary.
-  const target = nextCall(voyage, now);
-  if (target) {
-    const targetIndex = nearestIndex(route, target, floor);
-    const shipGap = squaredDistance(position, target);
-    while (at < targetIndex && squaredDistance(route[at], target) >= shipGap) at++;
-  }
-
-  // Begins at the vessel rather than at the nearest vertex: on a 10-point
-  // polyline across an ocean, that vertex can be a hundred miles away, and the
-  // gap between the ship and its own route reads as a rendering fault.
-  return [position, ...route.slice(at)];
+  return floor;
 }
 
 /**
- * The port she is heading for: the first call not yet departed, or the last one,
- * which has no departure because nobody leaves again.
+ * Comparable distance from a point to a segment, longitude-scaled.
  *
- * Unparseable departures are skipped rather than treated as future — an
- * unreadable date says nothing about whether a port is behind us, and guessing
- * "ahead" would aim the route at a port already visited.
+ * Not a real distance — only ever compared against others computed the same way,
+ * at latitudes close enough that one scale factor serves for all of them.
  */
-function nextCall(voyage: ShipVoyage, now: number): [number, number] | null {
-  for (const port of voyage.ports) {
-    if (!port.depart) return [port.lon, port.lat];
-    const departed = Date.parse(port.depart.replace(' ', 'T'));
-    if (!Number.isFinite(departed)) continue;
-    if (departed > now) return [port.lon, port.lat];
-  }
-  return null;
-}
+function distanceToSegment(
+  p: [number, number], a: [number, number], b: [number, number]
+): number {
+  const scale = Math.cos((p[1] * Math.PI) / 180) || 1;
+  const ax = (a[0] - p[0]) * scale, ay = a[1] - p[1];
+  const bx = (b[0] - p[0]) * scale, by = b[1] - p[1];
+  const dx = bx - ax, dy = by - ay;
 
-/** Comparable, not real: the same longitude-scaled metric nearestIndex uses. */
-function squaredDistance(a: [number, number], b: [number, number]): number {
-  const scale = Math.cos((b[1] * Math.PI) / 180) || 1;
-  const dx = (a[0] - b[0]) * scale;
-  const dy = a[1] - b[1];
-  return dx * dx + dy * dy;
+  const length = dx * dx + dy * dy;
+  // A degenerate segment is just its own endpoint.
+  const t = length === 0 ? 0 : Math.max(0, Math.min(1, -(ax * dx + ay * dy) / length));
+
+  const cx = ax + t * dx, cy = ay + t * dy;
+  return cx * cx + cy * cy;
 }
 
 /**

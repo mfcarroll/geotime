@@ -29,6 +29,7 @@ import {
   FIX_MAX_AGE_MS,
   FIX_STALE_AGE_MS,
   routeAhead,
+  routeAheadLegacy,
   voyageTrack,
   type ShipFix,
   type ShipPort,
@@ -377,6 +378,9 @@ const CASING = '#0B1219';
  */
 const PORT_PLAIN = '#E8EEF4';
 
+/** TEMPORARY: the old route-ahead, drawn for comparison under ?routedebug. */
+const ROUTE_WAS = '#FF8A00';
+
 // One colour for the whole track, solid behind and dashed ahead. Solid for
 // travelled and dashed for planned is a convention that needs no legend, and the
 // hue is the vessel's own — see shipColour — so a route reads as belonging to
@@ -467,7 +471,24 @@ export async function drawShipChart(key: string, voyage: Promise<ShipVoyage | nu
   // Only the part still to come, starting at the vessel. The wake covers where
   // it has been, so the two meet at the ship and neither repeats the other.
   const fix = fixForShip(key);
-  const ahead = routeAhead(resolved, fix ? [fix.lon, fix.lat] : null);
+  // TEMPORARY: ?routedebug draws the OLD vertex-snapping route beneath the new
+  // one, in orange, so the two can be compared on the map. Delete this branch,
+  // ROUTE_WAS, and routeAheadLegacy together once it has been looked at.
+  if (window.location.search.includes('routedebug')) {
+    const was = routeAheadLegacy(resolved, fix ? [fix.lon, fix.lat] : null);
+    if (was.length >= 2) {
+      polyline(map, was.map(toLatLng), {
+        strokeColor: ROUTE_WAS,
+        strokeOpacity: 0.9,
+        strokeWeight: 4,
+        // Under the new line, so where they agree the new one is what shows.
+        zIndex: 12,
+      });
+    }
+  }
+
+  const ahead = routeAhead(
+    resolved, fix ? [fix.lon, fix.lat] : null, fix ? markerBearing(fix) : null);
   if (ahead.length >= 2) {
     polyline(map, ahead.map(toLatLng), {
       // strokeOpacity 0 with a repeating icon is how the Maps API draws a dashed
