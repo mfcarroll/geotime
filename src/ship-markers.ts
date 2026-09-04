@@ -55,12 +55,24 @@ const HULL_PATH = 'M 0,-9 Q 4.5,-4.5 4.5,-1 L 4.5,6.5 L -4.5,6.5 L -4.5,-1 Q -4.
 // Distinct from the blue GPS dot on the same map, and legible on all four
 // grounds it has to sit on: dark water, slate land, and the blue and gold band
 // washes the zone layer paints underneath.
-// Turquoise, and deliberately not near the green: a hull's default state has to
-// be told apart AT A GLANCE from the one hull that is green, or the distinction
-// that matters most — which of these am I on — is the one the eye has to work
-// for. Far enough round the wheel to survive both band washes underneath.
-const HULL = '#2BC8D4';
-const HULL_STALE = '#7FA3AA';
+// Magenta, chosen by elimination rather than taste.
+//
+// The default hull has to survive being confused with FOUR colours that already
+// mean something on this map: the GPS blue, the ship green, the selected gold,
+// and the white of hover. Turquoise failed on the first — it sat close enough to
+// the blue band to blur into it. That leaves the far side of the wheel.
+//
+// Brown was the obvious alternative and is the wrong one: this map is dark
+// water and dark slate, and a low-chroma colour is precisely what vanishes
+// against it. Red carries "stop", which a ship is not. Orange lands next door to
+// the gold and would blur under a selected band the way turquoise blurred under
+// a blue one.
+//
+// Magenta is far from all four, bright enough for a dark ground, and claims no
+// meaning of its own — which is what a DEFAULT should do. The purple in the
+// clock list is a different surface and never shares a screen region with this.
+const HULL = '#FF5C9E';
+const HULL_STALE = '#B0748F';
 const OUTLINE = '#101922';
 // The same gold the zone layer paints a selected band with, so the marker and
 // the region it lit read as one answer rather than two.
@@ -82,19 +94,30 @@ const HOVER_RING = '#FFFFFF';
  * are both an hour off ship time. The map was stating something false about the
  * one question a passenger actually has at a port: do I change my watch here.
  *
- * So the ring answers that and only that. Green when the port keeps ship time,
- * turquoise when it does not, whether or not the vessel is selected — a fact
- * about the world does not change because you clicked something. Selection is
- * carried by the hull and the route, which are the things you picked.
+ * So the ring answers that and only that: a port that keeps the ship's clock
+ * wears the SHIP'S OWN colour, and a port that does not stays the default.
+ *
+ * Taking her colour rather than a fixed green is what keeps it honest in both
+ * modes. Aboard she is green, so the ports sharing your clock are green — which
+ * is the only time green is in play at all. Select her and she is gold, and the
+ * ports on her time go gold with her. Either way the ring means "same clock as
+ * that ship", and it is never asserting membership of a zone you happened to
+ * select, which is what a fixed gold would have implied.
+ *
+ * A ship neither aboard nor selected has no clock you are measuring against, so
+ * her ports all sit at the default and say nothing. That is correct: there is no
+ * question being asked.
  *
  * Null offsets — a port we cannot place, a clock not yet resolved — read as "not
  * the same", because unknown is not a match.
  */
-function portColour(port: { lat: number; lon: number }, shipOffset: number | null): string {
+function portColour(
+  port: { lat: number; lon: number }, shipOffset: number | null, shipHue: string,
+): string {
   if (shipOffset === null) return HULL;
   const tz = findTimezoneFromGeoJSON(port.lat, port.lon);
   if (!tz) return HULL;
-  return getUtcOffset(tz) === shipOffset ? ABOARD : HULL;
+  return getUtcOffset(tz) === shipOffset ? shipHue : HULL;
 }
 
 /**
@@ -103,8 +126,8 @@ function portColour(port: { lat: number; lon: number }, shipOffset: number | nul
  * Selected beats aboard beats ordinary, which is the same order the zone layer
  * resolves in: resolveZoneStyle tests `tzid === selectedTzid` before it tests
  * the ship or GPS bands. Gold answers "you picked this", green answers "this is
- * the clock you are living by", turquoise answers "this is a ship". A hull can
- * be all three things at once and the most specific claim wins.
+ * the clock you are living by", magenta answers "this is a ship". A hull can be
+ * all three things at once and the most specific claim wins.
  *
  * Her ports and route take the SAME colour, because they are not separate
  * objects the user picked — they are the vessel's own voyage, and colouring them
@@ -155,9 +178,11 @@ function styleHull(
   const path = svg?.firstElementChild as SVGElement | null;
   if (!svg || !path) return;
 
-  // A touch larger when selected, on top of the colour change — the gold alone
-  // is hard to pick out against the gold band it just lit.
-  const scale = selected ? 1.5 : 1.15;
+  // One size, always. Growing on selection was compensation for a hull whose
+  // default was near-white, where gold on a gold band really was hard to pick
+  // out; against magenta the colour change carries it alone, and a marker that
+  // changes size makes the map look like it moved.
+  const scale = 1.15;
   const size = 20 * scale;
   svg.setAttribute('width', String(size));
   svg.setAttribute('height', String(size));
@@ -457,7 +482,7 @@ export async function drawShipChart(key: string, voyage: Promise<ShipVoyage | nu
     ring.className = 'ship-port';
     ring.innerHTML =
       `<svg viewBox="-8 -8 16 16" width="16" height="16"><circle r="4" fill="${CASING}" ` +
-      `fill-opacity="0.9" stroke="${portColour(port, shipOffset)}" stroke-width="2" ` +
+      `fill-opacity="0.9" stroke="${portColour(port, shipOffset, routeColour)}" stroke-width="2" ` +
       `stroke-opacity="0.95"/></svg>`;
     chart.push(new google.maps.marker.AdvancedMarkerElement({
       map,
