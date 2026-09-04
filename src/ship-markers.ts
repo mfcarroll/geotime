@@ -52,10 +52,7 @@ import {
  */
 const HULL_PATH = 'M 0,-9 Q 4.5,-4.5 4.5,-1 L 4.5,6.5 L -4.5,6.5 L -4.5,-1 Q -4.5,-4.5 0,-9 Z';
 
-// Distinct from the blue GPS dot on the same map, and legible on all four
-// grounds it has to sit on: dark water, slate land, and the blue and gold band
-// washes the zone layer paints underneath.
-// Magenta, chosen by elimination rather than taste.
+// Crimson, chosen by elimination rather than taste.
 //
 // The default hull has to survive being confused with FOUR colours that already
 // mean something on this map: the GPS blue, the ship green, the selected gold,
@@ -68,11 +65,14 @@ const HULL_PATH = 'M 0,-9 Q 4.5,-4.5 4.5,-1 L 4.5,6.5 L -4.5,6.5 L -4.5,-1 Q -4.
 // the gold and would blur under a selected band the way turquoise blurred under
 // a blue one.
 //
-// Magenta is far from all four, bright enough for a dark ground, and claims no
-// meaning of its own — which is what a DEFAULT should do. The purple in the
-// clock list is a different surface and never shares a screen region with this.
-const HULL = '#FF5C9E';
-const HULL_STALE = '#B0748F';
+// This end of the wheel is far from all four and claims no meaning of its own,
+// which is what a DEFAULT should do. The purple in the clock list is a different
+// surface and never shares a screen region with this.
+const HULL = '#C2004E';
+// Lighter than the hull rather than darker: a stale mark is drawn at 0.55
+// opacity on top of this, and fading a dark colour on a dark map fades it to
+// nothing. Muted in saturation, not in lightness.
+const HULL_STALE = '#A85C7A';
 const OUTLINE = '#101922';
 // The same gold the zone layer paints a selected band with, so the marker and
 // the region it lit read as one answer rather than two.
@@ -95,7 +95,7 @@ const HOVER_RING = '#FFFFFF';
  * one question a passenger actually has at a port: do I change my watch here.
  *
  * So the ring answers that and only that: a port that keeps the ship's clock
- * wears the SHIP'S OWN colour, and a port that does not stays the default.
+ * wears the SHIP'S OWN colour, and a port that does not stays plain white.
  *
  * Taking her colour rather than a fixed green is what keeps it honest in both
  * modes. Aboard she is green, so the ports sharing your clock are green — which
@@ -105,7 +105,7 @@ const HOVER_RING = '#FFFFFF';
  * select, which is what a fixed gold would have implied.
  *
  * A ship neither aboard nor selected has no clock you are measuring against, so
- * her ports all sit at the default and say nothing. That is correct: there is no
+ * her ports all sit at plain white and say nothing. That is correct: there is no
  * question being asked.
  *
  * Null offsets — a port we cannot place, a clock not yet resolved — read as "not
@@ -114,10 +114,10 @@ const HOVER_RING = '#FFFFFF';
 function portColour(
   port: { lat: number; lon: number }, shipOffset: number | null, shipHue: string,
 ): string {
-  if (shipOffset === null) return HULL;
+  if (shipOffset === null) return PORT_PLAIN;
   const tz = findTimezoneFromGeoJSON(port.lat, port.lon);
-  if (!tz) return HULL;
-  return getUtcOffset(tz) === shipOffset ? shipHue : HULL;
+  if (!tz) return PORT_PLAIN;
+  return getUtcOffset(tz) === shipOffset ? shipHue : PORT_PLAIN;
 }
 
 /**
@@ -126,7 +126,7 @@ function portColour(
  * Selected beats aboard beats ordinary, which is the same order the zone layer
  * resolves in: resolveZoneStyle tests `tzid === selectedTzid` before it tests
  * the ship or GPS bands. Gold answers "you picked this", green answers "this is
- * the clock you are living by", magenta answers "this is a ship". A hull can be
+ * the clock you are living by", crimson answers "this is a ship". A hull can be
  * all three things at once and the most specific claim wins.
  *
  * Her ports and route take the SAME colour, because they are not separate
@@ -348,6 +348,20 @@ export function refreshShipMarkers(): void {
  * every segment its own contrast regardless of what it crosses.
  */
 const CASING = '#0B1219';
+
+/**
+ * The colour of a port that says nothing.
+ *
+ * Not the hull colour, which is what it was and which was wrong for a reason
+ * worth keeping. Ports are only ever on screen at all when a ship is selected or
+ * aboard — so they always appear in company with a row of green or gold rings
+ * beside them. A saturated default among those does not read as "no claim", it
+ * reads as a third claim, and the eye goes to it.
+ *
+ * Near-white rather than pure white: #FFFFFF is what hover paints, and a port
+ * ring that exactly matched it would blur two different statements together.
+ */
+const PORT_PLAIN = '#E8EEF4';
 
 // One colour for the whole track, solid behind and dashed ahead. Solid for
 // travelled and dashed for planned is a convention that needs no legend, and the
