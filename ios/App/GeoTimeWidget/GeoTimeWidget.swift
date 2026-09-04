@@ -38,7 +38,6 @@ private struct RowMetrics {
                                // single-line row, when the width allows
     let showDeviceLabel: Bool  // "· Device time" tag on the device row (single-line only)
     let showDeviceMark: Bool   // the phone glyph itself, dropped before a name truncates
-    let dayUnderTime: Bool     // small two-line: day label under the time, not beside it
     let dayTimeGap: CGFloat    // extra space between day label and time
     let hGap: CGFloat          // base horizontal gap between elements (tighter on small)
     let timeColW: CGFloat
@@ -154,7 +153,6 @@ struct GeoTimeWidgetView: View {
         let hGap: CGFloat = isSmall ? 3 : 5
         // Small two-line: the day label tucks under the time (line 2) rather than
         // beside it, so it no longer competes with the city name for line-1 width.
-        let dayUnderTime = isSmall && rich
 
         // City width is limited only by each row's OWN right-side content, so a
         // long name on a row with no day label can use the space that only other
@@ -202,7 +200,7 @@ struct GeoTimeWidgetView: View {
                     }
                 }
                 // When the day tucks under the time it doesn't take line-1 width.
-                if !dayUnderTime, let day = fullDay ? r.weekdayFull : r.weekdayShort {
+                if !rich, let day = fullDay ? r.weekdayFull : r.weekdayShort {
                     reserved += width(day, detailFont) + dayTimeGap
                 }
                 let availName = clusterW - reserved
@@ -277,7 +275,7 @@ struct GeoTimeWidgetView: View {
                           useFullShipName: useFullShipName,
                           showLocalLabel: showLocalLabel, showDeviceLabel: showDeviceLabel,
                           showDeviceMark: showDeviceMark,
-                          dayUnderTime: dayUnderTime, dayTimeGap: dayTimeGap, hGap: hGap,
+                          dayTimeGap: dayTimeGap, hGap: hGap,
                           timeColW: timeColW, periodColW: periodColW)
     }
 }
@@ -287,9 +285,17 @@ private struct RowView: View {
     let metrics: RowMetrics
 
     var body: some View {
-        if metrics.rich && metrics.dayUnderTime {
-            // Small two-line: two independent full-width rows, so the full-word day
-            // on line 2 never competes with the city name on line 1.
+        if metrics.rich {
+            // Two-line: the name over what qualifies it, the time over the day.
+            //
+            // Two independent full-width rows rather than two columns, so a full
+            // weekday on line 2 never competes with the city name on line 1 —
+            // which is the whole reason to spend the second line.
+            //
+            // Large used to put the day BESIDE the time and keep the left column
+            // to itself. Stacking everywhere is the same shape Android draws, and
+            // one shape across both platforms and all three families beats a
+            // family-specific variant that has to be remembered.
             VStack(alignment: .leading, spacing: 1) {
                 HStack(alignment: .firstTextBaseline, spacing: metrics.hGap) {
                     cityLine
@@ -306,17 +312,6 @@ private struct RowView: View {
                             .lineLimit(1)
                     }
                 }
-            }
-        } else if metrics.rich {
-            // Large two-line: city/offset on the left; day · time on the right,
-            // both blocks aligned on the city/time baseline.
-            HStack(alignment: .firstTextBaseline, spacing: metrics.hGap) {
-                VStack(alignment: .leading, spacing: 1) {
-                    cityLine
-                    subtitle
-                }
-                Spacer(minLength: 4)
-                rightGroup
             }
         } else {
             // Single line: everything sits on one shared baseline.
