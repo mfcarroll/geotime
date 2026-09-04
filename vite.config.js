@@ -29,22 +29,32 @@ export default defineConfig(({ mode }) => ({
         background_color: '#111827',
         display: 'standalone',
         start_url: '.',
+        /*
+         * These filenames must exist in public/icons. They did not: this listed
+         * icon-192x192.png and icon-512x512.png, and what is on disk is
+         * web-app-manifest-*.png — the names realfavicongenerator produces. The
+         * mismatch survived because index.html also links a hand-written
+         * site.webmanifest, browsers honour the FIRST manifest link, and that one
+         * happened to be right. A second manifest nobody read was quietly broken.
+         *
+         * `maskable` only, matching how site.webmanifest declared the same two
+         * files. These are generated with the safe zone a maskable icon needs —
+         * artwork inside the middle 80% — so serving them as `any` as well would
+         * draw a correctly-padded icon everywhere that does not mask, which reads
+         * as a small icon adrift in its own tile.
+         */
         icons: [
           {
-            src: 'icons/icon-192x192.png',
+            src: 'icons/web-app-manifest-192x192.png',
             sizes: '192x192',
             type: 'image/png',
+            purpose: 'maskable',
           },
           {
-            src: 'icons/icon-512x512.png',
+            src: 'icons/web-app-manifest-512x512.png',
             sizes: '512x512',
             type: 'image/png',
-          },
-          {
-            src: 'icons/icon-512x512.png',
-            sizes: '512x512',
-            type: 'image/png',
-            purpose: 'any maskable',
+            purpose: 'maskable',
           }
         ]
       }
