@@ -569,6 +569,13 @@ export function routeAhead(
   // Begins at the vessel rather than at the vertex: on a 10-point polyline
   // across an ocean that vertex can be a hundred miles away, and the gap between
   // the ship and her own route reads as a rendering fault.
+  //
+  // That join is a straight line to a PLANNED route from an ACTUAL position, so
+  // where a ship has left her plan it can cross land. Watched on Oasis of the
+  // Seas working around the Bahamas — weather routing, presumably — where the
+  // line cut through the islands. Left as it is: the alternative is inventing a
+  // path we have no basis for, and the line's job here is to say which way along
+  // the route is ahead, which it now does.
   return [position, ...route.slice(at)];
 }
 
@@ -591,20 +598,6 @@ function astern(from: [number, number], to: [number, number], course: number): b
   return off > 90;
 }
 
-/**
- * The vertex-snapping version, kept ONLY to be drawn beside the new one while
- * this is being looked at. Delete with the ?routedebug branch in ship-markers.
- */
-export function routeAheadLegacy(
-  voyage: ShipVoyage,
-  position: [number, number] | null
-): Array<[number, number]> {
-  const route = voyage.route;
-  if (route.length < 2) return route;
-  const floor = departedFloor(voyage, route);
-  if (!position) return route.slice(floor);
-  return [position, ...route.slice(nearestIndex(route, position, floor))];
-}
 
 /** The furthest route index belonging to a port we have already left. */
 function departedFloor(voyage: ShipVoyage, route: Array<[number, number]>): number {
