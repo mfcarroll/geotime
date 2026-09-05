@@ -24,6 +24,19 @@ struct WidgetRow: Identifiable {
     let weekdayFull: String?   // "Tuesday" — used when there's room (see metrics)
     let relativeText: String   // "Local time" / "+3 hrs" — for large rich rows
     let offsetSeconds: Int
+    /// True when an earlier row already shows this clock.
+    ///
+    /// NOT a reason to hide it. A second zone on the same offset is still a
+    /// place the user asked for, and on a widget with room it should be there.
+    /// It is only the first thing to give up when room runs out — ahead of a
+    /// zone that shows an hour nothing else does. Defaulted so the rows that
+    /// can never be duplicates (ground, phone, ship) say nothing about it.
+    /// Mirrors Row.sharesOffset in GeoTimeWidgetProvider.java.
+    var sharesOffset: Bool = false
+    /// True when the row's name is one the zone could not have produced — a place
+    /// the user picked, not the zone's own city. Decides which of two rows on the
+    /// same offset is the one worth keeping when only one fits.
+    var namesAPlace: Bool = false
 }
 
 // Canonical row set — dedup by zone id (local/device win), sorted by offset then
@@ -150,19 +163,33 @@ enum ZoneRowResolver {
             claimedOffsets.insert(deviceOffset)
         }
 
-        // The saved cities. One is dropped when its clock already appears above
-        // it — on a surface this small a second copy of a time buys nothing, and
-        // the app itself still lists both. Two zones that agree today and part in
-        // November part here too, which is the point.
+        // The saved cities. A city whose clock already appears above it is kept
+        // and FLAGGED, not dropped: it is still a place the user asked for, and
+        // hiding it while half the widget is empty is not a saving. It becomes
+        // the first thing surrendered when the rows genuinely do not fit — see
+        // fit(_:maxRows:).
+        //
+        // Dropping them here was also what made the two-line decision wrong: the
+        // view asks "does everything fit at the taller height", and everything
+        // had already been quietly reduced before it asked.
         //
         // Only the ground and a standalone phone claim an offset here, and the
         // ground goes first, so where you actually are always wins: in Vancouver
-        // with San Francisco saved, Vancouver keeps the slot.
+        // with San Francisco saved, Vancouver leads and San Francisco is the
+        // flagged one.
+        // The device zone is excluded by identity as well as the ground. The SAME
+        // zone must never appear twice, and until now the offset rule hid that
+        // case by accident: saving Vancouver while the phone is on Vancouver was
+        // dropped for sharing an offset, not for being the same place. Now that a
+        // shared offset is allowed, identity has to say so itself. Two DIFFERENT
+        // zones agreeing today still both show.
+        let deviceShown = deviceOffset != anchorOffset && deviceOffset != geographicOffset
         for (index, id) in storedIds.enumerated() {
             if id == local.identifier { continue }
+            if deviceShown && id == deviceTz.identifier { continue }
             guard let info = TimezoneDisplay.resolveZone(id) else { continue }
             let off = info.timeZone.secondsFromGMT(for: now)
-            if claimedOffsets.contains(off) { continue }
+            let dup = claimedOffsets.contains(off)
             claimedOffsets.insert(off)
             let chosen = index < labels.count && !labels[index].isEmpty ? labels[index] : nil
             let parts = TimezoneDisplay.timeParts(info.timeZone, at: now)
@@ -180,8 +207,33 @@ enum ZoneRowResolver {
                 weekdayShort: differs ? TimezoneDisplay.weekday(info.timeZone, at: now, full: false) : nil,
                 weekdayFull: differs ? TimezoneDisplay.weekday(info.timeZone, at: now, full: true) : nil,
                 relativeText: TimezoneDisplay.relativeOffset(zoneSeconds: off, deviceSeconds: anchorOffset),
-                offsetSeconds: off
+                offsetSeconds: off,
+                sharesOffset: dup,
+                // A name the zone could not have produced itself — "Mississauga"
+                // for America/Toronto, "Coco Cay" for America/Nassau. Plain
+                // "Toronto" does not count: it is what the row would read anyway,
+                // so letting it outrank an unlabelled zone would change the winner
+                // without changing anything the user can see.
+                namesAPlace: chosen != nil
+                    && chosen!.caseInsensitiveCompare(TimezoneDisplay.displayName(id)) != .orderedSame
             ))
+        }
+
+        // Now that every stored row exists, decide which of each offset speaks
+        // for it. Done here rather than inside the loop because the answer depends
+        // on rows the loop had not reached yet: a place added second can still be
+        // the better name for its offset. Specials (ground, phone, ship) already
+        // own their offset and are never displaced.
+        let isSpecial: (WidgetRow) -> Bool = { $0.isAnchor || $0.isLocal || $0.isShip || $0.isDevice }
+        var speaksFor: [Int: Int] = [:]                       // offset -> index in rows
+        for (i, r) in rows.enumerated() {
+            if isSpecial(r) { speaksFor[r.offsetSeconds] = i; continue }
+            guard let heldIndex = speaksFor[r.offsetSeconds] else { speaksFor[r.offsetSeconds] = i; continue }
+            let held = rows[heldIndex]
+            if !isSpecial(held) && r.namesAPlace && !held.namesAPlace { speaksFor[r.offsetSeconds] = i }
+        }
+        for i in rows.indices where !isSpecial(rows[i]) {
+            rows[i].sharesOffset = speaksFor[rows[i].offsetSeconds] != i
         }
 
         // Ships are outside the no-repeated-clocks rule in BOTH directions: a
@@ -239,8 +291,16 @@ enum ZoneRowResolver {
         let isSpecial: (WidgetRow) -> Bool = { $0.isAnchor || $0.isLocal || $0.isShip || $0.isDevice }
         let specials = rows.filter(isSpecial)
         let anchorOffset = rows.first { $0.isAnchor }?.offsetSeconds ?? 0
+        // A duplicate yields before any zone showing an hour of its own, however
+        // far from the anchor that zone sits: a second copy of a time already on
+        // screen is the one thing here that tells the user nothing new. Within
+        // each group, nearest the anchor survives.
         let others = rows.filter { !isSpecial($0) }
-            .sorted { abs($0.offsetSeconds - anchorOffset) < abs($1.offsetSeconds - anchorOffset) }
+            .sorted {
+                $0.sharesOffset != $1.sharesOffset
+                    ? !$0.sharesOffset
+                    : abs($0.offsetSeconds - anchorOffset) < abs($1.offsetSeconds - anchorOffset)
+            }
 
         var kept = specials
         kept += others.prefix(max(0, maxRows - specials.count))

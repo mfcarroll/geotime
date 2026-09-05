@@ -1245,9 +1245,20 @@ async function refreshLocalPlaceName(lat: number, lon: number): Promise<void> {
 }
 
 export function addUniqueTimezoneToList(tz: string) {
-    if (state.addedTimezones.includes(tz)) return;
+    // Persist even when the zone is already on the list.
+    //
+    // The list is not the only thing being written here: persistTimezones is the
+    // single write path for labels and kinds too, and the caller sets those just
+    // before calling this. Returning early because "the list did not change"
+    // therefore dropped a rename on the floor — adding Mississauga to a list that
+    // already held America/Toronto left every surface reading Toronto, because
+    // the new label never left memory. The widget kept the old name, and so did
+    // the app after the next reload.
+    const next = state.addedTimezones.includes(tz)
+        ? state.addedTimezones
+        : [...state.addedTimezones, tz];
 
-    persistTimezones([...state.addedTimezones, tz]);
+    persistTimezones(next);
     renderWorldClocks();
 }
 

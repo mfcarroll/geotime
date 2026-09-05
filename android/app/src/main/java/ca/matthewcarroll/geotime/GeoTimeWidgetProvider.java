@@ -23,7 +23,9 @@ import java.util.Calendar;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Map;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
@@ -137,8 +139,15 @@ public class GeoTimeWidgetProvider extends AppWidgetProvider {
         long anchorOffsetMin = 0;
         for (Row r : rows) if (r.isAnchor) { anchorOffsetMin = r.offsetMin; break; }
         final long anchorForSort = anchorOffsetMin;
-        Collections.sort(others, (a, b) -> Long.compare(
-                Math.abs(a.offsetMin - anchorForSort), Math.abs(b.offsetMin - anchorForSort)));
+        // A duplicate yields before any zone showing an hour of its own, however
+        // far from the anchor that zone sits: a second copy of a time already on
+        // screen is the one thing here that tells the user nothing new. Within
+        // each group, nearest the anchor survives.
+        Collections.sort(others, (a, b) -> {
+            if (a.sharesOffset != b.sharesOffset) return a.sharesOffset ? 1 : -1;
+            return Long.compare(Math.abs(a.offsetMin - anchorForSort),
+                                Math.abs(b.offsetMin - anchorForSort));
+        });
         List<Row> visible = new ArrayList<>(specials);
         for (Row r : others) {
             if (visible.size() >= budget) break;
@@ -283,6 +292,22 @@ public class GeoTimeWidgetProvider extends AppWidgetProvider {
          * WidgetRow.isAnchor in ZoneRowResolver.swift.
          */
         final boolean isAnchor;
+        /**
+         * True when an earlier row already shows this clock.
+         *
+         * NOT a reason to hide it. A second zone on the same offset is still a
+         * place the user asked for, and on a widget with room it should be
+         * there. It is only the first thing to give up when room runs out —
+         * ahead of a zone that shows an hour nothing else does. Mirrors
+         * WidgetRow.sharesOffset in ZoneRowResolver.swift.
+         */
+        boolean sharesOffset;
+        /**
+         * True when the row's name is one the zone could not have produced —
+         * a place the user picked, not the zone's own city. Decides which of two
+         * rows on the same offset is the one worth keeping when only one fits.
+         */
+        boolean namesAPlace;
         final String dayLabel;     // "Tue" — null unless the calendar day differs
         final String dayLabelFull; // "Tuesday" — used when there's room
         final String offset;       // "+3 hrs" relative to local; "" for local
@@ -394,22 +419,63 @@ public class GeoTimeWidgetProvider extends AppWidgetProvider {
         // must not shift the rest of the names by one.
         Set<String> seenIds = new HashSet<>();
         seenIds.add(baseId);
+        // The device zone too. The SAME zone must never appear twice, and until
+        // now the offset rule hid that case by accident: saving Vancouver while
+        // the phone is on Vancouver was dropped for sharing an offset, not for
+        // being the same place. Now that a shared offset is allowed, identity has
+        // to say so itself. Two DIFFERENT zones agreeing today still both show.
+        if (deviceOffset != anchorOffset && deviceOffset != geographicOffset) {
+            seenIds.add(osTz.getID());
+        }
         for (int i = 0; i < stored.size(); i++) {
             String id = stored.get(i);
             if (id.isEmpty() || id.equals(baseId)) continue;
             Resolved rz = resolveTimeZone(id);
             if (seenIds.contains(rz.tzId)) continue;
             long off = rz.tz.getOffset(now) / 60000L;
-            if (claimedOffsets.contains(off)) continue;
+            // Duplicates are kept and flagged rather than dropped here. Dropping
+            // was unconditional, so a zone vanished from the widget even with
+            // half the surface empty — and it happened before the layout had
+            // decided anything, which meant two-line rows were chosen "because
+            // everything fits" only after something had already been thrown away.
+            boolean dup = claimedOffsets.contains(off);
             seenIds.add(rz.tzId);
             claimedOffsets.add(off);
             boolean differs = dayDiffers(rz.tz, anchorTz, now);
             String chosen = (i < labels.size() && !labels.get(i).isEmpty()) ? labels.get(i) : null;
-            rows.add(new Row(chosen != null ? chosen : cityLabel(id), null, rz.tzId, off,
+            Row row = new Row(chosen != null ? chosen : cityLabel(id), null, rz.tzId, off,
                     false, false, false, false,
                     differs ? formatDay(rz.tz, now, false) : null,
                     differs ? formatDay(rz.tz, now, true) : null,
-                    relativeOffset(off, anchorOffset)));
+                    relativeOffset(off, anchorOffset));
+            row.sharesOffset = dup;
+            // A name the zone could not have produced itself — "Mississauga" for
+            // America/Toronto, "Coco Cay" for America/Nassau. Plain "Toronto"
+            // does not count: it is what the row would read anyway, so letting it
+            // outrank an unlabelled zone would change the winner without changing
+            // anything the user can see.
+            row.namesAPlace = chosen != null && !chosen.equalsIgnoreCase(cityLabel(id));
+            rows.add(row);
+        }
+
+        // Now that every stored row exists, decide which of each offset speaks
+        // for it. Done here rather than in the loop above because the answer
+        // depends on rows the loop had not reached yet: a place added second can
+        // still be the better name for its offset.
+        //
+        // Only among rows that would otherwise be interchangeable — a special
+        // (ground, phone, ship) already owns its offset and is never displaced.
+        Map<Long, Row> speaksFor = new HashMap<>();
+        for (Row r : rows) {
+            if (r.isAnchor || r.isLocal || r.isDevice || r.isShip) { speaksFor.put(r.offsetMin, r); continue; }
+            Row held = speaksFor.get(r.offsetMin);
+            if (held == null) { speaksFor.put(r.offsetMin, r); continue; }
+            boolean heldIsSpecial = held.isAnchor || held.isLocal || held.isDevice || held.isShip;
+            if (!heldIsSpecial && r.namesAPlace && !held.namesAPlace) speaksFor.put(r.offsetMin, r);
+        }
+        for (Row r : rows) {
+            if (r.isAnchor || r.isLocal || r.isDevice || r.isShip) continue;
+            r.sharesOffset = speaksFor.get(r.offsetMin) != r;
         }
 
         // Ships neither fold nor cause folding: a city keeping ship time is a

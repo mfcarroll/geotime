@@ -1,5 +1,5 @@
-Aboard a ship, everything now reads from ship time. The clock you are living by is the ship's, and the place you sailed from becomes an ordinary row with an offset like any other.
+The widget now shows more of your clocks before it starts hiding any: it drops to compact rows first, and only then sets aside a zone whose time is already on screen. Whenever something is hidden it says so, so you can tell you are looking at part of the list.
 
-Her ports of call are searchable by name now, and join your clock list marked with an anchor.
+When two of your places keep the same time, the one you named — Mississauga rather than a bare zone — is the one that stays.
 
-Your timezone comes from a far more detailed map, so small islands and coastlines resolve to where you are actually standing rather than to the water nearby.
+Renaming a place that shares a zone with one you already saved now sticks.
