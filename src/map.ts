@@ -6,6 +6,7 @@ import { timezoneForCoordinates, findTimezoneFromGeoJSON, startClocks, relativeT
 import { locationMapStyles, worldTimezoneMapStyles } from './map-styles';
 import { distance, formatAccuracy, fold } from './utils';
 import { loadCityIndex, nearestPlace } from './cities';
+import { feature as topoFeature } from 'topojson-client';
 import { resolveZoneStyle } from './map-highlight';
 import { clockKey, clockLabel, clockSubLabel, formatFixedOffsetTime, visibleClocks, type ClockEntry } from './clocks';
 import { shipKey, type ShipClock } from './ships';
@@ -868,6 +869,8 @@ async function setupTimezoneMapListeners() {
   indexFeaturesByOffset();
   refreshMapStyles();
 
+  void showGeometryDebugLayers();
+
   state.timezoneMap.data.addListener('mouseover', (event: google.maps.Data.MouseEvent) => {
     if (isTouchDevice) return;
 
@@ -894,6 +897,73 @@ async function setupTimezoneMapListeners() {
     paintHoverCard();
     selectZone(event.feature.getProperty('tzid') as string);
   });
+}
+
+/**
+ * `?debug=geometry` draws where the boundary data disagrees with itself.
+ *
+ * Two layers, both built by scripts/tz-analysis/build-debug-layers.mjs from
+ * whatever timezones.topojson currently holds:
+ *
+ *   magenta  claimed by more than one zone — the scan order decides who wins
+ *   red      claimed by no zone at all — a click there hits nothing
+ *
+ * The files are gitignored, so in a build that has not generated them the fetch
+ * 404s and this quietly does nothing. That is the intended behaviour in
+ * production, not a failure worth reporting.
+ *
+ * These are their own Data layers rather than extra features on the main one:
+ * the main layer is indexed by offset and restyled on hover, and debug shapes
+ * have no offset to be indexed by.
+ */
+async function showGeometryDebugLayers(): Promise<void> {
+  if (new URLSearchParams(window.location.search).get('debug') !== 'geometry') return;
+  if (!state.timezoneMap) return;
+
+  const layers: Array<[string, string, string]> = [
+    ['debug-overlaps.geojson', '#FF00AA', 'claimed by 2+ zones'],
+    ['debug-gaps.geojson',     '#FF3B30', 'claimed by NOTHING'],
+    ['debug-adopted.geojson',  '#00E5A0', 'was a band, adopted by the land'],
+  ];
+
+  for (const [file, colour, label] of layers) {
+    try {
+      const response = await fetch(file);
+      if (!response.ok) {
+        console.warn(`[debug=geometry] ${file} is missing — run scripts/tz-analysis/build-debug-layers.mjs`);
+        continue;
+      }
+      const layer = new google.maps.Data({ map: state.timezoneMap });
+      layer.addGeoJson(await response.json());
+      layer.setStyle({
+        fillColor: colour, fillOpacity: 0.55,
+        strokeColor: colour, strokeWeight: 1.5,
+        zIndex: 900,
+      });
+      let count = 0;
+      layer.forEach(() => { count++; });
+      layer.addListener('click', (event: google.maps.Data.MouseEvent) => {
+        const from = event.feature.getProperty('from');
+        if (from) {
+          console.log(`[debug=geometry] ${event.feature.getProperty('km2')} km2 `
+            + `was ${from}, now ${event.feature.getProperty('to')}`);
+          return;
+        }
+        const zones = event.feature.getProperty('zoneList');
+        const winner = event.feature.getProperty('winner');
+        if (!zones) { console.log(`[debug=geometry] ${label} — nothing claims this`); return; }
+        // An overlap is not a bug on its own; what matters is whether the app
+        // still lands on the right zone. Say who wins and on what grounds.
+        console.log(`[debug=geometry] ${zones}`
+          + `\n   -> resolves to ${winner} (${event.feature.getProperty('decided') === 'override'
+              ? 'explicit DEFER_TO rule' : 'smallest zone wins'})`
+          + `\n   -> loses: ${event.feature.getProperty('loses')}`);
+      });
+      console.log(`[debug=geometry] ${count} patches ${label} (${colour})`);
+    } catch (error) {
+      console.warn(`[debug=geometry] could not draw ${file}:`, error);
+    }
+  }
 }
 
 // Features grouped by their current UTC offset, so "highlight everything at this
@@ -972,8 +1042,17 @@ function setHoveredZone(tzid: string | null) {
 export async function loadTimezoneGeoJson() {
   if (state.geoJsonLoaded) return;
   try {
-    const response = await fetch('timezones.geojson');
-    const geoJson = await response.json();
+    // TopoJSON on the wire, GeoJSON in memory. Every coastline is a boundary of
+    // two zones at once — the land one and the ocean one beside it — and geojson
+    // has no way to say that, so it stores the line twice. topojson stores it
+    // once and both zones point at it, which is most of why the file is a third
+    // the size. topoFeature stitches the arcs back into ordinary polygons, and
+    // nothing downstream (Google's data layer, turf's point-in-polygon) can tell
+    // the difference.
+    const response = await fetch('timezones.topojson');
+    const topology = await response.json();
+    const objectName = Object.keys(topology.objects)[0];
+    const geoJson = topoFeature(topology, topology.objects[objectName]) as any;
 
     // Cache each zone's current offset once; it drives band grouping and sorting.
     geoJson.features.forEach((feature: any) => {

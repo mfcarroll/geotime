@@ -23,3 +23,8 @@ distribution/screenshots/*/*.png
 
 # SwiftPM build output for the widget-logic test package
 ios/SharedKit/.build/
+
+# Local-only inspection layers (scripts/tz-analysis/build-debug-layers.mjs)
+public/debug-overlaps.geojson
+public/debug-gaps.geojson
+public/debug-adopted.geojson

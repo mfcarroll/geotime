@@ -8,6 +8,7 @@ import { shipKey } from './ships';
 import { isUnresolvable } from './shiptime';
 import { point as turfPoint } from '@turf/helpers';
 import { booleanPointInPolygon } from '@turf/boolean-point-in-polygon';
+import { lookupOrder } from './zone-order';
 
 // Zone naming is pure and lives in utils so it can be used (and tested)
 // without pulling in the DOM; re-exported here for existing callers.
@@ -56,12 +57,26 @@ export function getUtcOffset(timeZone: string): number {
  * timezone-boundary-builder with ocean zones, so every feature carries a real
  * IANA id and the whole globe is covered — there is no "no match" case at sea.
  */
+// Ordering the features costs one pass over the geometry, so it is done once per
+// loaded dataset rather than per lookup. Keyed on the object itself: a reload
+// replaces it and the order is rebuilt, and nothing has to remember to clear it.
+let orderedFrom: unknown = null;
+let orderedFeatures: any[] = [];
+
 export function findTimezoneFromGeoJSON(lat: number, lon: number): string | null {
     if (!state.geoJsonData) return null;
 
+    if (orderedFrom !== state.geoJsonData) {
+        orderedFeatures = lookupOrder(state.geoJsonData.features);
+        orderedFrom = state.geoJsonData;
+    }
+
     const searchPoint = turfPoint([lon, lat]);
 
-    for (const feature of state.geoJsonData.features) {
+    // Smallest zone first, so the first hit is the most specific one. Only three
+    // points on Earth are claimed by two zones at once — see zone-order.ts — and
+    // everywhere else this order is indistinguishable from any other.
+    for (const feature of orderedFeatures) {
         if (feature.geometry && booleanPointInPolygon(searchPoint, feature.geometry)) {
             return feature.properties.tzid as string;
         }
@@ -347,11 +362,28 @@ export function startClocks() {
 /**
  * The zone for a position, derived entirely on device.
  *
- * The bundled boundaries answer this for 99.85% of the globe. The remaining
- * slivers sit along the antimeridian at high latitude, where the ±12 ocean zones
- * meet, so the fallback is the nautical convention those same polygons encode:
- * 15-degree bands centred on each multiple of 15. Checked against the ocean
- * polygons at 813 sampled points, the formula reproduces them exactly.
+ * The bundled boundaries answer this essentially everywhere. Sampled at 200,000
+ * equal-area points, zero fall outside every polygon — which bounds the total
+ * uncovered area at roughly 7,651 km2 (95%, rule of three), or 0.0015% of Earth.
+ * The fallback is the nautical convention those same polygons encode: 15-degree
+ * bands centred on each multiple of 15. Checked against the ocean polygons at
+ * 813 sampled points, the formula reproduces them exactly.
+ *
+ * This used to claim 99.85% and blame slivers along the antimeridian. Then it
+ * claimed 99.998% and blamed four strips off Antarctica. Both were wrong, and
+ * wrong because of the measuring, not the data: mapshaper's -erase-from-a-world-
+ * rectangle SNAPS slivers away and reports none where real ones exist, while its
+ * -mosaic n=0 tiles INVENT them — it labelled 6,314 km2 off Enderby Land
+ * uncovered where dense point sampling finds one uncovered sample in 48,000.
+ *
+ * If you need to check this, ask booleanPointInPolygon, because that is the
+ * question the lookup actually asks. Nothing else has been trustworthy here.
+ *
+ * The fallback stays regardless. A real hole DID appear once, in the
+ * Belgium/Germany border near Eupen, cut by a subtractive boolean in the build;
+ * point sampling found 3.4% of that area answering nothing. Small holes are
+ * invisible to any global sweep, so the fallback is what makes the lookup total
+ * rather than merely well-tested.
  *
  * Deliberately offline and deliberately total. This app exists because network
  * time was wrong at sea, so the one thing the timezone must never depend on is

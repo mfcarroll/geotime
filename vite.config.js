@@ -1,6 +1,7 @@
 // vite.config.js
 
 import { resolve } from 'path';
+import { existsSync, rmSync, readdirSync } from 'fs';
 import { defineConfig, loadEnv } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
 import basicSsl from '@vitejs/plugin-basic-ssl';
@@ -18,9 +19,10 @@ export default defineConfig(({ mode }) => ({
   },
   plugins: [
     workerCsp(),
+    dropDebugLayers(mode),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['timezones.geojson', 'cities.json', 'ships.json'],
+      includeAssets: ['timezones.topojson', 'cities.json', 'ships.json'],
       manifest: {
         name: 'GeoTime Dashboard',
         short_name: 'GeoTime',
@@ -159,6 +161,35 @@ function shipGateway(mode) {
  * Only the origin is taken, never the path: CSP source expressions match on
  * scheme, host and port.
  */
+/**
+ * Keeps the ?debug=geometry inspection layers out of a production build.
+ *
+ * They are written into public/ by scripts/tz-analysis/build-debug-layers.mjs so
+ * the dev server can serve them, and they are gitignored — but publicDir is
+ * copied wholesale, so a production build made on a machine that has them
+ * shipped 860 KB of overlap and gap polygons. Not in the precache manifest, so
+ * nothing fetched them; just dead weight on the deploy, and only visible if you
+ * look in dist/ rather than at the manifest.
+ *
+ * The shiptest build keeps them, because that is the one being inspected.
+ */
+function dropDebugLayers(mode) {
+  return {
+    name: 'drop-debug-layers',
+    apply: 'build',
+    closeBundle() {
+      if (mode === 'shiptest') return;
+      const out = resolve(__dirname, 'dist');
+      if (!existsSync(out)) return;
+      for (const name of readdirSync(out)) {
+        if (!/^debug-.*\.geojson$/.test(name)) continue;
+        rmSync(resolve(out, name), { force: true });
+        this.warn(`removed ${name} from the production build`);
+      }
+    },
+  };
+}
+
 function workerCsp() {
   return {
     name: 'geotime:worker-csp',

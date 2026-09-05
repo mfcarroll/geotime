@@ -21,7 +21,8 @@
     "typecheck:workers": "tsc --noEmit -p workers/tsconfig.json",
     "typecheck:tests": "tsc --noEmit -p tsconfig.test.json",
     "test": "node --import ./scripts/ts-resolve.mjs --test src/**/*.test.ts",
-    "test:shared": "cd ios/SharedKit && swift test"
+    "test:shared": "cd ios/SharedKit && swift test",
+    "build:timezones": "node --import ./scripts/ts-resolve.mjs scripts/build-timezone-geojson.mjs --oceans"
   },
   "devDependencies": {
     "@capacitor/assets": "^3.0.5",
@@ -29,6 +30,7 @@
     "@cloudflare/workers-types": "^5.20260902.1",
     "@googlemaps/js-api-loader": "^1.16.10",
     "@types/google.maps": "^3.55.10",
+    "@types/topojson-client": "^3.1.5",
     "@vitejs/plugin-basic-ssl": "^2.3.0",
     "autoprefixer": "^10.4.19",
     "postcss": "^8.4.38",
@@ -47,6 +49,7 @@
     "@fortawesome/fontawesome-svg-core": "^7.1.0",
     "@fortawesome/free-solid-svg-icons": "^7.1.0",
     "@turf/boolean-point-in-polygon": "^7.2.0",
-    "@turf/helpers": "^7.2.0"
+    "@turf/helpers": "^7.2.0",
+    "topojson-client": "^3.1.0"
   }
 }
