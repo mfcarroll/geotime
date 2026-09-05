@@ -4,24 +4,28 @@
 import './style.css';
 import { Loader } from '@googlemaps/js-api-loader';
 import * as dom from './dom';
-import { state, persistTimezones, migrateStoredTimezones, setZoneLabel, syncWidget, addShipClock } from './state';
+import { state, persistTimezones, migrateStoredTimezones, setZoneLabel, setZoneKind, syncWidget, addShipClock } from './state';
 import { refreshAnchorChip, refreshMapStyles, initMaps, onLocationError, onLocationSuccess, selectTimezone, selectShip, setHoveredShip, renderWorldClocks, addUniqueTimezoneToList, updateUserTimezoneDetails, showLocationUnavailable, loadTimezoneGeoJson } from './map';
-import { updateAllClocks, syncClock, getDisplayTimezoneName, startClocks } from './time';
+import { updateAllClocks, syncClock, getDisplayTimezoneName, startClocks, findTimezoneFromGeoJSON } from './time';
 import { Capacitor } from '@capacitor/core';
 import { getDeviceTimezone, onDeviceTimezoneChanged } from './widget';
 import { Geolocation, PositionOptions } from '@capacitor/geolocation';
 import { createSearchCombobox } from './combobox';
-import { loadShipRoster, refreshShipRoster, shipRosterNow } from './ships';
+import { loadShipRoster, refreshShipRoster, shipRosterNow, shipKey } from './ships';
 import { initShipTime } from './rccl';
 import { forgetShip, resolveAllShipClocks, startShipTimeWatch } from './shiptime';
-import { initShipTrack } from './shiptrack';
+import { initShipTrack, cachedVoyageFor } from './shiptrack';
+import { portRefsFrom } from './ports';
 import { refreshShipMarkers, startShipMarkerWatch } from './ship-markers';
 import { installDiagnostics } from './diagnostics';
 import { maybeRunShipProbe } from './ship-probe';
 import { library, dom as faDom } from '@fortawesome/fontawesome-svg-core';
-import { faLocationDot, faWifi, faBullseye, faMobileAlt, faSatellite, faShip } from '@fortawesome/free-solid-svg-icons';
+import { faLocationDot, faWifi, faBullseye, faMobileAlt, faSatellite, faShip, faAnchor } from '@fortawesome/free-solid-svg-icons';
 
-library.add(faLocationDot, faWifi, faBullseye, faMobileAlt, faSatellite, faShip);
+// Every icon the markup names has to be registered here — the tree-shaken
+// core renders an unregistered one as a placeholder box, which is what the
+// anchor did until it was added.
+library.add(faLocationDot, faWifi, faBullseye, faMobileAlt, faSatellite, faShip, faAnchor);
 faDom.watch();
 
 const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
@@ -180,6 +184,19 @@ async function startApp() {
     // A getter, not the awaited array: a weekly roster refresh can land while
     // the search box is open, and capturing it would freeze that out.
     ships: () => shipRosterNow(),
+    /**
+     * Ports of call from whatever itineraries are loaded, resolved here because
+     * findTimezoneFromGeoJSON needs the boundary data and ports.ts stays pure.
+     *
+     * A ship's own row is what makes her itinerary load, so in practice this is
+     * populated for the ships the user is actually watching.
+     */
+    ports: () => portRefsFrom(
+      state.shipClocks.map((ship) => ({
+        ship: ship.short,
+        voyage: cachedVoyageFor(shipKey(ship)),
+      })),
+      findTimezoneFromGeoJSON),
     onSelect: (place) => {
       if (place.kind === 'ship') {
         // No map selection: a ship has no position on it, and its clock is set
@@ -190,7 +207,11 @@ async function startApp() {
         void resolveAllShipClocks();
         return;
       }
-      setZoneLabel(place.tzid, place.kind === 'city' ? place.label : undefined);
+      // A port keeps its own name on the row ("Cozumel"), the same way a city
+      // does, and is marked with an anchor so it reads as somewhere the ship
+      // calls rather than somewhere the user lives.
+      setZoneLabel(place.tzid, place.kind === 'city' || place.kind === 'port' ? place.label : undefined);
+      setZoneKind(place.tzid, place.kind === 'port' ? 'port' : undefined);
       addUniqueTimezoneToList(place.tzid);
       selectTimezone(place.tzid);
       updateAllClocks();

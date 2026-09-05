@@ -8,6 +8,7 @@
 
 import { fold, distance, getDisplayTimezoneName, isValidTimezone } from './utils';
 import { matchShipTiers, shipKey, type ShipRef } from './ships';
+import { matchPortTiers, type PortRef } from './ports';
 
 interface PlaceBase {
   /** Name to store and show on the clock — the place, not the zone. */
@@ -45,7 +46,20 @@ export interface ShipPlace extends PlaceBase {
   ship: ShipRef;
 }
 
-export type PlaceResult = ZonePlace | CityPlace | ShipPlace;
+/**
+ * A port of call from a ship's itinerary, resolved to the zone it stands in.
+ *
+ * Its own kind rather than a CityPlace with a flag, because the row carries an
+ * anchor and the two are found in different ways — a city comes from the bundled
+ * index, a port from whichever itineraries happen to be loaded.
+ */
+export interface PortPlace extends PlaceBase {
+  kind: 'port';
+  /** IANA zone the port keeps time by. */
+  tzid: string;
+}
+
+export type PlaceResult = ZonePlace | CityPlace | ShipPlace | PortPlace;
 
 interface CityIndex {
   zones: string[];
@@ -131,6 +145,19 @@ export function loadCityIndex(): Promise<CityIndex | null> {
 // id only when that would have repeated the place name — so the same slot meant
 // "the zone's name" on one row and "the zone's identifier" on the next, which
 // read as arbitrary. One meaning throughout is worth a little more text.
+function portResult(port: PortRef): PortPlace {
+  return {
+    kind: 'port',
+    tzid: port.tzid,
+    label: port.name,
+    primary: port.name,
+    // The ship names the line, because that is what makes a port worth offering:
+    // it is on YOUR itinerary. The zone id would repeat what the row already
+    // shows once the clock is added.
+    secondary: `Port of call · ${port.ship}`,
+  };
+}
+
 function cityResult(index: CityIndex, i: number): CityPlace {
   const name = index.names[i];
   return {
@@ -246,6 +273,7 @@ export function searchPlaces(
   index: CityIndex | null,
   origin: Origin | null = null,
   ships: ShipRef[] = [],
+  ports: PortRef[] = [],
   limit = 8
 ): PlaceResult[] {
   const q = fold(query.trim());
@@ -258,6 +286,7 @@ export function searchPlaces(
   const cityTiers: number[][] = [[], [], []];
   const zoneTiers: ZonePlace[][] = [[], [], []];
   const shipTiers = matchShipTiers(query, ships);
+  const portTiers = matchPortTiers(query, ports, fold);
 
   for (const tzid of zoneIds) {
     const segment = fold(getDisplayTimezoneName(tzid));
@@ -318,9 +347,15 @@ export function searchPlaces(
     // thousands, and building a result object for each would be wasted work.
     const ranked = cityTiers[tier].slice(0, limit).map((i) => cityResult(index!, i));
     const shipsHere = shipTiers[tier].map(shipResult);
+    // Ports lead their tier. Someone with a ship on the list is reading an
+    // itinerary, and when they type a port name they mean that port — the
+    // alternative is a same-named town half a world away outranking the place
+    // they are sailing to on Thursday. Cozumel is both a town and a call on
+    // this itinerary; the anchor and the ship name are what tell them apart.
+    const portsHere = portTiers[tier].map(portResult);
     const ordered: PlaceResult[] = tier === 0
-      ? [...shipsHere, ...ranked, ...zoneTiers[tier]]
-      : [...ranked, ...shipsHere, ...zoneTiers[tier]];
+      ? [...portsHere, ...shipsHere, ...ranked, ...zoneTiers[tier]]
+      : [...portsHere, ...ranked, ...shipsHere, ...zoneTiers[tier]];
 
     for (const candidate of ordered) {
       // One row per place: the same city name can repeat across regions, but an

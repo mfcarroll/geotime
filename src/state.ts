@@ -1,5 +1,7 @@
 // src/state.ts
 
+import { migrateStoredTimezones, type StoredZone } from './stored-zones';
+export { migrateStoredTimezones, type StoredZone };
 import { syncWidgetTimezones } from './widget';
 import { newShipClock, shipKey, type ShipClock, type ShipRef } from './ships';
 import type { DeviceFix } from './ship-position';
@@ -52,6 +54,8 @@ export interface AppState {
      * is named after whichever city happens to name its zone.
      */
     zoneLabels: Record<string, string>;
+    /** Zones added as a ship's port of call, which the row marks with an anchor. */
+    zoneKinds: Record<string, 'port'>;
     clocksInterval: number | null;
     locationMap: google.maps.Map | null;
     timezoneMap: google.maps.Map | null;
@@ -90,43 +94,6 @@ export interface AppState {
      */
     selectedShipKey: string | null;
     timezonesFromUrl: string[] | null;
-}
-
-export interface StoredZone {
-    tz: string;
-    label?: string;
-}
-
-/**
- * Repairs a stored zone list written by older builds.
- *
- * Pre-rebuild the app synthesised `Etc/GMT±N.N` ids for map features that had no
- * name and a fractional offset. Those are not valid tzdb ids — `Intl` throws on
- * them — so they were carried by hand-written parsers on three platforms. They
- * are rounded to the nearest valid whole-hour zone here and the parsers dropped.
- */
-export function migrateStoredTimezones(raw: unknown): StoredZone[] {
-    if (!Array.isArray(raw)) return [];
-    const out: StoredZone[] = [];
-    for (const entry of raw) {
-        // Older builds stored bare id strings; newer ones store {tz, label}.
-        const source = typeof entry === 'string' ? { tz: entry } : entry;
-        if (!source || typeof source.tz !== 'string' || !source.tz.trim()) continue;
-
-        let id = source.tz;
-        const fractional = id.match(/^Etc\/GMT([+-])(\d+)\.\d+$/);
-        if (fractional) id = `Etc/GMT${fractional[1]}${fractional[2]}`;
-        try {
-            new Intl.DateTimeFormat('en-US', { timeZone: id });
-        } catch {
-            continue; // unrecoverable; drop rather than poison the widget
-        }
-        if (out.some((z) => z.tz === id)) continue;
-        out.push(typeof source.label === 'string' && source.label.trim()
-            ? { tz: id, label: source.label }
-            : { tz: id });
-    }
-    return out;
 }
 
 function loadStoredTimezones(): StoredZone[] {
@@ -190,6 +157,8 @@ export const state: AppState = {
     aboardShipKey: localStorage.getItem('aboardShipKey') || null,
     zoneLabels: Object.fromEntries(
         stored.flatMap((z) => (z.label ? [[z.tz, z.label]] : []))),
+    zoneKinds: Object.fromEntries(
+        stored.flatMap((z) => (z.kind ? [[z.tz, z.kind]] : []))),
     clocksInterval: null,
     locationMap: null,
     timezoneMap: null,
@@ -240,9 +209,19 @@ export function persistTimezones(timezones: string[]): void {
     for (const tz of Object.keys(state.zoneLabels)) {
         if (!timezones.includes(tz)) delete state.zoneLabels[tz];
     }
+    for (const tz of Object.keys(state.zoneKinds)) {
+        if (!timezones.includes(tz)) delete state.zoneKinds[tz];
+    }
 
-    const payload: StoredZone[] = timezones.map((tz) =>
-        state.zoneLabels[tz] ? { tz, label: state.zoneLabels[tz] } : { tz });
+    // Built field by field to match migrateStoredTimezones on the way back in.
+    // A zone dropped from the list loses its name and its kind with it, so
+    // removing and re-adding it does not resurrect either.
+    const payload: StoredZone[] = timezones.map((tz) => {
+        const zone: StoredZone = { tz };
+        if (state.zoneLabels[tz]) zone.label = state.zoneLabels[tz];
+        if (state.zoneKinds[tz]) zone.kind = state.zoneKinds[tz];
+        return zone;
+    });
     localStorage.setItem('worldClocks', JSON.stringify(payload));
 
     syncWidget();
@@ -349,6 +328,18 @@ export function setLocalPlaceName(name: string | null): void {
     state.localPlaceName = name;
     if (name) localStorage.setItem('localPlaceName', name);
     else localStorage.removeItem('localPlaceName');
+}
+
+/**
+ * Records that a zone was added as a port of call, or that it was not.
+ *
+ * Always called on add, including with undefined, so that adding Athens as an
+ * ordinary city after adding it as a port clears the anchor rather than leaving
+ * a mark the row can no longer explain.
+ */
+export function setZoneKind(tzid: string, kind: 'port' | undefined): void {
+    if (kind) state.zoneKinds[tzid] = kind;
+    else delete state.zoneKinds[tzid];
 }
 
 /** Records the name the user picked for a zone (see AppState.zoneLabels). */

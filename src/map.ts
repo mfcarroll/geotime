@@ -1321,6 +1321,12 @@ function createClockElement(entry: ClockEntry): HTMLElement {
     // zone, so it names its line instead.
     clone.querySelector('.region')!.textContent = clockSubLabel(entry);
     if (isShip) clone.querySelector('.ship-icon')!.classList.remove('hidden');
+    // An anchor says this row is a port a ship on the list calls at, not a
+    // place the user chose for its own sake. Mutually exclusive with the ship
+    // mark by construction: a ship row has no tzid to have been added under.
+    if (tzid && state.zoneKinds[tzid] === 'port') {
+        clone.querySelector('.port-icon')!.classList.remove('hidden');
+    }
 
     const removeBtn = clone.querySelector('.remove-btn') as HTMLElement;
     const pinBtn = clone.querySelector('.pin-btn') as HTMLElement;

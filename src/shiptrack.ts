@@ -161,6 +161,26 @@ const voyages = new Map<string, Cached<ShipVoyage>>();
 let fleetInFlight: Promise<Map<string, ShipFix>> | null = null;
 const voyagesInFlight = new Map<string, Promise<ShipVoyage | null>>();
 
+/**
+ * The itinerary already in hand for a ship, or null.
+ *
+ * Reads the cache and never fetches. Ports become searchable as itineraries
+ * arrive for other reasons — selecting a ship, drawing her route — rather than
+ * by asking for 44 itineraries the moment someone opens the search box. This
+ * feed is not ours, and a search box that fanned out on focus would be the most
+ * expensive thing in the app.
+ *
+ * Keyed by clock key and resolved through shipImo(), the same way
+ * voyageForShip() resolves it. Reading `imo` off the stored ShipClock instead
+ * looks equivalent and is not: a roster saved by an older build carries no IMO
+ * for anybody, so the map would draw a route while the ports stayed invisible.
+ */
+export function cachedVoyageFor(shipKey: string): ShipVoyage | null {
+  const imo = shipImo(shipKey);
+  if (!imo) return null;
+  return voyages.get(imo)?.value ?? null;
+}
+
 /** True when the map layers can work at all. */
 export function shipTrackAvailable(): boolean {
   return !!BASE;
