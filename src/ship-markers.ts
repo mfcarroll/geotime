@@ -393,6 +393,29 @@ export function refreshShipMarkers(): void {
  */
 const CASING = '#0B1219';
 
+/** How much wider than its line a casing is drawn, in pixels. */
+const CASING_WIDTH = 2;
+
+/**
+ * The dash geometry, and why the gaps are as wide as they are.
+ *
+ * These itineraries are round trips: the route out and the route home are the
+ * same polyline through the same water, so at most zooms it is drawn over
+ * itself. Symbol spacing is measured along the PATH, which means the homeward
+ * pass lands at whatever phase its own accumulated length happens to give it —
+ * and where that phase is half a period, the two dash trains interleave and the
+ * gaps fill in. The line reads solid, and appears to change spacing with zoom,
+ * because the pixel length of the outbound leg changes and with it the phase.
+ *
+ * The pattern therefore has to survive being drawn twice at the worst possible
+ * offset. Interleaved, a dash of L every R leaves gaps of R/2 - L, so the rule
+ * is R >= 4L: at 4 and 16 the doubled line still reads 4 on, 4 off. It was 5 and
+ * 13, which leaves 1.5 — indistinguishable from solid, which is what was
+ * reported.
+ */
+const DASH_PX = 4;
+const DASH_REPEAT_PX = 16;
+
 /**
  * The dotted stretch across a gap in the wake.
  *
@@ -439,21 +462,45 @@ function clearChart(): void {
   chart = [];
 }
 
+/** The same symbol, wider and dark, to sit under its own dash. */
+function casedIcon(sequence: google.maps.IconSequence): google.maps.IconSequence {
+  const icon = sequence.icon;
+  if (!icon) return sequence;
+  return {
+    ...sequence,
+    icon: {
+      ...icon,
+      strokeColor: CASING,
+      strokeOpacity: 0.55,
+      strokeWeight: (icon.strokeWeight ?? 2) + CASING_WIDTH,
+    },
+  };
+}
+
 function polyline(
   map: google.maps.Map,
   path: google.maps.LatLngLiteral[],
   options: google.maps.PolylineOptions
 ): void {
+  // A dashed line's casing has to be dashed too.
+  //
+  // This used to inherit the icons and keep a solid stroke, which put an
+  // unbroken dark line the full length of the route underneath the dashes. On
+  // open ocean it passed for shadow; where the route doubled back on itself it
+  // was the thing making the line read solid, and it was doing that at every
+  // zoom rather than only at the ones where the dashes interleaved.
+  const dashed = options.strokeOpacity === 0;
+
   // Casing first, so it sits under its own line.
   chart.push(new google.maps.Polyline({
     map,
     path,
     clickable: false,
     strokeColor: CASING,
-    strokeOpacity: 0.55,
-    strokeWeight: (options.strokeWeight ?? 2) + 3,
+    strokeOpacity: dashed ? 0 : 0.55,
+    strokeWeight: (options.strokeWeight ?? 2) + CASING_WIDTH,
     zIndex: (options.zIndex ?? 10) - 1,
-    icons: options.icons,
+    icons: options.icons?.map(casedIcon),
   }));
   chart.push(new google.maps.Polyline({ map, path, clickable: false, ...options }));
 }
@@ -484,13 +531,42 @@ function dottedGap(map: google.maps.Map, path: google.maps.LatLngLiteral[]): voi
         path: 'M 0,-0.6 0,0.6',
         strokeColor: GAP,
         strokeOpacity: 0.75,
-        strokeWeight: 2,
+        strokeWeight: 1.75,
         scale: 1.6,
       },
       offset: '0',
-      repeat: '9px',
+      // Nearly round at this length, so it stays a dot rather than becoming a
+      // short dash: 1.9 on, 8 off, and 1.9 on 3.1 off if it ever doubles back.
+      repeat: '10px',
     }],
   }));
+}
+
+/**
+ * What a port announces about itself when it is pointed at or tapped.
+ *
+ * Carries coordinates rather than a zone, because resolving one needs the
+ * boundary data in time.ts and this module has no business loading it. The
+ * listener in map.ts is already holding both.
+ */
+export interface PortMarkerDetail {
+  name: string;
+  lat: number;
+  lon: number;
+  /** "day 2 · departs 17:00", or empty. The subtitle, never the name. */
+  detail: string;
+}
+
+function portDetail(port: ShipPort, fallbackName: string | null): PortMarkerDetail {
+  const full = portTitle(port, fallbackName);
+  const name = port.name ?? fallbackName ?? 'Port of call';
+  return {
+    name,
+    lat: port.lat,
+    lon: port.lon,
+    // portTitle already joins the parts; the name is the first of them.
+    detail: full.startsWith(`${name} · `) ? full.slice(name.length + 3) : '',
+  };
 }
 
 /** "Coco Cay · day 2 · departs 17:00", as much of it as we actually know. */
@@ -552,19 +628,21 @@ export async function drawShipChart(key: string, voyage: Promise<ShipVoyage | nu
     polyline(map, ahead.map(toLatLng), {
       // strokeOpacity 0 with a repeating icon is how the Maps API draws a dashed
       // line — the stroke itself is invisible and the dashes are the symbols.
+      // `repeat` in px is screen distance, so the pattern is the same at every
+      // zoom; see DASH_REPEAT_PX for the part that was not.
       strokeOpacity: 0,
-      strokeWeight: 2,
+      strokeWeight: 1.75,
       zIndex: 15,
       icons: [{
         icon: {
           path: 'M 0,-1 0,1',
           strokeColor: routeColour,
           strokeOpacity: 0.85,
-          strokeWeight: 2,
-          scale: 2.5,
+          strokeWeight: 1.75,
+          scale: DASH_PX / 2,
         },
         offset: '0',
-        repeat: '13px',
+        repeat: `${DASH_REPEAT_PX}px`,
       }],
     });
   }
@@ -606,7 +684,7 @@ export async function drawShipChart(key: string, voyage: Promise<ShipVoyage | nu
     polyline(map, run.map(toLatLng), {
       strokeColor: routeColour,
       strokeOpacity: 0.95,
-      strokeWeight: 2.5,
+      strokeWeight: 2,
       zIndex: 20,
     });
   }
@@ -619,18 +697,46 @@ export async function drawShipChart(key: string, voyage: Promise<ShipVoyage | nu
   for (const port of resolved.ports) {
     const ring = document.createElement('div');
     ring.className = 'ship-port';
+    // Two circles: the ring you see, and a transparent one twice its size that
+    // is what you actually hit. A 4px ring is a fine thing to look at and a poor
+    // thing to aim a finger at, and the tap below is the whole point of it now.
     ring.innerHTML =
-      `<svg viewBox="-8 -8 16 16" width="16" height="16"><circle r="4" fill="${CASING}" ` +
-      `fill-opacity="0.9" stroke="${portColour(port, shipOffset, routeColour)}" stroke-width="2" ` +
+      `<svg viewBox="-11 -11 22 22" width="22" height="22">` +
+      `<circle r="10" fill="transparent"/>` +
+      `<circle class="port-ring" r="4" fill="${CASING}" fill-opacity="0.9" ` +
+      `stroke="${portColour(port, shipOffset, routeColour)}" stroke-width="2" ` +
       `stroke-opacity="0.95"/></svg>`;
-    chart.push(new google.maps.marker.AdvancedMarkerElement({
+
+    const marker = new google.maps.marker.AdvancedMarkerElement({
       map,
       position: { lat: port.lat, lng: port.lon },
-      title: portTitle(port, null),
+      title: portTitle(port, resolved.destination),
       content: ring,
       // Under the ship itself, over the lines.
       zIndex: 40,
-    }));
+      // Off by default on an AdvancedMarkerElement, so the tap would silently
+      // never fire without it.
+      gmpClickable: true,
+    });
+
+    // Announced rather than handled here, for the same reason the hull's are:
+    // this module cannot import from map.ts, which imports from it. main.ts
+    // owns the wiring.
+    //
+    // Hover rides on the content element rather than a maps event — an
+    // AdvancedMarkerElement's content is ordinary DOM — and the white ring it
+    // paints is pure CSS, so pointing at a port costs no redraw.
+    const detail = portDetail(port, resolved.destination);
+    marker.addListener('gmp-click', () => {
+      document.dispatchEvent(new CustomEvent('portmarkerclick', { detail }));
+    });
+    ring.addEventListener('pointerenter', () => {
+      document.dispatchEvent(new CustomEvent('portmarkerhover', { detail }));
+    });
+    ring.addEventListener('pointerleave', () => {
+      document.dispatchEvent(new CustomEvent('portmarkerhover', { detail: null }));
+    });
+    chart.push(marker);
   }
 }
 

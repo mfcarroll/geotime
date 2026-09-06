@@ -1,7 +1,7 @@
 // src/map.ts
 
 import * as dom from './dom';
-import { aboardShip, state, persistTimezones, setLocalPlaceName, syncWidget } from './state';
+import { aboardShip, state, persistTimezones, setLocalPlaceName, setZoneKind, setZoneLabel, syncWidget } from './state';
 import { timezoneForCoordinates, findTimezoneFromGeoJSON, startClocks, relativeTextForZone, relativeTextForShip, getFormattedTime, getUtcOffset, getDisplayTimezoneName, getZoneLabel, updateAllClocks, formatOffsetDiff } from './time';
 import { locationMapStyles, worldTimezoneMapStyles } from './map-styles';
 import { debugFlag, distance, formatAccuracy, fold } from './utils';
@@ -11,8 +11,9 @@ import { resolveZoneStyle } from './map-highlight';
 import { clockKey, clockLabel, clockSubLabel, formatFixedOffsetTime, visibleClocks, type ClockEntry } from './clocks';
 import { shipKey, type ShipClock } from './ships';
 import { voyageForShip, type ShipVoyage } from './shiptrack';
-import { clearShipChart, drawShipChart, fitToShip, refreshShipMarkers } from './ship-markers';
+import { clearShipChart, drawShipChart, fitToShip, refreshShipMarkers, type PortMarkerDetail } from './ship-markers';
 import { voyageLine } from './voyage-line';
+import { isUnlocatedZone } from './ports';
 
 /**
  * Cloud-styled vector maps.
@@ -129,7 +130,11 @@ function updateCard(
   role: 'selected' | 'hovered' = 'selected',
 ) {
   if (tzid) {
-    nameEl.textContent = getDisplayTimezoneName(tzid);
+    // The name the user gave it, where they gave it one. Picking "Cozumel" out
+    // of the search or off the map and being answered "Cancun" is the zone
+    // being pedantic at somebody who was not asking about the zone — and the
+    // row below already says Cozumel, so the card was contradicting the list.
+    nameEl.textContent = getZoneLabel(tzid);
 
     if (valueType === 'offset') {
       // Measured from the anchor, like every offset in the list below it — a map
@@ -437,6 +442,9 @@ function shipCardValue(ship: ShipClock): { text: string; mono: boolean } {
 /** The zone under the pointer, remembered even while a hull is over the top of it. */
 let hoveredZoneTzid: string | null = null;
 
+/** The port of call under the pointer, with the zone it keeps time by. */
+let hoveredPort: { detail: PortMarkerDetail; tzid: string } | null = null;
+
 /**
  * Repaints the white card from both hover sources, ship first.
  *
@@ -451,6 +459,20 @@ let hoveredZoneTzid: string | null = null;
  * more specific target, and the one you had to aim at.
  */
 function paintHoverCard(): void {
+    // A port outranks both. It is the smallest target on the map, it sits on a
+    // zone and often within a hull's width of the ship calling there, and it is
+    // the one you had to aim at.
+    if (hoveredPort) {
+        dom.hoveredTimezoneNameEl.textContent = hoveredPort.detail.name;
+        setCardValue(dom.hoveredTimezoneOffsetEl, relativeTextForZone(hoveredPort.tzid), false);
+        // The line a hovered ship uses for her destination carries the call's
+        // own particulars here — "day 2 · departs 17:00" — which is the rest of
+        // what the itinerary knows and has never had anywhere to be said.
+        setVoyageLine(dom.hoveredShipVoyageEl, hoveredPort.detail.detail);
+        dom.hoveredTimezoneDetailsEl.classList.remove('hidden');
+        return;
+    }
+
     if (state.hoveredShipKey) {
         const ship = state.shipClocks.find((sc) => shipKey(sc) === state.hoveredShipKey);
         if (ship) {
@@ -465,6 +487,44 @@ function paintHoverCard(): void {
     setVoyageLine(dom.hoveredShipVoyageEl, '');
     updateCard(dom.hoveredTimezoneDetailsEl, dom.hoveredTimezoneNameEl,
                dom.hoveredTimezoneOffsetEl, hoveredZoneTzid, 'offset', 'hovered');
+}
+
+/**
+ * Puts a port of call in the white card, or takes it out again.
+ *
+ * A port resolving to a nautical band has not been located — its coordinates
+ * landed offshore, which is common for a tender anchorage — and a fixed offset
+ * is a plausible-looking wrong answer, right in winter and an hour out all
+ * summer wherever the shore keeps DST. The search already refuses those; so
+ * does this, and so does the tap below. The ring stays on the map with its
+ * tooltip, which is all we can honestly say about it.
+ */
+export function setHoveredPort(detail: PortMarkerDetail | null): void {
+    const tzid = detail ? findTimezoneFromGeoJSON(detail.lat, detail.lon) : null;
+    hoveredPort = detail && tzid && !isUnlocatedZone(tzid) ? { detail, tzid } : null;
+    paintHoverCard();
+}
+
+/**
+ * Selects the zone a port of call stands in, under the port's own name.
+ *
+ * The same act as tapping the region it sits in, which is what makes it
+ * unsurprising: one gold band, one card, and the temporary row below with its
+ * pin to keep it. What the port adds is the NAME — "Cozumel" rather than
+ * "Cancun" — and the anchor beside it, exactly as picking it out of the search
+ * would, so a place reached two ways is stored one way.
+ */
+export function selectPort(detail: PortMarkerDetail): void {
+    const tzid = findTimezoneFromGeoJSON(detail.lat, detail.lon);
+    if (!tzid || isUnlocatedZone(tzid)) return;
+
+    hoveredPort = null;
+    hoveredZoneTzid = null;
+    paintHoverCard();
+
+    setZoneLabel(tzid, detail.name);
+    setZoneKind(tzid, 'port');
+    selectZone(tzid);
 }
 
 /**

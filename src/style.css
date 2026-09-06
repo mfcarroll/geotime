@@ -205,6 +205,22 @@
 }
 
 /*
+  Pointing at a port turns its ring white, the same statement the hull makes and
+  the same white the map's zone outline uses: "the pointer is here", never "this
+  is what the thing is". Which is why it is the RING that changes and not the
+  fill — the ring's colour is already saying whether the port keeps the ship's
+  time, and hover must not overwrite that answer.
+
+  A CSS rule rather than a redraw: `stroke` on the circle is a presentation
+  attribute, so a stylesheet outranks it without !important, and the chart does
+  not have to be rebuilt to show that a pointer moved.
+*/
+.ship-port:hover .port-ring {
+  stroke: #FFFFFF;
+  stroke-width: 2.5;
+}
+
+/*
   The blue dot is drawn over everything and reachable by nothing.
 
   It sits at the highest z-index on purpose — "where am I" should never be

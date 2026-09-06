@@ -5,7 +5,7 @@ import './style.css';
 import { Loader } from '@googlemaps/js-api-loader';
 import * as dom from './dom';
 import { addShipClock, loadDebugFleet, migrateStoredTimezones, persistTimezones, setZoneKind, setZoneLabel, state, syncWidget } from './state';
-import { refreshAnchorChip, refreshMapStyles, initMaps, onLocationError, onLocationSuccess, selectTimezone, selectShip, setHoveredShip, renderWorldClocks, addUniqueTimezoneToList, updateUserTimezoneDetails, showLocationUnavailable, loadTimezoneGeoJson } from './map';
+import { refreshAnchorChip, refreshMapStyles, initMaps, onLocationError, onLocationSuccess, selectTimezone, selectShip, selectPort, setHoveredShip, setHoveredPort, renderWorldClocks, addUniqueTimezoneToList, updateUserTimezoneDetails, showLocationUnavailable, loadTimezoneGeoJson } from './map';
 import { updateAllClocks, syncClock, startClockWatch, getDisplayTimezoneName, startClocks, findTimezoneFromGeoJSON } from './time';
 import { Capacitor } from '@capacitor/core';
 import { getDeviceTimezone, onDeviceTimezoneChanged } from './widget';
@@ -16,7 +16,7 @@ import { initShipTime } from './rccl';
 import { forgetShip, resolveAllShipClocks, startShipTimeWatch } from './shiptime';
 import { initShipTrack, cachedVoyageFor } from './shiptrack';
 import { portRefsFrom } from './ports';
-import { refreshShipMarkers, startShipMarkerWatch } from './ship-markers';
+import { refreshShipMarkers, startShipMarkerWatch, type PortMarkerDetail } from './ship-markers';
 import { installDiagnostics } from './diagnostics';
 import { maybeRunShipProbe } from './ship-probe';
 import { library, dom as faDom } from '@fortawesome/fontawesome-svg-core';
@@ -278,6 +278,19 @@ async function startApp() {
   document.addEventListener('shipmarkerhover', (e) => {
     if (matchMedia('(hover: none)').matches) return;
     setHoveredShip((e as CustomEvent<{ key: string | null }>).detail.key);
+  });
+
+  // A port of call is a place like any other on this map: point at it and the
+  // card names it, tap it and it is selected, with the pin beside its row to
+  // keep it. Both routed the same way as the hull's, and muted on touch for the
+  // same reason.
+  document.addEventListener('portmarkerhover', (e) => {
+    if (matchMedia('(hover: none)').matches) return;
+    setHoveredPort((e as CustomEvent<PortMarkerDetail | null>).detail);
+  });
+
+  document.addEventListener('portmarkerclick', (e) => {
+    selectPort((e as CustomEvent<PortMarkerDetail>).detail);
   });
 
   // The ship we are aboard has no row to tap — it collapsed into this card — so
