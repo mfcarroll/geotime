@@ -21,9 +21,11 @@ export const localDateEl = document.getElementById('local-date')!;
 export const shipTimeSectionEl = document.getElementById('ship-time-section')!;
 export const shipTimeEl = document.getElementById('ship-time')!;
 export const shipNameEl = document.getElementById('ship-name')!;
+export const shipDateEl = document.getElementById('ship-date')!;
 
 export const deviceTimeEl = document.getElementById('device-time')!;
 export const deviceTimezoneEl = document.getElementById('device-timezone')!;
+export const deviceDateEl = document.getElementById('device-date')!;
 
 // World Clock
 export const timezoneInput = document.getElementById('timezone-input') as HTMLInputElement;

@@ -3,7 +3,8 @@
 import * as dom from './dom';
 import { aboardShip, state } from './state';
 import { getDisplayTimezoneName, isValidTimezone } from './utils';
-import { clockKey, fixedOffsetWeekday, formatFixedOffsetTime, isUnresolved, visibleClocks } from './clocks';
+import { clockKey, fixedOffsetWeekday, formatFixedOffsetDate, formatFixedOffsetTime, isUnresolved, visibleClocks } from './clocks';
+import { fitSecondLines, type SecondLineRow } from './second-line';
 import { shipKey } from './ships';
 import { isUnresolvable } from './shiptime';
 import { point as turfPoint } from '@turf/helpers';
@@ -154,6 +155,33 @@ export async function syncClock() {
   }
 }
 
+/**
+ * "Saturday, September 5, 2026" in a given zone.
+ *
+ * One place, because three cards now render this string and two of them exist
+ * only to be compared against the third — a formatting difference between them
+ * would read as a date difference and show a line that should have stayed
+ * hidden.
+ */
+function writtenDate(at: Date, timeZone: string): string {
+  return at.toLocaleDateString('en-US', {
+    timeZone, weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
+  });
+}
+
+/**
+ * Shows a card's date line only when it disagrees with the ground.
+ *
+ * Compared as the rendered strings rather than by arithmetic on the instants:
+ * the question the line answers is "does this card say a different day from the
+ * one above it", which is a question about what is on screen.
+ */
+function showDateWhenItDiffers(el: HTMLElement, date: string, groundDate: string): void {
+  const differs = date !== groundDate;
+  el.textContent = differs ? date : '';
+  el.classList.toggle('hidden', !differs);
+}
+
 export function updateAllClocks() {
   const correctedTime = new Date(new Date().getTime() + state.timeOffset);
   const localTimezone = state.localTimezone || Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -165,7 +193,7 @@ export function updateAllClocks() {
       minute: '2-digit',
       second: '2-digit'
     });
-    dom.localDateEl.textContent = correctedTime.toLocaleDateString('en-US', { timeZone: localTimezone, weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+    dom.localDateEl.textContent = writtenDate(correctedTime, localTimezone);
     // The town you're in, when we can name it — otherwise the zone.
     dom.localTimezoneEl.textContent = state.localPlaceName ?? getDisplayTimezoneName(localTimezone);
   } catch (e) {
@@ -173,6 +201,7 @@ export function updateAllClocks() {
   }
 
 
+  const secondLines: SecondLineRow[] = [];
   visibleClocks().forEach((entry) => {
     // Looked up by data attribute, not by rebuilding the id — zone ids contain
     // hyphens (America/Port-au-Prince, Etc/GMT-5) that a slug can't round-trip.
@@ -197,23 +226,30 @@ export function updateAllClocks() {
     }
 
     let timeString: string;
-    let dateString: string;
+    let dayShort: string;
+    let dayFull: string;
     let timeDiff: string;
 
     if (entry.kind === 'ship') {
       const offset = entry.ship.offsetHours as number;
       timeString = formatFixedOffsetTime(offset, { hour: 'numeric', minute: '2-digit' });
-      dateString = fixedOffsetWeekday(offset);
+      dayShort = fixedOffsetWeekday(offset);
+      dayFull = fixedOffsetWeekday(offset, 'long');
       timeDiff = relativeTextForShip(entry.ship as { brand: string; code: string; offsetHours: number });
     } else {
       timeString = getFormattedTime(entry.tzid, { hour: 'numeric', minute: '2-digit' });
-      dateString = correctedTime.toLocaleDateString('en-US', { timeZone: entry.tzid, weekday: 'short' });
+      dayShort = correctedTime.toLocaleDateString('en-US', { timeZone: entry.tzid, weekday: 'short' });
+      dayFull = correctedTime.toLocaleDateString('en-US', { timeZone: entry.tzid, weekday: 'long' });
       timeDiff = relativeTextForZone(entry.tzid);
     }
 
     el.querySelector('.time')!.textContent = timeString;
-    el.querySelector('.date-diff')!.textContent = `${dateString}, ${timeDiff}`;
+    // The second line is written by fitSecondLines below, which needs every
+    // row's candidate strings before it can choose between them.
+    secondLines.push({ el, entry, dayShort, dayFull, timeDiff });
   });
+
+  fitSecondLines(secondLines);
   
   renderShipTime();
 
@@ -228,6 +264,11 @@ export function updateAllClocks() {
     second: '2-digit'
   });
   dom.deviceTimezoneEl.textContent = getDisplayTimezoneName(deviceTz);
+  // The date, but only when the device is on a different day from the ground.
+  // Crossing a date line or sitting near midnight is exactly when "8:15" on two
+  // cards means two different things, and a bare time cannot say so.
+  showDateWhenItDiffers(dom.deviceDateEl, writtenDate(deviceNow, deviceTz),
+                        dom.localDateEl.textContent ?? '');
 
   dom.timeLoader.classList.add('hidden');
   dom.timeContent.classList.remove('hidden');
@@ -290,6 +331,7 @@ function renderShipTime(): void {
   dom.shipNameEl.textContent = ship.name;
 
   if (ship.offsetHours === null) {
+    dom.shipDateEl.classList.add('hidden');
     // Detected, but the offset has not resolved. Never fill this with the
     // embark-port zone or any other guess: a blank is honest and
     // self-explanatory, a wrong time is neither.
@@ -302,6 +344,10 @@ function renderShipTime(): void {
     minute: '2-digit',
     second: '2-digit',
   });
+  // Aboard, a ship an hour or two off the ground is routine and a ship on
+  // tomorrow's date is the reason anybody misses a gangway.
+  showDateWhenItDiffers(dom.shipDateEl, formatFixedOffsetDate(ship.offsetHours),
+                        dom.localDateEl.textContent ?? '');
 }
 
 /**

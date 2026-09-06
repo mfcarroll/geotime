@@ -74,7 +74,9 @@ export function clockLabel(entry: ClockEntry): string {
  * have about a place name; nobody wonders what "Royal Caribbean" is doing under
  * a ship.
  */
-export function clockSubLabel(entry: ClockEntry): string {
+export type ZoneLabelWord = 'Timezone' | 'Zone';
+
+export function clockSubLabel(entry: ClockEntry, word: ZoneLabelWord = 'Timezone'): string {
   if (entry.kind === 'ship') {
     const line = entry.ship.brand === 'C' ? 'Celebrity' : 'Royal Caribbean';
     // Suppressed when the name already says it: every Celebrity vessel is
@@ -85,7 +87,7 @@ export function clockSubLabel(entry: ClockEntry): string {
   const zoneName = getDisplayTimezoneName(entry.tzid);
   // Accents aside, "Reykjavík" and the zone "Reykjavik" are the same place —
   // naming it twice would just look like a mistake.
-  return fold(zoneName) === fold(getZoneLabel(entry.tzid)) ? '' : `Timezone: ${zoneName}`;
+  return fold(zoneName) === fold(getZoneLabel(entry.tzid)) ? '' : `${word}: ${zoneName}`;
 }
 
 /** True when this row is a ship whose offset we have never resolved. */
@@ -113,6 +115,14 @@ export function formatFixedOffsetTime(
 export function fixedOffsetWeekday(offsetHours: number, format: 'short' | 'long' = 'short'): string {
   const shifted = new Date(Date.now() + state.timeOffset + offsetHours * 3600_000);
   return shifted.toLocaleDateString('en-US', { timeZone: 'UTC', weekday: format });
+}
+
+/** The written-out date on a fixed UTC offset, for the Ship Time card. */
+export function formatFixedOffsetDate(offsetHours: number): string {
+  const shifted = new Date(Date.now() + state.timeOffset + offsetHours * 3600_000);
+  return shifted.toLocaleDateString('en-US', {
+    timeZone: 'UTC', weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
+  });
 }
 
 /**

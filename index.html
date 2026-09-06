@@ -80,6 +80,13 @@
                 </h2>
                 <p id="ship-time" class="text-3xl font-medium text-gray-300 font-mono">--:--:--</p>
                 <p id="ship-name" class="text-md text-gray-500">--</p>
+                <!-- Only when the ship is on a different DAY from the ground.
+                     Same day and the line is noise: the date is already spelled
+                     out under Local Time a few lines above, and repeating it
+                     invites the reader to compare two identical strings looking
+                     for the difference. A different day is the case that
+                     actually catches people out. -->
+                <p id="ship-date" class="text-md text-gray-400 hidden">---, --- --, ----</p>
               </div>
               <hr class="border-gray-600 my-4">
               <h2 class="text-xl font-semibold text-white mb-2 flex items-center justify-center">
@@ -88,6 +95,8 @@
               </h2>
               <p id="device-time" class="text-3xl font-medium text-gray-300 font-mono">--:--:--</p>
               <p id="device-timezone" class="text-md text-gray-500">-- / --</p>
+              <!-- See the note on #ship-date: shown only on a different day. -->
+              <p id="device-date" class="text-md text-gray-400 hidden">---, --- --, ----</p>
             </div>
           </div>
           
@@ -175,12 +184,13 @@
            space. min-w-0 is what lets the name actually shrink and ellipsize. -->
       <div class="clock-row relative flex items-center gap-3 bg-gray-700/50 p-3 pr-10 rounded-lg border-2 border-transparent">
         <div class="min-w-0 flex-1">
+          <div class="flex items-baseline gap-3">
           <!-- Wraps rather than truncates. A ship name is long enough that
                clipping it produces "Independence of the S…", which is worse
                than a second line; and wrapping means the full name always
                shows, so nothing has to measure or abbreviate here. The widget
                still does, because a widget cannot grow. -->
-          <p class="text-lg font-medium text-white">
+          <p class="text-lg font-medium text-white min-w-0 flex-1">
             <!-- Ships carry a mark, because a ship name is often also a real
                  town: "Independence" is a vessel and six places, one of them
                  120,000 people. The icon is what disambiguates a row; ordering
@@ -201,11 +211,21 @@
                  work but would stop the name wrapping at all, which is worse. -->
             <span class="city"></span><span class="city-tail"><span class="city-last"></span><i class="ship-icon fas fa-ship fa-fw ml-1 text-sm text-gray-300 hidden"></i><i class="port-icon fas fa-anchor fa-fw ml-1 text-sm text-gray-300 hidden"></i></span>
           </p>
-          <p class="region text-sm text-gray-400 truncate"></p>
-        </div>
-        <div class="flex-none text-right">
-          <p class="time text-xl font-semibold text-white font-mono whitespace-nowrap">--:--</p>
-          <p class="date-diff text-sm text-gray-400 whitespace-nowrap">--, +/- hrs</p>
+            <p class="time text-xl font-semibold text-white font-mono whitespace-nowrap flex-none">--:--</p>
+          </div>
+          <!-- Line 2 is its own flex row, not the lower half of two stacked
+               columns, and that is the whole point of the split.
+               Stacked columns give the second line the FIRST line's width: the
+               right column is sized by the time, which is text-xl mono and far
+               wider than "Sun, +0 hrs" beneath it, so the zone line was
+               ellipsised against a column edge with 40-odd points of empty
+               space to the right of the offset. Measuring each line separately
+               is what the widget already does; this brings the app into line
+               with it. -->
+          <div class="flex items-baseline gap-3">
+            <p class="region text-sm text-gray-400 truncate min-w-0 flex-1"></p>
+            <p class="date-diff text-sm text-gray-400 whitespace-nowrap flex-none">--, +/- hrs</p>
+          </div>
         </div>
         <div class="absolute top-1/2 -translate-y-1/2 right-2 flex space-x-1">
           <button class="remove-btn text-gray-500 hover:text-red-400 transition-colors">
