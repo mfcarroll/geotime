@@ -75,6 +75,15 @@ interface CityIndex {
   cityAt: Float64Array;
   /** Centroid of each zone's largest city's region, parallel to `zones`. */
   zoneAt: Float64Array;
+  /**
+   * Index into `names` of each zone's largest city, parallel to `zones`; -1
+   * where the zone has no city over the population floor.
+   *
+   * Falls out of the same fact `zoneAt` already relies on — the index is stored
+   * in population order, so the first city seen for a zone is its largest. Used
+   * to decide whether a city row can stand in for its zone's own row.
+   */
+  primaryCity: Int32Array;
 }
 
 export interface Origin {
@@ -130,7 +139,14 @@ export function loadCityIndex(): Promise<CityIndex | null> {
         zoneAt[z + 1] = regionAt[regionOf[i] * 2 + 1];
       }
 
-      return { zones: raw.z, regions: raw.r, names, folded, regionOf, zoneOf, regionAt, cityAt, zoneAt };
+      // Same pass, same fact: population order means the first city seen for a
+      // zone is the largest one in it.
+      const primaryCity = new Int32Array(raw.z.length).fill(-1);
+      for (let i = 0; i < names.length; i++) {
+        if (primaryCity[zoneOf[i]] === -1) primaryCity[zoneOf[i]] = i;
+      }
+
+      return { zones: raw.z, regions: raw.r, names, folded, regionOf, zoneOf, regionAt, cityAt, zoneAt, primaryCity };
     } catch (error) {
       // Zone-id search still works without this, so degrade rather than fail.
       console.warn('Could not load the city index:', error);
@@ -332,6 +348,31 @@ export function searchPlaces(
 
   const seen = new Set<string>();
   const results: PlaceResult[] = [];
+  /**
+   * City rows that can stand in for their zone's own row.
+   *
+   * A zone row exists so a zone stays findable when no city names it —
+   * America/Creston has no town over the population floor. Once a city in that
+   * zone is on screen, the zone row is a second way to add the identical clock,
+   * differing only in the label it saves. The city row is the better one: it
+   * says where the place is, and carries the id underneath either way.
+   *
+   * Two cities qualify, and no others. The zone's NAMESAKE, compared folded so
+   * that "São Paulo" stands in for the zone written "Sao Paulo" — today it does
+   * not, because the duplicate key compares raw labels while matching is
+   * accent-insensitive, so 22 zones show a row that is a near-copy of the city
+   * above it. And the zone's LARGEST city, which covers "New York City" for
+   * America/New_York and "Vatican City" for Europe/Vatican.
+   *
+   * The largest-city clause is what keeps this honest, and it was added because
+   * the rule without it had one real casualty: "Cayman" matched the settlement
+   * of Cayman Palms — 44,000th by population — which would have replaced a clean
+   * America/Cayman row with a hamlet, while George Town, the actual place, went
+   * unmentioned. Where the namesake is not the biggest city the zone keeps its
+   * row, which also spares Matamoros, Hovd and Kuwait. Failing towards one row
+   * too many is the right direction to fail in.
+   */
+  const speaksForZone = new Set<PlaceResult>();
   // Cities ahead of zones within each tier. A zone named after its city
   // ("Creston") collides with the city itself, and the city row is the better
   // one to keep — it says where the place is.
@@ -342,10 +383,19 @@ export function searchPlaces(
   // these names genuinely collide — "Independence" is also six real towns, one
   // of them 120,000 people — and the ship icon is what resolves it, not the
   // ordering. Nothing is ever silently picked.
-  for (let tier = 0; tier < 3 && results.length < limit; tier++) {
+  const candidates: PlaceResult[] = [];
+  for (let tier = 0; tier < 3; tier++) {
     // Only the leading slice is materialised — a broad query like "san" matches
     // thousands, and building a result object for each would be wasted work.
-    const ranked = cityTiers[tier].slice(0, limit).map((i) => cityResult(index!, i));
+    const ranked = cityTiers[tier].slice(0, limit).map((i) => {
+      const row = cityResult(index!, i);
+      const zone = index!.zoneOf[i];
+      if (fold(row.label) === fold(getDisplayTimezoneName(row.tzid))
+          || index!.primaryCity[zone] === i) {
+        speaksForZone.add(row);
+      }
+      return row;
+    });
     const shipsHere = shipTiers[tier].map(shipResult);
     // Ports lead their tier. Someone with a ship on the list is reading an
     // itinerary, and when they type a port name they mean that port — the
@@ -353,18 +403,33 @@ export function searchPlaces(
     // they are sailing to on Thursday. Cozumel is both a town and a call on
     // this itinerary; the anchor and the ship name are what tell them apart.
     const portsHere = portTiers[tier].map(portResult);
-    const ordered: PlaceResult[] = tier === 0
+    candidates.push(...(tier === 0
       ? [...portsHere, ...shipsHere, ...ranked, ...zoneTiers[tier]]
-      : [...portsHere, ...ranked, ...shipsHere, ...zoneTiers[tier]];
+      : [...portsHere, ...ranked, ...shipsHere, ...zoneTiers[tier]]));
+  }
 
-    for (const candidate of ordered) {
-      // One row per place: the same city name can repeat across regions, but an
-      // identical name *and* zone is a duplicate as far as the user is concerned.
-      const key = resultKey(candidate);
-      if (seen.has(key)) continue;
-      seen.add(key);
-      results.push(candidate);
-      if (results.length >= limit) break;
+  // Walked as one list rather than a loop per tier, so that a zone row dropped
+  // part-way through can be replaced from further down instead of leaving the
+  // list a row short. Order is unchanged: the tiers are simply concatenated.
+  //
+  // The zone check runs in both directions because the two rows can arrive in
+  // either order. "Vancouver" puts the city first — it is an exact match and
+  // the zone is too, and cities lead their tier. "New York" puts the zone
+  // first, because the city is called New York City and only reaches the prefix
+  // tier. So an admitted city retires a zone row already on the list, and an
+  // admitted zone is skipped if a city has already spoken for it.
+  const spokenFor = new Set<string>();
+  for (const candidate of candidates) {
+    if (results.length >= limit) break;
+    const key = resultKey(candidate);
+    if (seen.has(key)) continue;
+    if (candidate.kind === 'zone' && spokenFor.has(candidate.tzid)) continue;
+    seen.add(key);
+    results.push(candidate);
+    if (candidate.kind === 'city' && speaksForZone.has(candidate)) {
+      spokenFor.add(candidate.tzid);
+      const stale = results.findIndex((r) => r.kind === 'zone' && r.tzid === candidate.tzid);
+      if (stale !== -1) results.splice(stale, 1);
     }
   }
 
