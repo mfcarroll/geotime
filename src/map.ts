@@ -4,7 +4,7 @@ import * as dom from './dom';
 import { aboardShip, state, persistTimezones, setLocalPlaceName, syncWidget } from './state';
 import { timezoneForCoordinates, findTimezoneFromGeoJSON, startClocks, relativeTextForZone, relativeTextForShip, getFormattedTime, getUtcOffset, getDisplayTimezoneName, getZoneLabel, updateAllClocks, formatOffsetDiff } from './time';
 import { locationMapStyles, worldTimezoneMapStyles } from './map-styles';
-import { distance, formatAccuracy, fold } from './utils';
+import { debugFlag, distance, formatAccuracy, fold } from './utils';
 import { loadCityIndex, nearestPlace } from './cities';
 import { feature as topoFeature } from 'topojson-client';
 import { resolveZoneStyle } from './map-highlight';
@@ -917,7 +917,7 @@ async function setupTimezoneMapListeners() {
  * have no offset to be indexed by.
  */
 async function showGeometryDebugLayers(): Promise<void> {
-  if (new URLSearchParams(window.location.search).get('debug') !== 'geometry') return;
+  if (!debugFlag('geometry')) return;
   if (!state.timezoneMap) return;
 
   const layers: Array<[string, string, string]> = [

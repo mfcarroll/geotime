@@ -76,3 +76,18 @@ export function isValidTimezone(tz: string): boolean {
         return false;
     }
 }
+
+/**
+ * Whether a `?debug=` flag is set.
+ *
+ * Comma-separated, so `?debug=ships,geometry` turns on both. It used to be a
+ * bare equality test against one word, which made the flags mutually exclusive
+ * for no reason other than how the check was written.
+ *
+ * Everything behind one of these is a development aid: none of it is reachable
+ * without typing the parameter, and none of it changes what a normal load does.
+ */
+export function debugFlag(name: string): boolean {
+    const raw = new URLSearchParams(window.location.search).get('debug') ?? '';
+    return raw.split(',').some((flag) => flag.trim().toLowerCase() === name);
+}

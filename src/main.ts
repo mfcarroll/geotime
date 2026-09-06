@@ -4,7 +4,7 @@
 import './style.css';
 import { Loader } from '@googlemaps/js-api-loader';
 import * as dom from './dom';
-import { state, persistTimezones, migrateStoredTimezones, setZoneLabel, setZoneKind, syncWidget, addShipClock } from './state';
+import { addShipClock, loadDebugFleet, migrateStoredTimezones, persistTimezones, setZoneKind, setZoneLabel, state, syncWidget } from './state';
 import { refreshAnchorChip, refreshMapStyles, initMaps, onLocationError, onLocationSuccess, selectTimezone, selectShip, setHoveredShip, renderWorldClocks, addUniqueTimezoneToList, updateUserTimezoneDetails, showLocationUnavailable, loadTimezoneGeoJson } from './map';
 import { updateAllClocks, syncClock, startClockWatch, getDisplayTimezoneName, startClocks, findTimezoneFromGeoJSON } from './time';
 import { Capacitor } from '@capacitor/core';
@@ -104,6 +104,11 @@ async function startApp() {
     void resolveAllShipClocks();
     void refreshShipRoster();
     startShipTimeWatch();
+    // `?debug=ships` only, and here rather than earlier because the roster is
+    // empty until the app key resolves — loadShipRoster memoises the empty
+    // answer if it is asked first, which is exactly what a call up in the
+    // startup block did.
+    void loadDebugFleet();
   });
   installDiagnostics(dom.deviceTimezoneEl);
 

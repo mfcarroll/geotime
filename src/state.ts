@@ -3,8 +3,9 @@
 import { migrateStoredTimezones, type StoredZone } from './stored-zones';
 export { migrateStoredTimezones, type StoredZone };
 import { syncWidgetTimezones } from './widget';
-import { newShipClock, shipKey, type ShipClock, type ShipRef } from './ships';
+import { loadShipRoster, newShipClock, shipKey, type ShipClock, type ShipRef } from './ships';
 import type { DeviceFix } from './ship-position';
+import { debugFlag } from './utils';
 
 export interface AppState {
     timeOffset: number;
@@ -227,6 +228,35 @@ export function persistTimezones(timezones: string[]): void {
     localStorage.setItem('worldClocks', JSON.stringify(payload));
 
     syncWidget();
+}
+
+/**
+ * Puts every vessel in the roster on the World Clock, for `?debug=ships`.
+ *
+ * A development aid for looking at tracks: every ship on the list at once, and a
+ * marker for each on the map, instead of adding them one at a time to find the
+ * one drawing something odd.
+ *
+ * Deliberately not special: the ships are added exactly as if they had been
+ * searched for by hand, so they persist, resolve their offsets and reach the
+ * widget like any other. Remove them the same way.
+ *
+ * Called once the app key has resolved, not during startup. loadShipRoster
+ * returns [] when ship features are off and MEMOISES that answer, so asking
+ * before the key lands leaves the roster permanently empty for this page —
+ * which is what the first version of this did, silently.
+ */
+export async function loadDebugFleet(): Promise<void> {
+    if (!debugFlag('ships')) return;
+    const roster = await loadShipRoster();
+    const have = new Set(state.shipClocks.map(shipKey));
+    const added = roster.filter((ship) => !have.has(shipKey(ship))).map((ship) => newShipClock(ship));
+    if (added.length === 0) return;
+
+    // One write rather than one per ship: addShipClock would persist and
+    // announce forty-four times over.
+    persistShipClocks([...state.shipClocks, ...added]);
+    announceShipClocks();
 }
 
 /** Single write path for the ship list. Mirrors persistTimezones. */
