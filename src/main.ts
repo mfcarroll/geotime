@@ -193,7 +193,11 @@ async function startApp() {
      */
     ports: () => portRefsFrom(
       state.shipClocks.map((ship) => ({
-        ship: ship.short,
+        // The full name, not the short one. A clock row uses `short` because it
+        // competes with a time for width; this line is a dropdown subtitle with
+        // room to spare, and "Star of the Seas" identifies the vessel where
+        // "Star" alone reads like another place name.
+        ship: ship.name,
         voyage: cachedVoyageFor(shipKey(ship)),
       })),
       findTimezoneFromGeoJSON),

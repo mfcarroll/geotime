@@ -22,7 +22,10 @@ export interface PortRef {
   name: string;
   /** IANA zone the port stands in. */
   tzid: string;
-  /** The ship whose itinerary this came from, for the row underneath. */
+  /**
+   * The ship whose itinerary this came from, in full ("Star of the Seas"), for
+   * the line underneath the port name in search results.
+   */
   ship: string;
   lat: number;
   lon: number;
