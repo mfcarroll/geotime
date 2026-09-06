@@ -1,21 +1,23 @@
 import { strict as assert } from 'node:assert';
 import { describe, it } from 'node:test';
-import { dayIndex, voyageIsOver, voyageSlice, wakeGaps, wakeRuns, type WakePort } from './wake';
+import { dayIndex, routeAhead, voyageIsOver, voyageSlice, wakeGaps, wakeRuns, type WakePort } from './wake';
 
 // Real coordinates throughout, because what this guards against was only ever
 // visible in real data: a wake drawn confidently through places the ship had
 // never been. Synthetic points a degree apart would prove the arithmetic and
 // none of the judgement in the rule.
 
-const NOW = Date.parse('2026-09-07T12:00:00');
-const AGO = '2026-09-02 17:00:00';       // departed
-const SOON = '2026-09-08 11:59:00';      // still ahead
+const NOW = Date.parse('2026-09-07T12:00:00Z');
+// Instants, not wall clocks: resolving the itinerary's "2026-09-02 17:00:00" in
+// the PORT's zone is the caller's job now — see port-clock.ts.
+const AGO = Date.parse('2026-09-02T17:00:00-04:00');    // departed
+const SOON = Date.parse('2026-09-08T11:59:00-04:00');   // still ahead
 
 /** Star of the Seas: where her held wake stopped, inbound to Cozumel on day 4. */
 const OFF_COZUMEL: [number, number] = [-86.40427, 20.96229];
 /** And where she actually was on day 8 — alongside, 1,014 km away. */
 const PORT_CANAVERAL: [number, number] = [-80.61014, 28.40875];
-const COZUMEL: WakePort = { lon: -86.94, lat: 20.51, depart: AGO };
+const COZUMEL: WakePort = { lon: -86.94, lat: 20.51, departsAt: AGO };
 
 /** A plausible afternoon's crumbs off the Florida coast, ~30 km apart. */
 const CONTINUOUS: Array<[number, number]> = [
@@ -25,7 +27,7 @@ const CONTINUOUS: Array<[number, number]> = [
 
 describe('wake gaps', () => {
     it('finds none in a wake that reaches every port it has left', () => {
-        const port: WakePort = { lon: -80.75, lat: 27.60, depart: AGO };
+        const port: WakePort = { lon: -80.75, lat: 27.60, departsAt: AGO };
         assert.equal(wakeGaps(CONTINUOUS, [port], NOW).size, 0);
     });
 
@@ -46,7 +48,7 @@ describe('wake gaps', () => {
         // Radiance's Tampa, the last call of her itinerary: no departure time
         // because she has not left, so nothing about it is missing.
         const wake = [...CONTINUOUS, [-70.0, 22.0] as [number, number]];  // a 1,200 km hop
-        const ahead: WakePort = { lon: -82.45, lat: 27.94, depart: null };
+        const ahead: WakePort = { lon: -82.45, lat: 27.94, departsAt: null };
         // Only the backstop fires; the port contributes nothing.
         assert.deepEqual([...wakeGaps(wake, [ahead], NOW)], [5]);
         assert.equal(wakeGaps(CONTINUOUS, [ahead], NOW).size, 0);
@@ -54,7 +56,7 @@ describe('wake gaps', () => {
 
     it('leaves a port whose departure is still in the future alone', () => {
         // Vision's Kings Wharf, departing tomorrow.
-        const soon: WakePort = { lon: -64.83, lat: 32.32, depart: SOON };
+        const soon: WakePort = { lon: -64.83, lat: 32.32, departsAt: SOON };
         assert.equal(wakeGaps(CONTINUOUS, [soon], NOW).size, 0);
     });
 
@@ -63,7 +65,7 @@ describe('wake gaps', () => {
         // hop lay nearest and dotting stretches of 3, 8 and 12 km. A port 40 km
         // off an unbroken wake is a tender berth or a rough coordinate, not a
         // hole in the line.
-        const nearby: WakePort = { lon: -80.75, lat: 27.25, depart: AGO };
+        const nearby: WakePort = { lon: -80.75, lat: 27.25, departsAt: AGO };
         assert.equal(wakeGaps(CONTINUOUS, [nearby], NOW).size, 0);
     });
 
@@ -87,14 +89,9 @@ describe('wake gaps', () => {
         const wake: Array<[number, number]> = [
             [-86.0, 21.4], [-86.2, 21.2], OFF_COZUMEL, PORT_CANAVERAL,
         ];
-        const beyond: WakePort = { lon: -84.0, lat: 24.5, depart: AGO };
+        const beyond: WakePort = { lon: -84.0, lat: 24.5, departsAt: AGO };
         const gaps = wakeGaps(wake, [beyond], NOW);
         assert.ok(gaps.has(2), 'the 1,014 km hop, not the 30 km one that shares its start');
-    });
-
-    it('ignores a departure string it cannot read', () => {
-        const bad: WakePort = { lon: -86.94, lat: 20.51, depart: 'sometime last Tuesday' };
-        assert.equal(wakeGaps(CONTINUOUS, [bad], NOW).size, 0);
     });
 
     it('has nothing to say about a wake of fewer than two points', () => {
@@ -285,5 +282,167 @@ describe('voyage is over', () => {
         assert.equal(voyageIsOver(null, noon('2026-09-07')), false);
         assert.equal(voyageIsOver('next Thursday', noon('2026-09-07')), false);
         assert.equal(voyageIsOver('', noon('2026-09-07')), false);
+    });
+});
+
+describe('route ahead', () => {
+    /**
+     * Harmony of the Seas' real route, all 31 vertices of it, on her round trip
+     * out of Port Canaveral. Two things about its shape drive everything below.
+     *
+     * It DOUBLES BACK: every port is visited twice over, outbound and homeward,
+     * so the water at index 8 is the water at index 19 and geometry alone cannot
+     * say which leg she is on. And each call is a DUPLICATED PAIR of vertices —
+     * Coco Cay at 5 and 6, Cozumel at 17 and 18 — which is what turns a
+     * one-vertex error into a visible spike on the map.
+     */
+    const HARMONY: Array<[number, number]> = [
+        [-80.60688, 28.40364], [-80.56006, 28.409107], [-79.031804, 26.258172],
+        [-77.981406, 25.902989], [-77.985901, 25.83423],
+        [-77.93411, 25.8169], [-77.93411, 25.8169],            // Coco Cay
+        [-77.985901, 25.83423], [-78.691629, 25.791336], [-79.18788, 25.810065],
+        [-79.880466, 25.273181], [-80.326746, 24.731696], [-81.202233, 23.978561],
+        [-81.572913, 23.840338], [-82.076714, 23.730991], [-82.861672, 23.720652],
+        [-85.837088, 21.657746],
+        [-86.95408, 20.51213], [-86.95408, 20.51213],          // Cozumel
+        [-85.837088, 21.657746], [-82.861672, 23.720652], [-82.092874, 23.972037],
+        [-81.953348, 24.161146], [-80.797412, 24.600942], [-80.231637, 25.017102],
+        [-80.056052, 25.273181], [-79.872937, 26.600425], [-79.912494, 26.97601],
+        [-80.151633, 27.522691], [-80.56006, 28.409107], [-80.60688, 28.40364],
+    ];
+    const COCO_CAY: [number, number] = [-77.93411, 25.8169];
+    const COZUMEL: [number, number] = [-86.95408, 20.51213];
+    const CANAVERAL: [number, number] = [-80.60688, 28.40364];
+
+    /** Where she was, and what she was doing: 41 km past Coco Cay at 19 knots. */
+    const UNDER_WAY: [number, number] = [-78.29509, 25.98767];
+    const COURSE = 288;
+
+    const NOW = Date.parse('2026-09-06T22:46:00Z');
+    /** Coco Cay's stated 17:00, resolved in the Bahamas' own clock. */
+    const LEFT_COCO_CAY = Date.parse('2026-09-06T21:00:00Z');
+    const LEAVES_COZUMEL = Date.parse('2026-09-08T21:00:00Z');
+
+    const itinerary = (cocoCay: number | null): WakePort[] => [
+        { lon: COCO_CAY[0], lat: COCO_CAY[1], departsAt: cocoCay },
+        { lon: COZUMEL[0], lat: COZUMEL[1], departsAt: LEAVES_COZUMEL },
+        { lon: CANAVERAL[0], lat: CANAVERAL[1], departsAt: null },
+    ];
+
+    /** Degrees off the bow, so "ahead" can be asserted rather than eyeballed. */
+    const offBow = (to: [number, number]) => {
+        const scale = Math.cos((UNDER_WAY[1] * Math.PI) / 180);
+        const bearing = (Math.atan2(
+            (to[0] - UNDER_WAY[0]) * scale, to[1] - UNDER_WAY[1]) * 180) / Math.PI;
+        return Math.abs(((bearing - COURSE + 540) % 360) - 180);
+    };
+
+    it('sets off for the next call, not back to the one just left', () => {
+        // The fault, exactly as reported: "the forward track is still looping
+        // back to Coco Cay before continuing on, so there's a zig zag." Twelve
+        // of forty-five vessels were drawing one, all of them within a few hours
+        // of a departure — which is the window in which the itinerary was being
+        // read in the wrong clock. See port-clock.ts.
+        const line = routeAhead(
+            HARMONY, itinerary(LEFT_COCO_CAY), '10 Sep, 2026', UNDER_WAY, COURSE, NOW);
+
+        assert.deepEqual(line[0], UNDER_WAY, 'begins at the vessel');
+        assert.ok(offBow(line[1]) < 90,
+            `sets off ${offBow(line[1]).toFixed(0)}° off the bow`);
+        assert.notDeepEqual(line[1], COCO_CAY, 'not back to Coco Cay');
+        assert.ok(line.some((p) => p[0] === COZUMEL[0] && p[1] === COZUMEL[1]),
+            'and still arrives at Cozumel');
+    });
+
+    it('never begins past the call she has not reached', () => {
+        // The other half of the same clamp, and the reason it exists: with Coco
+        // Cay still ahead of her the line has to run through it rather than set
+        // off for the call after it. Without the ceiling, projection onto a
+        // route that doubles back skipped Cadiz entirely on Liberty of the Seas.
+        const line = routeAhead(
+            HARMONY, itinerary(NOW + 3600_000), '10 Sep, 2026', UNDER_WAY, COURSE, NOW);
+        assert.deepEqual(line[1], COCO_CAY, 'through the port, not past it');
+    });
+
+    it('has nothing to draw for a voyage that has ended', () => {
+        assert.deepEqual(
+            routeAhead(HARMONY, itinerary(LEFT_COCO_CAY), '05 Sep, 2026', UNDER_WAY, COURSE, NOW),
+            []);
+    });
+
+    it('falls back to the last departed port when there is no position', () => {
+        const line = routeAhead(
+            HARMONY, itinerary(LEFT_COCO_CAY), '10 Sep, 2026', null, null, NOW);
+        assert.deepEqual(line[0], COCO_CAY);
+    });
+
+    /**
+     * Serenade of the Seas, alongside at Canada Place with nothing departed yet.
+     *
+     * Trimmed to the vertices that matter, and the first two and last two are
+     * verbatim: her route leaves Vancouver and comes home through exactly the
+     * same water, so the outbound segment and the homeward one are the SAME LINE
+     * traversed backwards. Distance to each is therefore equal in real
+     * arithmetic and unequal in floating point — the homeward one measured
+     * nearer by two parts in 10^20, which was enough to choose it.
+     */
+    const VANCOUVER: [number, number] = [-123.10906, 49.28856];
+    const FIRST_NARROWS: [number, number] = [-123.261, 49.3102];
+    const SITKA: [number, number] = [-135.37854, 57.12623];
+    const INSIDE_PASSAGE: Array<[number, number]> = [
+        VANCOUVER, FIRST_NARROWS, [-127.5, 51.5], [-133.0, 55.0],
+        SITKA, SITKA,
+        [-133.0, 55.0], [-127.5, 51.5], FIRST_NARROWS, VANCOUVER,
+    ];
+    /** Her AIS fix at the berth, 0.2 km off the vertex the route uses. */
+    const ALONGSIDE: [number, number] = [-123.10709, 49.28996];
+    const ALASKA: WakePort[] = [
+        { lon: SITKA[0], lat: SITKA[1], departsAt: Date.parse('2026-09-08T18:30:00-08:00') },
+        { lon: VANCOUVER[0], lat: VANCOUVER[1], departsAt: null },
+    ];
+
+    it('draws the whole outbound leg for a ship still at her origin', () => {
+        // What it drew instead was Vancouver to Sitka in one straight line with
+        // the entire Inside Passage missing — the homeward segment won the tie,
+        // the ceiling pulled it back to Sitka, and 25 vertices vanished.
+        const line = routeAhead(
+            INSIDE_PASSAGE, ALASKA, '13 Sep, 2026', ALONGSIDE, null, NOW);
+
+        assert.deepEqual(line[1], FIRST_NARROWS, 'out through the First Narrows');
+        assert.equal(line.length, INSIDE_PASSAGE.length, 'the whole route, plus her');
+    });
+
+    it('ignores a course of null rather than walking the line away', () => {
+        // Why the caller withholds a moored hull's heading. Serenade lay at the
+        // berth pointing east with her whole voyage leading west; given that as
+        // a course, every vertex ahead of her reads as behind and the walk
+        // consumes the line up to its ceiling.
+        const moored = routeAhead(
+            INSIDE_PASSAGE, ALASKA, '13 Sep, 2026', ALONGSIDE, 81, NOW);
+        assert.deepEqual(moored[1], SITKA, 'the answer a berth heading produces');
+
+        const withheld = routeAhead(
+            INSIDE_PASSAGE, ALASKA, '13 Sep, 2026', ALONGSIDE, null, NOW);
+        assert.deepEqual(withheld[1], FIRST_NARROWS, 'and the answer without it');
+    });
+
+    it('still uses a course from a ship that is making way', () => {
+        // The walk earns its place on the doubled-back stretch: at Cozumel the
+        // route turns round on itself, and the vertex projection lands on can be
+        // the one she has just passed.
+        const homeward: [number, number] = [-86.0, 21.5];
+        const line = routeAhead(
+            HARMONY,
+            [{ lon: COCO_CAY[0], lat: COCO_CAY[1], departsAt: LEFT_COCO_CAY },
+             { lon: COZUMEL[0], lat: COZUMEL[1], departsAt: Date.parse('2026-09-08T21:00:00Z') },
+             { lon: CANAVERAL[0], lat: CANAVERAL[1], departsAt: null }],
+            '10 Sep, 2026', homeward, 60, Date.parse('2026-09-08T23:00:00Z'));
+        assert.ok(line.length >= 2);
+        assert.ok(line[1][0] > homeward[0], 'headed east for home, not west to Cozumel');
+    });
+
+    it('leaves a route of fewer than two points alone', () => {
+        assert.deepEqual(routeAhead([], [], null, UNDER_WAY, COURSE, NOW), []);
+        assert.deepEqual(routeAhead([COCO_CAY], [], null, UNDER_WAY, COURSE, NOW), [COCO_CAY]);
     });
 });

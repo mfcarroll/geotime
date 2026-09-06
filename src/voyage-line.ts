@@ -28,17 +28,10 @@
 
 import { state } from './state';
 import { shipKey } from './ships';
-import { findTimezoneFromGeoJSON, getUtcOffset } from './time';
+import { utcOffsetForCoordinates } from './time';
 import { distance } from './utils';
-import { fixForShip, type ShipFix, type ShipPort, type ShipVoyage } from './shiptrack';
-
-/**
- * Under way or not.
- *
- * Not zero, because AIS reports a tenth of a knot of drift on a moored hull and
- * a hard zero would flicker the line on and off between fixes.
- */
-const ALONGSIDE_KNOTS = 0.7;
+import { ALONGSIDE_KNOTS, fixForShip, type ShipFix, type ShipPort, type ShipVoyage } from './shiptrack';
+import { clock12, instantOf, parseWall, voyageYear } from './port-clock';
 
 /**
  * How near a port still counts as being at it.
@@ -50,85 +43,9 @@ const ALONGSIDE_KNOTS = 0.7;
  */
 const ALONGSIDE_KM = 10;
 
-/** A wall clock with no zone attached, which is all the itinerary gives us. */
-interface Wall {
-  /** Null for the ETA format, which omits the year. */
-  year: number | null;
-  month: number;
-  day: number;
-  hour: number;
-  minute: number;
-}
-
-const MONTHS = [
-  'january', 'february', 'march', 'april', 'may', 'june',
-  'july', 'august', 'september', 'october', 'november', 'december',
-];
-
-/**
- * Parses the two shapes upstream uses, and nothing else.
- *
- *   "2026-09-02 17:00:00"   port departures
- *   "September 3, 12:15"    the destination ETA
- *
- * Deliberately strict. These strings are scraped from someone else's markup, so
- * a shape we have not seen is likelier to be a surprise than a near-miss worth
- * salvaging, and the caller can say less rather than say something wrong.
- */
-export function parseWall(raw: string | null): Wall | null {
-  if (!raw) return null;
-
-  const iso = raw.match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{1,2}):(\d{2})/);
-  if (iso) {
-    return {
-      year: Number(iso[1]), month: Number(iso[2]), day: Number(iso[3]),
-      hour: Number(iso[4]), minute: Number(iso[5]),
-    };
-  }
-
-  const named = raw.match(/^([A-Za-z]+)\s+(\d{1,2}),\s*(\d{1,2}):(\d{2})/);
-  if (named) {
-    const month = MONTHS.indexOf(named[1].toLowerCase()) + 1;
-    if (month === 0) return null;
-    return {
-      year: null, month, day: Number(named[2]),
-      hour: Number(named[3]), minute: Number(named[4]),
-    };
-  }
-
-  return null;
-}
-
-/** "17:00" -> "5:00 PM". The whole point of the exercise. */
-export function clock12(w: Wall): string {
-  const suffix = w.hour < 12 ? 'AM' : 'PM';
-  const hour = w.hour % 12 === 0 ? 12 : w.hour % 12;
-  return `${hour}:${String(w.minute).padStart(2, '0')} ${suffix}`;
-}
-
-/**
- * The instant a wall clock refers to, given the zone it is stated in.
- *
- * Uses the zone's CURRENT offset rather than its offset on the date in question.
- * These times are hours to days away, so the two differ only across a DST
- * boundary, and the only thing this feeds is a has-it-passed test where an
- * hour's error changes nothing.
- */
-function instantOf(w: Wall, zoneOffsetHours: number, fallbackYear: number): number {
-  return Date.UTC(w.year ?? fallbackYear, w.month - 1, w.day, w.hour, w.minute)
-    - zoneOffsetHours * 3600_000;
-}
-
-/** The year the ETA leaves out, taken from the voyage it belongs to. */
-function voyageYear(voyage: ShipVoyage): number {
-  const stamped = (voyage.voyage.startDate ?? voyage.voyage.endDate ?? '').match(/(\d{4})/);
-  return stamped ? Number(stamped[1]) : new Date().getFullYear();
-}
-
 /** UTC offset of the zone a port stands in, or null out at sea. */
 function portOffsetHours(port: ShipPort): number | null {
-  const tz = findTimezoneFromGeoJSON(port.lat, port.lon);
-  return tz ? getUtcOffset(tz) : null;
+  return utcOffsetForCoordinates(port.lat, port.lon);
 }
 
 /** The ship's own offset, or null before it has ever resolved. */
@@ -171,7 +88,7 @@ export function voyageLine(voyage: ShipVoyage | null, key: string | null): strin
 
   const fix = fixForShip(key);
   const shipOffset = shipOffsetHours(key);
-  const year = voyageYear(voyage);
+  const year = voyageYear(voyage.voyage.startDate, voyage.voyage.endDate);
   const now = Date.now() + state.timeOffset;
 
   const port = portCall(voyage, fix);

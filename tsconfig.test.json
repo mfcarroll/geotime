@@ -2,6 +2,11 @@
   // Tests run on Node and may use node: builtins; the app must not, which is why
   // the base config pins `types` to the browser set and excludes these files.
   "extends": "./tsconfig.json",
+  // And why the exclusion has to be lifted again HERE. `exclude` beats `include`
+  // rather than being replaced by it, so inheriting the base's meant this config
+  // checked no test file at all — silently, and for as long as it has existed. A
+  // WakePort field was renamed under nine fixtures without a word from tsc.
+  "exclude": [],
   "compilerOptions": {
     "types": ["node", "vite/client", "google.maps"],
     "noEmit": true

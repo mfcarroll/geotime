@@ -1,6 +1,7 @@
 // src/wake.ts
 //
-// Where a wake is a passage and where it is a hole.
+// Which parts of a voyage to draw: where the wake is a passage and where it is
+// a hole, and which way along the route is still ahead.
 //
 // Its own module because it is pure and worth testing, and ship-markers.ts is
 // not importable outside a browser — it reaches for the Maps API at the top
@@ -13,8 +14,18 @@ import { distance } from './utils';
 export interface WakePort {
     lon: number;
     lat: number;
-    /** Upstream's local wall time, "2026-08-31 17:00:00", or null. */
-    depart: string | null;
+    /**
+     * When she is due to leave, as an instant.
+     *
+     * Resolved by the caller and never parsed here, because the itinerary states
+     * it as a bare wall clock in the PORT's zone and only the caller can look
+     * that zone up — see port-clock.ts, and the loop-backs that reading it in
+     * the device's zone drew.
+     *
+     * Null where the itinerary states none, which is the last call of every
+     * cruise. Null means "has not left", never "left long ago".
+     */
+    departsAt: number | null;
 }
 
 /**
@@ -76,9 +87,9 @@ const ALWAYS_DOTTED_KM = 400;
  * near. That is the fault worth drawing, and it is the one a reader can check
  * against the itinerary in front of them.
  *
- * Ports still ahead are excluded, which is the whole reason `depart` is read
- * rather than the day number. On day three of eight, five ports are naturally
- * absent from the wake and none of them is missing.
+ * Ports still ahead are excluded, which is the whole reason a departure time is
+ * read rather than the day number. On day three of eight, five ports are
+ * naturally absent from the wake and none of them is missing.
  *
  * @param at  now, as ms; ports departed before this should be on the wake.
  */
@@ -103,10 +114,9 @@ export function wakeGaps(
     if (candidates.length === 0) return gaps;
 
     for (const port of ports) {
-        const departed = port.depart ? Date.parse(port.depart.replace(' ', 'T')) : NaN;
         // No departure time means she has not left — the last call of the
         // itinerary, where she may be standing right now. Nothing is missing yet.
-        if (!Number.isFinite(departed) || departed > at) continue;
+        if (port.departsAt === null || port.departsAt > at) continue;
 
         const reached = wake.some((c) => distance(c[1], c[0], port.lat, port.lon) <= REACHED_KM);
         if (reached) continue;
@@ -299,4 +309,219 @@ export function voyageIsOver(endDate: string | null, at: number): boolean {
     const endOfThatDay = new Date(end);
     endOfThatDay.setHours(23, 59, 59, 999);
     return at > endOfThatDay.getTime();
+}
+
+/**
+ * Index of the route vertex closest to a point, searching from `from` onward.
+ *
+ * Longitude is scaled by cos(latitude) so a degree of longitude is compared
+ * against a degree of latitude at roughly its true length. Without it, two
+ * vertices equally far away in miles compare unequally at high latitude, and the
+ * nearest vertex to a ship off Norway is not the one it looks like on the map.
+ */
+function nearestIndex(
+    route: Array<[number, number]>,
+    target: [number, number],
+    from: number
+): number {
+    const scale = Math.cos((target[1] * Math.PI) / 180) || 1;
+    let best = from;
+    let bestDistance = Infinity;
+    for (let i = from; i < route.length; i++) {
+        const dx = (route[i][0] - target[0]) * scale;
+        const dy = route[i][1] - target[1];
+        const d = dx * dx + dy * dy;
+        if (d < bestDistance) {
+            bestDistance = d;
+            best = i;
+        }
+    }
+    return best;
+}
+
+/**
+ * Comparable distance from a point to a segment, longitude-scaled.
+ *
+ * Not a real distance — only ever compared against others computed the same way,
+ * at latitudes close enough that one scale factor serves for all of them.
+ */
+function distanceToSegment(
+    p: [number, number], a: [number, number], b: [number, number]
+): number {
+    const scale = Math.cos((p[1] * Math.PI) / 180) || 1;
+    const ax = (a[0] - p[0]) * scale, ay = a[1] - p[1];
+    const bx = (b[0] - p[0]) * scale, by = b[1] - p[1];
+    const dx = bx - ax, dy = by - ay;
+
+    const length = dx * dx + dy * dy;
+    // A degenerate segment is just its own endpoint.
+    const t = length === 0 ? 0 : Math.max(0, Math.min(1, -(ax * dx + ay * dy) / length));
+
+    const cx = ax + t * dx, cy = ay + t * dy;
+    return cx * cx + cy * cy;
+}
+
+/** More than a right angle off the bow, and therefore behind her. */
+function astern(from: [number, number], to: [number, number], course: number): boolean {
+    const scale = Math.cos((from[1] * Math.PI) / 180) || 1;
+    const bearing = (Math.atan2((to[0] - from[0]) * scale, to[1] - from[1]) * 180) / Math.PI;
+    const off = Math.abs(((bearing - course + 540) % 360) - 180);
+    return off > 90;
+}
+
+/**
+ * The port she is heading for: the first call not yet departed, else null.
+ *
+ * A call with no departure time is that port — it is the end of the itinerary,
+ * where nobody leaves again — so it stops the walk rather than being skipped.
+ */
+function nextCall(ports: WakePort[], now: number): [number, number] | null {
+    for (const port of ports) {
+        if (port.departsAt === null || port.departsAt > now) return [port.lon, port.lat];
+    }
+    return null;
+}
+
+/** The furthest route index belonging to a port we have already left. */
+function departedFloor(
+    ports: WakePort[], route: Array<[number, number]>, now: number
+): number {
+    let floor = 0;
+    for (const port of ports) {
+        if (port.departsAt === null || port.departsAt > now) continue;
+        floor = Math.max(floor, nearestIndex(route, [port.lon, port.lat], 0));
+    }
+    return floor;
+}
+
+/**
+ * The part of the planned route still to come: from where the ship is now, to
+ * the last port.
+ *
+ * Needed because `route` is the whole voyage, including the water already
+ * covered. Drawing it entire and letting the wake cover the sailed part looks
+ * right only while there IS a wake — and the upstream track goes empty often
+ * enough that the fallback matters, where the full route would then claim the
+ * ship had not left yet.
+ *
+ * The hard part is that a nearest-vertex search is ambiguous on a round trip:
+ * these itineraries come back through water they went out through, so the vertex
+ * closest to the ship may belong to the leg it has not sailed yet. The
+ * itinerary breaks the tie — no part of the route before the last port the ship
+ * has already left can still be ahead of it — so the search is floored at that
+ * port and geometry only decides the rest.
+ *
+ * WHICH MEANS THE ITINERARY HAS TO BE READ IN THE RIGHT CLOCK. Both the floor
+ * and the ceiling below are "has she left yet?" tests, and while the answer was
+ * computed in the device's zone instead of the port's, the whole line inverted
+ * for the few hours after every departure — see port-clock.ts. `departsAt`
+ * arrives already resolved for exactly that reason.
+ */
+export function routeAhead(
+    route: Array<[number, number]>,
+    ports: WakePort[],
+    endDate: string | null,
+    position: [number, number] | null,
+    course: number | null,
+    now: number,
+): Array<[number, number]> {
+    if (route.length < 2) return route;
+
+    // A voyage that has already ended has no route ahead, and the route we hold
+    // is not the one she is on.
+    //
+    // Left undrawn rather than drawn wrong, because what this produces otherwise
+    // is not a small error. Every port of a finished cruise has departed, so
+    // `nextCall` falls through to the last call — the only one without a
+    // departure time — and `limit` lands on the final vertex of a round trip.
+    // The line becomes the ship plus one point: a dashed stub back to the port
+    // she has just sailed FROM, pointing the wrong way down a voyage she has
+    // finished.
+    //
+    // Watched on Oasis of the Seas an hour out of New York on a new cruise,
+    // while the finished one was still cached: 2 points and 59 km where the
+    // answer was 36 points and 3,952 km. The window is ours rather than
+    // upstream's — thirty minutes of Worker cache and thirty of client cache —
+    // but it reopens at every turnaround, so it wants handling rather than
+    // waiting out.
+    if (voyageIsOver(endDate, now)) return [];
+
+    const floor = departedFloor(ports, route, now);
+    if (!position) return route.slice(floor);
+
+    // The next port of call is the one thing this line must not lose.
+    //
+    // Whatever else is uncertain — which leg of a round trip she is on, which
+    // vertex is behind her — the route ahead has to arrive at the place she is
+    // going. So her next call's vertex is a ceiling on the search below as well
+    // as on the walk after it: she has left every port before `floor` and
+    // reached none at or beyond `limit`, so the stretch she is on lies between
+    // them by construction.
+    const target = nextCall(ports, now);
+    const limit = target ? nearestIndex(route, target, floor) : route.length - 1;
+
+    // Which SEGMENT she is on, not which vertex she is near.
+    //
+    // Snapping to the nearest vertex was wrong in a way that distance to the
+    // next port could not fix. A route is a coarse polyline; the vertex closest
+    // to a ship halfway along a leg is routinely the one she has just passed, so
+    // the line hooked backwards before setting off. Ordering by progress toward
+    // the next call corrected that where the call was near — Liberty, 237 km
+    // from Cadiz — and did nothing where it was far: Oasis, 1679 km from Cape
+    // Liberty, moved 8 km and still set off in the opposite direction to her
+    // course.
+    //
+    // Position ALONG THE POLYLINE is the ordering that actually means "ahead",
+    // and it needs no reference point to measure against. Find the segment she
+    // is nearest to and start at that segment's far end: everything before it
+    // she has sailed, by construction rather than by inference.
+    //
+    // SEARCHED WITHIN THE CEILING, not clamped to it afterwards, and a round
+    // trip is why. Its first segment and its last are the same water — Serenade
+    // of the Seas alongside in Vancouver was 0.2 km from both — so which one
+    // wins comes down to the last bit of a float. It picked segment 90 of 92 by
+    // a margin of 2e-20, the clamp pulled that back to the ceiling, and the
+    // route ahead became a straight line from Vancouver to Sitka with the whole
+    // Inside Passage missing. Bounding the search cannot express that answer.
+    let bestSegment = floor;
+    let bestDistance = Infinity;
+    for (let i = floor; i < Math.min(limit, route.length - 1); i++) {
+        const d = distanceToSegment(position, route[i], route[i + 1]);
+        if (d < bestDistance) {
+            bestDistance = d;
+            bestSegment = i;
+        }
+    }
+
+    let at = Math.min(Math.max(bestSegment + 1, floor), limit);
+
+    // Then discard anything still astern of her.
+    //
+    // Projection alone is not enough, and the reason is these itineraries: most
+    // are round trips, so the polyline passes through the same water twice and
+    // the segment she is nearest to may belong to the leg she is not on. Her own
+    // course settles it — a vertex more than a right angle off the bow is behind
+    // her whatever the index says.
+    //
+    // Only while she is making way, which is the caller's job to decide: a
+    // moored hull's heading is the berth's orientation and says nothing about
+    // where she is going next. Serenade lay at Canada Place pointing east with
+    // her whole voyage leading west, and every vertex of it read as behind her —
+    // so this walked the line up to its ceiling and drew Vancouver to Sitka
+    // direct. A null course means "no opinion", and no opinion is right here.
+    if (course !== null) {
+        while (at < limit && astern(position, route[at], course)) at++;
+    }
+
+    // Begins at the vessel rather than at the vertex: on a 10-point polyline
+    // across an ocean that vertex can be a hundred miles away, and the gap
+    // between the ship and her own route reads as a rendering fault.
+    //
+    // That join is a straight line to a PLANNED route from an ACTUAL position,
+    // so where a ship has left her plan it can cross land. Watched on Oasis of
+    // the Seas working around the Bahamas — weather routing, presumably — where
+    // the line cut through the islands. Left as it is: the alternative is
+    // inventing a path we have no basis for, and the line's job here is to say
+    // which way along the route is ahead, which it now does.
+    return [position, ...route.slice(at)];
 }

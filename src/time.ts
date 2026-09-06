@@ -540,6 +540,19 @@ export function timezoneForCoordinates(lat: number, lon: number): string {
   return findTimezoneFromGeoJSON(lat, lon) ?? nauticalTimezone(lon);
 }
 
+/**
+ * UTC offset in hours of the zone a coordinate stands in, or null.
+ *
+ * Null rather than a fallback, because the two callers both need to know they
+ * did not get an answer: one omits its " port time" qualifier and the other
+ * leans on the ship's own offset instead. Only ever null before the boundary
+ * data has loaded — the lookup itself covers the globe.
+ */
+export function utcOffsetForCoordinates(lat: number, lon: number): number | null {
+  const tz = findTimezoneFromGeoJSON(lat, lon);
+  return tz ? getUtcOffset(tz) : null;
+}
+
 /** Nautical time: 15° bands, POSIX-inverted (Etc/GMT-1 is UTC+1). */
 export function nauticalTimezone(lon: number): string {
   // Clamped rather than wrapped: ±180 is the dateline, and the two ±12 bands

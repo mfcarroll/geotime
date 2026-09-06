@@ -20,7 +20,7 @@
 import { state } from './state';
 import { shipKey, type ShipClock } from './ships';
 import { shipTimeAvailable } from './rccl';
-import { findTimezoneFromGeoJSON, getUtcOffset } from './time';
+import { utcOffsetForCoordinates } from './time';
 import {
   fleetFixes,
   fixForShip,
@@ -28,7 +28,7 @@ import {
   shipTrackAvailable,
   FIX_MAX_AGE_MS,
   FIX_STALE_AGE_MS,
-  routeAhead,
+  makingWay,
   voyageTrack,
   type ShipFix,
   type ShipPort,
@@ -36,7 +36,8 @@ import {
   voyageForShip,
 } from './shiptrack';
 import { distance } from './utils';
-import { wakeGaps, wakeRuns } from './wake';
+import { routeAhead, wakeGaps, wakeRuns, type WakePort } from './wake';
+import { departsAt, voyageYear } from './port-clock';
 
 /**
  * A hull seen from above: pointed bow, flared sides, square stern.
@@ -134,9 +135,33 @@ function portColour(
   port: { lat: number; lon: number }, shipOffset: number | null, shipHue: string,
 ): string {
   if (shipOffset === null) return PORT_PLAIN;
-  const tz = findTimezoneFromGeoJSON(port.lat, port.lon);
-  if (!tz) return PORT_PLAIN;
-  return getUtcOffset(tz) === shipOffset ? shipHue : PORT_PLAIN;
+  return utcOffsetForCoordinates(port.lat, port.lon) === shipOffset ? shipHue : PORT_PLAIN;
+}
+
+/**
+ * Her ports of call with their departures resolved to instants.
+ *
+ * Done once per redraw and handed to both layers, because the wake and the route
+ * ahead are answering the same question — which calls are behind her — and had
+ * better answer it identically.
+ *
+ * The zone is the PORT's, from its own coordinates, and getting that wrong is
+ * not cosmetic: read in the device's zone instead, every Caribbean call sat
+ * three hours in the future for a reader in Vancouver, and the route ahead ran
+ * backwards to the port she had just left. Her own clock stands in where the
+ * boundary data has not loaded — she is alongside the place, so it is the
+ * closest thing to hand — and UTC where even that is unknown.
+ */
+function portCalls(voyage: ShipVoyage, shipOffset: number | null): WakePort[] {
+  const year = voyageYear(voyage.voyage.startDate, voyage.voyage.endDate);
+  return voyage.ports.map((port) => ({
+    lon: port.lon,
+    lat: port.lat,
+    departsAt: departsAt(
+      port.depart,
+      utcOffsetForCoordinates(port.lat, port.lon) ?? shipOffset ?? 0,
+      year),
+  }));
 }
 
 /**
@@ -516,8 +541,13 @@ export async function drawShipChart(key: string, voyage: Promise<ShipVoyage | nu
   // Only the part still to come, starting at the vessel. The wake covers where
   // it has been, so the two meet at the ship and neither repeats the other.
   const fix = fixForShip(key);
+  const now = Date.now() + state.timeOffset;
+  const calls = portCalls(resolved, shipOffset);
+  // Her course only counts as a course while she is moving — see routeAhead.
   const ahead = routeAhead(
-    resolved, fix ? [fix.lon, fix.lat] : null, fix ? markerBearing(fix) : null);
+    resolved.route, calls, resolved.voyage.endDate,
+    fix ? [fix.lon, fix.lat] : null,
+    fix && makingWay(fix) ? markerBearing(fix) : null, now);
   if (ahead.length >= 2) {
     polyline(map, ahead.map(toLatLng), {
       // strokeOpacity 0 with a repeating icon is how the Maps API draws a dashed
@@ -569,7 +599,7 @@ export async function drawShipChart(key: string, voyage: Promise<ShipVoyage | nu
   // account for. The alternative to the dotted stretch is not "nothing missing"
   // — it is a wake that stops in open water with no explanation, which reads as
   // a rendering fault rather than as an absence of data.
-  const gaps = wakeGaps(wake, resolved.ports, Date.now());
+  const gaps = wakeGaps(wake, calls, now);
   const runs = wakeRuns(wake, gaps);
   for (const run of runs) {
     if (run.length < 2) continue;
