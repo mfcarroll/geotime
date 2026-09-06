@@ -56,6 +56,7 @@ export interface AppState {
     zoneLabels: Record<string, string>;
     /** Zones added as a ship's port of call, which the row marks with an anchor. */
     zoneKinds: Record<string, 'port'>;
+    /** Handle for the self-rescheduling clock tick; see scheduleNextTick. */
     clocksInterval: number | null;
     locationMap: google.maps.Map | null;
     timezoneMap: google.maps.Map | null;

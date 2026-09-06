@@ -2,6 +2,7 @@
 
 import * as dom from './dom';
 import { aboardShip, state } from './state';
+import { msUntilNextSecond, serverClockOffset, type ServerTimeReading } from './clock-offset';
 import { getDisplayTimezoneName, isValidTimezone } from './utils';
 import { clockKey, fixedOffsetWeekday, formatFixedOffsetDate, formatFixedOffsetTime, isUnresolved, visibleClocks } from './clocks';
 import { fitSecondLines, type SecondLineRow } from './second-line';
@@ -86,11 +87,30 @@ export function findTimezoneFromGeoJSON(lat: number, lon: number): string | null
     return null;
 }
 
-export function getFormattedTime(tz: string, options: Intl.DateTimeFormatOptions = {}): string {
-  const correctedTime = new Date(new Date().getTime() + state.timeOffset);
+/**
+ * Now, as this app believes it — the device clock plus whatever correction the
+ * last trusted server reading bought.
+ *
+ * Every rendered clock resolves through here, and every caller inside one paint
+ * should call it ONCE and pass the result down. Reading it per clock is what put
+ * the cards a second apart: `updateAllClocks` used to take six independent
+ * readings, and any two of them landing either side of a second boundary showed
+ * up as two clocks disagreeing — a second on the cards, which show seconds, and
+ * a whole minute on the rows, which show h:mm and so disagree at the minute
+ * boundary instead.
+ */
+export function correctedNow(): Date {
+  return new Date(Date.now() + state.timeOffset);
+}
+
+export function getFormattedTime(
+  tz: string,
+  options: Intl.DateTimeFormatOptions = {},
+  at: Date = correctedNow()
+): string {
   try {
     // undefined locale: follow the device's locale and 12/24h preference
-    return correctedTime.toLocaleTimeString(undefined, { timeZone: tz, ...options });
+    return at.toLocaleTimeString(undefined, { timeZone: tz, ...options });
   } catch (e) {
     return "Invalid";
   }
@@ -112,10 +132,42 @@ export function getFormattedTime(tz: string, options: Intl.DateTimeFormatOptions
  * The 500 ms deadband is kept from the original: below that the difference is
  * indistinguishable from round-trip latency, which on a satellite link is the
  * dominant error in either source.
+ *
+ * Latency and timestamp granularity are undone in clock-offset.ts, which is
+ * where the arithmetic and its reasoning live.
  */
-export function noteServerTime(serverUtcMs: number): void {
-  const offset = serverUtcMs - Date.now();
-  state.timeOffset = Math.abs(offset) < 500 ? 0 : offset;
+export function noteServerTime(serverUtcMs: number, reading: ServerTimeReading = {}): void {
+  state.timeOffset = serverClockOffset(serverUtcMs, reading);
+}
+
+/**
+ * When the clock was last agreed with a server, so a resume does not re-ask on
+ * every tab switch. Epoch ms on the DEVICE clock, which is fine for measuring an
+ * interval — the correction cancels out of a subtraction.
+ */
+let lastSyncAt = 0;
+
+/**
+ * Not less often than this, and not more.
+ *
+ * The clock used to be set once at launch and then trusted forever: a session
+ * left open for a day rode entirely on the device's own crystal, and a phone
+ * whose clock drifts is the failure this app exists to catch. Resume is the
+ * right trigger for the same reason it is for ship time — it is the moment
+ * something could newly have changed, and the moment the user is about to look.
+ *
+ * Fifteen minutes is a floor, not a schedule: still no timer, so a session left
+ * in the foreground makes no requests at all. The Worker is a few hundred bytes
+ * and no-store, so the cost of asking is a round trip and nothing else.
+ */
+const RESYNC_AFTER_MS = 15 * 60 * 1000;
+
+export function startClockWatch(): void {
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible') return;
+    if (Date.now() - lastSyncAt < RESYNC_AFTER_MS) return;
+    void syncClock();
+  });
 }
 
 export async function syncClock() {
@@ -136,12 +188,17 @@ export async function syncClock() {
     let noted = false;
     for (const url of SOURCES) {
       try {
+        const sentAt = Date.now();
         const response = await fetch(url);
         if (!response.ok) continue;
         const data = await response.json();
+        // Stamped after decoding rather than on first byte, which overstates the
+        // trip slightly and so errs towards trusting the device — the safer
+        // direction, since the correction is the thing being justified.
+        const receivedAt = Date.now();
         const serverMs = new Date(data.dateTime).getTime();
         if (!Number.isFinite(serverMs)) continue;
-        noteServerTime(serverMs);
+        noteServerTime(serverMs, { sentAt, receivedAt });
         noted = true;
         break;
       } catch {
@@ -149,9 +206,16 @@ export async function syncClock() {
       }
     }
     if (!noted) throw new Error('No UTC source answered.');
+    lastSyncAt = Date.now();
   } catch (error) {
     console.error('Could not synchronize clock:', error);
-    state.timeOffset = 0;
+    // Left alone rather than zeroed. A failed re-sync is not evidence the
+    // previous correction was wrong, and throwing it away would silently hand a
+    // known-bad device clock back to a user who is mid-voyage — which is the one
+    // situation where reaching a server is least likely and being right matters
+    // most. `lastSyncAt` is deliberately not advanced, so the next resume
+    // retries immediately.
+    if (lastSyncAt === 0) state.timeOffset = 0;
   }
 }
 
@@ -183,7 +247,13 @@ function showDateWhenItDiffers(el: HTMLElement, date: string, groundDate: string
 }
 
 export function updateAllClocks() {
-  const correctedTime = new Date(new Date().getTime() + state.timeOffset);
+  // ONE reading, for everything this paint draws. Both stamps come off the same
+  // millisecond, so the Local and Device cards can now differ only by the
+  // correction itself — never by a second that was really two clock readings
+  // landing either side of a boundary.
+  const tickMs = Date.now();
+  const correctedTime = new Date(tickMs + state.timeOffset);
+  const deviceNow = new Date(tickMs);
   const localTimezone = state.localTimezone || Intl.DateTimeFormat().resolvedOptions().timeZone;
   
   try {
@@ -232,12 +302,12 @@ export function updateAllClocks() {
 
     if (entry.kind === 'ship') {
       const offset = entry.ship.offsetHours as number;
-      timeString = formatFixedOffsetTime(offset, { hour: 'numeric', minute: '2-digit' });
-      dayShort = fixedOffsetWeekday(offset);
-      dayFull = fixedOffsetWeekday(offset, 'long');
+      timeString = formatFixedOffsetTime(offset, { hour: 'numeric', minute: '2-digit' }, correctedTime);
+      dayShort = fixedOffsetWeekday(offset, 'short', correctedTime);
+      dayFull = fixedOffsetWeekday(offset, 'long', correctedTime);
       timeDiff = relativeTextForShip(entry.ship as { brand: string; code: string; offsetHours: number });
     } else {
-      timeString = getFormattedTime(entry.tzid, { hour: 'numeric', minute: '2-digit' });
+      timeString = getFormattedTime(entry.tzid, { hour: 'numeric', minute: '2-digit' }, correctedTime);
       dayShort = correctedTime.toLocaleDateString('en-US', { timeZone: entry.tzid, weekday: 'short' });
       dayFull = correctedTime.toLocaleDateString('en-US', { timeZone: entry.tzid, weekday: 'long' });
       timeDiff = relativeTextForZone(entry.tzid);
@@ -251,9 +321,8 @@ export function updateAllClocks() {
 
   fitSecondLines(secondLines);
   
-  renderShipTime();
+  renderShipTime(correctedTime);
 
-  const deviceNow = new Date();
   // Prefer the native-reported OS timezone; the WebView's own Intl can be stale
   // after an OS timezone change until the process restarts.
   const deviceTz = state.deviceTimezone || Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -319,7 +388,7 @@ export function formatOffsetDiff(diffHours: number): string {
  * gateway marker: no signal means unknown, so the section survives wi-fi being
  * off aboard, and disappears when a `shore` marker actually arrives.
  */
-function renderShipTime(): void {
+function renderShipTime(at: Date): void {
   const ship = aboardShip();
 
   if (!ship) {
@@ -343,10 +412,10 @@ function renderShipTime(): void {
     hour: 'numeric',
     minute: '2-digit',
     second: '2-digit',
-  });
+  }, at);
   // Aboard, a ship an hour or two off the ground is routine and a ship on
   // tomorrow's date is the reason anybody misses a gangway.
-  showDateWhenItDiffers(dom.shipDateEl, formatFixedOffsetDate(ship.offsetHours),
+  showDateWhenItDiffers(dom.shipDateEl, formatFixedOffsetDate(ship.offsetHours, at),
                         dom.localDateEl.textContent ?? '');
 }
 
@@ -400,9 +469,40 @@ export function getTimezoneOffset(tz1: string, tz2: string | null): string {
 }
 
 export function startClocks() {
-  if (state.clocksInterval) window.clearInterval(state.clocksInterval);
+  if (state.clocksInterval) window.clearTimeout(state.clocksInterval);
   updateAllClocks();
-  state.clocksInterval = window.setInterval(updateAllClocks, 1000);
+  scheduleNextTick();
+}
+
+/**
+ * Repaints just after each second boundary, rather than every 1000 ms from
+ * whenever the app happened to start.
+ *
+ * A free-running interval keeps whatever phase it was created with. Start at
+ * .384 of a second and every repaint lands at .384 forever: the digits are
+ * correct when they are written, but they are written up to a second after the
+ * moment they became true, so the app sits visibly behind a clock that ticks on
+ * the boundary — the OS menu bar, or any other clock on the desk. Reported as
+ * "about a second off" with all three cards agreeing with each other, which is
+ * exactly the signature: one shared phase error, not three disagreeing clocks.
+ *
+ * Recomputed from the clock each time rather than chained at a fixed 1000 ms, so
+ * it cannot accumulate the drift setInterval is prone to, and so a tab that was
+ * throttled in the background re-aligns on its first tick back.
+ *
+ * Measured against the CORRECTED clock, since that is what the app draws: if
+ * the device is a quarter-second fast and we know it, the digits should still
+ * turn over when the true second does.
+ *
+ * The few ms past the boundary are deliberate. Timers fire no earlier than
+ * asked but routinely a shade late, and landing a hair early would render the
+ * second that is about to end — the one failure this is meant to remove.
+ */
+function scheduleNextTick(): void {
+  state.clocksInterval = window.setTimeout(() => {
+    updateAllClocks();
+    scheduleNextTick();
+  }, msUntilNextSecond(Date.now() + state.timeOffset));
 }
 
 /**

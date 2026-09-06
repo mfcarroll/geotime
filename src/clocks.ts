@@ -16,7 +16,7 @@
 // initialisation, so both are fully evaluated before either is called — but keep
 // it that way: a top-level call across this boundary would break at load.
 import { state } from './state';
-import { getUtcOffset, getZoneLabel } from './time';
+import { correctedNow, getUtcOffset, getZoneLabel } from './time';
 import { getDisplayTimezoneName, fold } from './utils';
 import { shipKey, type ShipClock } from './ships';
 import { shipTimeAvailable } from './rccl';
@@ -105,22 +105,35 @@ export function isUnresolved(entry: ClockEntry): boolean {
  */
 export function formatFixedOffsetTime(
   offsetHours: number,
-  options: Intl.DateTimeFormatOptions = {}
+  options: Intl.DateTimeFormatOptions = {},
+  at: Date = correctedNow()
 ): string {
-  const shifted = new Date(Date.now() + state.timeOffset + offsetHours * 3600_000);
-  return shifted.toLocaleTimeString(undefined, { timeZone: 'UTC', ...options });
+  return shiftTo(offsetHours, at).toLocaleTimeString(undefined, { timeZone: 'UTC', ...options });
+}
+
+/**
+ * The instant re-expressed on a fixed offset, ready to be formatted in UTC.
+ *
+ * `at` is the whole point of the parameter: a caller rendering a list passes the
+ * same instant to every row, so no two rows can be a second apart. Defaulting it
+ * keeps the one-off callers honest without making them care.
+ */
+function shiftTo(offsetHours: number, at: Date): Date {
+  return new Date(at.getTime() + offsetHours * 3600_000);
 }
 
 /** The weekday on a fixed UTC offset, for the "different day over there" line. */
-export function fixedOffsetWeekday(offsetHours: number, format: 'short' | 'long' = 'short'): string {
-  const shifted = new Date(Date.now() + state.timeOffset + offsetHours * 3600_000);
-  return shifted.toLocaleDateString('en-US', { timeZone: 'UTC', weekday: format });
+export function fixedOffsetWeekday(
+  offsetHours: number,
+  format: 'short' | 'long' = 'short',
+  at: Date = correctedNow()
+): string {
+  return shiftTo(offsetHours, at).toLocaleDateString('en-US', { timeZone: 'UTC', weekday: format });
 }
 
 /** The written-out date on a fixed UTC offset, for the Ship Time card. */
-export function formatFixedOffsetDate(offsetHours: number): string {
-  const shifted = new Date(Date.now() + state.timeOffset + offsetHours * 3600_000);
-  return shifted.toLocaleDateString('en-US', {
+export function formatFixedOffsetDate(offsetHours: number, at: Date = correctedNow()): string {
+  return shiftTo(offsetHours, at).toLocaleDateString('en-US', {
     timeZone: 'UTC', weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
   });
 }

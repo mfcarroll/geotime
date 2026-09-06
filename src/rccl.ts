@@ -180,6 +180,9 @@ async function request(path: string, requiresKey = false): Promise<RcclResponse 
   const url = `${apiBase()}${path}`;
   try {
     let response: RcclResponse;
+    // Set immediately before whichever transport is used, so the round trip is
+    // measured around the request rather than around this whole function.
+    let sentAt = Date.now();
 
     if (Capacitor.isNativePlatform()) {
       const key = await loadAppKey();
@@ -191,6 +194,7 @@ async function request(path: string, requiresKey = false): Promise<RcclResponse 
       // rotated or blocked, ship *search*, the roster refresh and onboard
       // *detection* all keep working, and only the offset goes dark.
       if (requiresKey && !key) return null;
+      sentAt = Date.now();
       const native = await CapacitorHttp.get({
         url,
         headers: {
@@ -208,6 +212,7 @@ async function request(path: string, requiresKey = false): Promise<RcclResponse 
         headers: lowerCaseKeys(native.headers as Record<string, string>),
       };
     } else {
+      sentAt = Date.now();
       const fetched = await fetch(url, { headers: { accept: 'application/json' } });
       const headers: Headers = {};
       fetched.headers.forEach((value, key) => { headers[key.toLowerCase()] = value; });
@@ -221,10 +226,17 @@ async function request(path: string, requiresKey = false): Promise<RcclResponse 
     // Every response carries a server `date`. At sea that is a better UTC
     // reference than a round trip to Cloud Run, and it costs nothing because
     // the request was already being made.
+    //
+    // Handed over with both stamps and its own granularity: an HTTP date is
+    // whole seconds by spec, so it needs centring as well as the round-trip
+    // correction, and this is the path where both matter most — a shipboard link
+    // is exactly where the latency is large enough to move the answer.
     const serverDate = response.headers['date'];
     if (serverDate) {
       const parsed = Date.parse(serverDate);
-      if (Number.isFinite(parsed)) noteServerTime(parsed);
+      if (Number.isFinite(parsed)) {
+        noteServerTime(parsed, { sentAt, receivedAt: Date.now(), resolutionMs: 1000 });
+      }
     }
 
     return response;

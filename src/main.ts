@@ -6,7 +6,7 @@ import { Loader } from '@googlemaps/js-api-loader';
 import * as dom from './dom';
 import { state, persistTimezones, migrateStoredTimezones, setZoneLabel, setZoneKind, syncWidget, addShipClock } from './state';
 import { refreshAnchorChip, refreshMapStyles, initMaps, onLocationError, onLocationSuccess, selectTimezone, selectShip, setHoveredShip, renderWorldClocks, addUniqueTimezoneToList, updateUserTimezoneDetails, showLocationUnavailable, loadTimezoneGeoJson } from './map';
-import { updateAllClocks, syncClock, getDisplayTimezoneName, startClocks, findTimezoneFromGeoJSON } from './time';
+import { updateAllClocks, syncClock, startClockWatch, getDisplayTimezoneName, startClocks, findTimezoneFromGeoJSON } from './time';
 import { Capacitor } from '@capacitor/core';
 import { getDeviceTimezone, onDeviceTimezoneChanged } from './widget';
 import { Geolocation, PositionOptions } from '@capacitor/geolocation';
@@ -81,6 +81,7 @@ async function startApp() {
 
   startClocks();
   syncClock();
+  startClockWatch();
 
   // Heal the native home-screen widget on every launch, in case a previous
   // write was missed (app killed mid-write, data predating the widget, etc).
