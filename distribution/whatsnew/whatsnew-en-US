@@ -1,5 +1,1 @@
-The widget now shows more of your clocks before it hides any: it drops to compact rows first, and only then sets aside a zone whose time is already on screen. When anything is hidden it says so.
-
-When two places keep the same time, the one you named — Mississauga rather than a bare zone — is the one that stays. Renaming a place that shares a zone with one you already saved now sticks.
-
-A port of call carries its anchor on the widget too, when the row has room.
+Various fixes and improved user interface. Better time sync between the app and your device. Homepage widgets now show more of your clocks before hiding any and improve how the displayed timezones are selected when space is tight. A port of call shows the anchor logo on the widget. Ship Time and Device Time show the date when it differs from yours. Improved ship route plotting.
