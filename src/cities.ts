@@ -384,6 +384,9 @@ export function searchPlaces(
   // of them 120,000 people — and the ship icon is what resolves it, not the
   // ordering. Nothing is ever silently picked.
   const candidates: PlaceResult[] = [];
+  // Materialised in full before anything is ordered: whether a zone row is
+  // expected to survive depends on cities in tiers this loop has not reached.
+  const materialised: { ranked: PlaceResult[]; shipsHere: PlaceResult[]; portsHere: PlaceResult[] }[] = [];
   for (let tier = 0; tier < 3; tier++) {
     // Only the leading slice is materialised — a broad query like "san" matches
     // thousands, and building a result object for each would be wasted work.
@@ -403,9 +406,49 @@ export function searchPlaces(
     // they are sailing to on Thursday. Cozumel is both a town and a call on
     // this itinerary; the anchor and the ship name are what tell them apart.
     const portsHere = portTiers[tier].map(portResult);
+    materialised.push({ ranked, shipsHere, portsHere });
+  }
+
+  /**
+   * Zones that some matched city will answer for, whichever tier it is in.
+   *
+   * Ordering only — the authoritative drop still happens on admission below, so
+   * that a zone row is never retired in favour of a city that the row limit then
+   * cuts. This is the cheaper question of whether a zone row is EXPECTED to
+   * survive, and being wrong about it costs a place in the order and nothing
+   * else.
+   */
+  const answeredFor = new Set<string>();
+  for (const row of speaksForZone) if (row.kind !== 'ship') answeredFor.add(row.tzid);
+
+  for (let tier = 0; tier < 3; tier++) {
+    const { ranked, shipsHere, portsHere } = materialised[tier];
+    /**
+     * A city that shares a zone with a surviving zone row, and is neither that
+     * zone's namesake nor its largest city, does not outrank the row.
+     *
+     * Without this, one more keystroke reorders the list: at "Cayma" both rows
+     * are prefix matches and cities lead their tier, so the settlement of Cayman
+     * Palms is top; at "Cayman" the zone becomes an exact match, jumps a tier,
+     * and overtakes it. The promotion is right — an exact match should win — so
+     * it is the earlier order that was wrong, and this fixes that end.
+     *
+     * Narrow on purpose. It cannot demote a city over any zone it does not
+     * belong to, and `answeredFor` keeps it away from the ordinary case: Newark
+     * shares America/New_York with a zone row, but New York City answers for
+     * that zone, so the row will not survive and Newark keeps its rank.
+     */
+    const yieldsToZone = (row: PlaceResult) =>
+      row.kind === 'city'
+      && !speaksForZone.has(row)
+      && !answeredFor.has(row.tzid)
+      && zoneTiers[tier].some((z) => z.tzid === row.tzid);
+
+    const leading = ranked.filter((r) => !yieldsToZone(r));
+    const trailing = ranked.filter(yieldsToZone);
     candidates.push(...(tier === 0
-      ? [...portsHere, ...shipsHere, ...ranked, ...zoneTiers[tier]]
-      : [...portsHere, ...ranked, ...shipsHere, ...zoneTiers[tier]]));
+      ? [...portsHere, ...shipsHere, ...leading, ...zoneTiers[tier], ...trailing]
+      : [...portsHere, ...leading, ...shipsHere, ...zoneTiers[tier], ...trailing]));
   }
 
   // Walked as one list rather than a loop per tier, so that a zone row dropped

@@ -57,24 +57,35 @@ export function clockLabel(entry: ClockEntry): string {
 /**
  * The smaller line underneath, or '' when it would only repeat the name.
  *
- * For a zone this names the zone the place keeps time by, bracketed so that
- * "Los Angeles" under "San Francisco" doesn't read as a second place. For a ship
- * there is no zone to name, so it says whose ship it is — which is also what
- * distinguishes the row from the town of the same name, since "Independence" is
- * both a vessel and six real places.
+ * For a zone this names the zone the place keeps time by; for a ship, whose
+ * ship it is — which is also what distinguishes the row from the town of the
+ * same name, since "Independence" is both a vessel and six real places.
+ *
+ *     Seattle                      Symphony of the Seas
+ *     Timezone: Los Angeles        Royal Caribbean
+ *
+ * The brackets are gone from both. They were doing the work of a label without
+ * being one: "(Los Angeles)" under "Seattle" reads as an aside about the name
+ * above it — the same thing "(Royal Caribbean)" means — when what it actually
+ * says is which clock the row keeps. Naming the relationship says that outright,
+ * and costs a character less than bracketing the alternative wording did.
+ *
+ * Only the zone line is labelled. "Timezone:" answers a question a reader might
+ * have about a place name; nobody wonders what "Royal Caribbean" is doing under
+ * a ship.
  */
 export function clockSubLabel(entry: ClockEntry): string {
   if (entry.kind === 'ship') {
     const line = entry.ship.brand === 'C' ? 'Celebrity' : 'Royal Caribbean';
     // Suppressed when the name already says it: every Celebrity vessel is
-    // "Celebrity <something>", so "(Celebrity)" underneath would just repeat the
+    // "Celebrity <something>", so the line underneath would just repeat the
     // first word. Same principle as the zone case below.
-    return fold(entry.ship.name).startsWith(fold(line)) ? '' : `(${line})`;
+    return fold(entry.ship.name).startsWith(fold(line)) ? '' : line;
   }
   const zoneName = getDisplayTimezoneName(entry.tzid);
   // Accents aside, "Reykjavík" and the zone "Reykjavik" are the same place —
   // naming it twice would just look like a mistake.
-  return fold(zoneName) === fold(getZoneLabel(entry.tzid)) ? '' : `(${zoneName})`;
+  return fold(zoneName) === fold(getZoneLabel(entry.tzid)) ? '' : `Timezone: ${zoneName}`;
 }
 
 /** True when this row is a ship whose offset we have never resolved. */
