@@ -182,15 +182,14 @@
            old grid gave the city a fixed 2 of 5 columns and left a whole third
            column empty on wide screens, so long names truncated beside blank
            space. min-w-0 is what lets the name actually shrink and ellipsize. -->
-      <div class="clock-row relative flex items-center gap-3 bg-gray-700/50 p-3 pr-10 rounded-lg border-2 border-transparent">
+      <div class="clock-row relative flex items-start gap-3 bg-gray-700/50 p-3 pr-10 rounded-lg border-2 border-transparent">
         <div class="min-w-0 flex-1">
-          <div class="flex items-baseline gap-3">
           <!-- Wraps rather than truncates. A ship name is long enough that
                clipping it produces "Independence of the S…", which is worse
                than a second line; and wrapping means the full name always
                shows, so nothing has to measure or abbreviate here. The widget
                still does, because a widget cannot grow. -->
-          <p class="text-lg font-medium text-white min-w-0 flex-1">
+          <p class="text-lg font-medium text-white">
             <!-- Ships carry a mark, because a ship name is often also a real
                  town: "Independence" is a vessel and six places, one of them
                  120,000 people. The icon is what disambiguates a row; ordering
@@ -211,21 +210,27 @@
                  work but would stop the name wrapping at all, which is worse. -->
             <span class="city"></span><span class="city-tail"><span class="city-last"></span><i class="ship-icon fas fa-ship fa-fw ml-1 text-sm text-gray-300 hidden"></i><i class="port-icon fas fa-anchor fa-fw ml-1 text-sm text-gray-300 hidden"></i></span>
           </p>
-            <p class="time text-xl font-semibold text-white font-mono whitespace-nowrap flex-none">--:--</p>
-          </div>
-          <!-- Line 2 is its own flex row, not the lower half of two stacked
-               columns, and that is the whole point of the split.
-               Stacked columns give the second line the FIRST line's width: the
-               right column is sized by the time, which is text-xl mono and far
-               wider than "Sun, +0 hrs" beneath it, so the zone line was
-               ellipsised against a column edge with 40-odd points of empty
-               space to the right of the offset. Measuring each line separately
-               is what the widget already does; this brings the app into line
-               with it. -->
-          <div class="flex items-baseline gap-3">
-            <p class="region text-sm text-gray-400 truncate min-w-0 flex-1"></p>
-            <p class="date-diff text-sm text-gray-400 whitespace-nowrap flex-none">--, +/- hrs</p>
-          </div>
+          <!-- The zone line's WIDTH is set in JavaScript, by second-line.ts, and
+               it is the one thing here that CSS cannot express.
+               Two columns is the right shape: the time and the offset stack on
+               the right and flow past a name that wraps, so a two-line vessel
+               puts its offset beside the second line rather than stranding it
+               below the zone. What two columns get wrong is this line's width —
+               the right column is sized by the CLOCK, which is text-xl mono and
+               far wider than "Sun, +0 hrs" underneath it, so the zone name was
+               ellipsised with forty-odd points of empty space to the right of
+               the offset.
+               Splitting the row into two independently measured lines fixed the
+               width and broke the wrap. So the columns stay, and the zone line
+               is measured against whatever is actually beside it: the offset
+               when the name is one line, nothing at all when the name wrapped
+               past it. Which of those it is, is asked of the geometry rather
+               than assumed from line heights. -->
+          <p class="region text-sm text-gray-400 truncate"></p>
+        </div>
+        <div class="flex-none text-right">
+          <p class="time text-xl font-semibold text-white font-mono whitespace-nowrap">--:--</p>
+          <p class="date-diff text-sm text-gray-400 whitespace-nowrap">--, +/- hrs</p>
         </div>
         <div class="absolute top-1/2 -translate-y-1/2 right-2 flex space-x-1">
           <button class="remove-btn text-gray-500 hover:text-red-400 transition-colors">

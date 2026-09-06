@@ -3,10 +3,15 @@
 // What the second line of a World Clock row says, once it is known how much
 // room that line actually has.
 //
-// The row is two independently measured lines rather than two stacked columns,
-// so this line's width is its own: the zone name competes with "Sun, +0 hrs"
-// beside it, not with the much wider clock above it. See the note on the
-// template in index.html for why that changed.
+// The row is two columns — name over zone on the left, clock over offset on the
+// right — and this line's width is the one thing that shape gets wrong. The left
+// column is sized against the CLOCK, which is text-xl mono and far wider than
+// "Sun, +0 hrs" underneath it, so the zone name was ellipsised with forty-odd
+// points of empty space to the right of the offset.
+//
+// It is set here instead, from what is actually beside the line: the offset when
+// the name is one line, and nothing at all once a wrapped name has carried the
+// offset up past it. See the note on the template in index.html.
 //
 // Two things are decided here, and both are decided for the WHOLE list rather
 // than per row. A column where one row says "Timezone" and the next says "Zone"
@@ -53,11 +58,11 @@ function fontOf(el: Element | null): string {
  * widget settles every one of these with: content first, garnish second.
  *
  *   1. The LABEL yields first, because it is the only part of the line that is
- *      not information — "Timezone: Los Angeles" and "Zone: Los Angeles" name
- *      the same fact, and one of them fits where the other does not. Asked of
- *      the zone rows only: a ship's line carries no label, so a ship that
- *      cannot fit "Royal Caribbean" must not be the reason every zone row loses
- *      four characters it had room for.
+ *      not information — "Timezone: Los Angeles", "Zone: …" and "TZ: …" name the
+ *      same fact, and one of them fits where another does not. Asked of the zone
+ *      rows only: a ship's line carries no label, so a ship that cannot fit
+ *      "Royal Caribbean" must not be the reason every zone row loses a word it
+ *      had room for.
  *
  *   2. The FULL DAY is then granted only into whatever slack is left. It is
  *      the nicer form and it is worth nothing next to a truncated place name,
@@ -74,29 +79,65 @@ export function fitSecondLines(rows: SecondLineRow[]): void {
     const regionFont = fontOf(firstRegion);
     const dateFont = fontOf(firstDate);
 
-    // `gap-3` on the line's flex container. Read rather than hard-coded, so
-    // changing the class does not silently change the arithmetic.
-    const line = firstRegion?.parentElement;
-    const gap = line ? parseFloat(getComputedStyle(line).columnGap || '12') || 12 : 12;
+    // `gap-3` between the row's two columns — read off the ROW, which is the flex
+    // container that carries it, rather than hard-coded. The left column is not
+    // a flex container and has no gap of its own to read.
+    const gap = parseFloat(getComputedStyle(rows[0].el).columnGap || '') || 12;
 
     interface Measured {
         row: SecondLineRow;
-        available: number;
+        region: HTMLElement | null;
+        /**
+         * Full width of the row's content box — what this line gets when the
+         * name wrapped past the offset and nothing is beside it.
+         */
+        rowWidth: number;
+        /** True when the offset still sits on this line and must be paid for. */
+        crowded: boolean;
         labelled: boolean;                     // a zone row, so it carries the label
-        region: Record<ZoneLabelWord, number>;
+        text: Record<ZoneLabelWord, string>;
+        region_: Record<ZoneLabelWord, number>;
         date: { short: number; full: number };
     }
 
     const measured: Measured[] = rows.map((row) => {
-        const regionEl = row.el.querySelector('.region');
-        const available = (regionEl?.parentElement?.clientWidth ?? 0) - gap;
-        const long = clockSubLabel(row.entry, 'Timezone');
-        const short = clockSubLabel(row.entry, 'Zone');
+        const regionEl = row.el.querySelector<HTMLElement>('.region');
+        const dateEl = row.el.querySelector<HTMLElement>('.date-diff');
+        const column = regionEl?.parentElement;
+
+        // Does the offset still sit beside this line, or has the name wrapped
+        // past it? Asked of the geometry rather than inferred from line heights,
+        // which would go quietly wrong the first time a font size changed.
+        // Compared in the row's own coordinates, since the two live in different
+        // columns.
+        const rowTop = row.el.getBoundingClientRect().top;
+        const regionTop = regionEl ? regionEl.getBoundingClientRect().top - rowTop : 0;
+        const dateBottom = dateEl ? dateEl.getBoundingClientRect().bottom - rowTop : 0;
+        const crowded = regionTop < dateBottom - 0.5;
+
+        // The content box the whole row has: the left column plus the right one
+        // plus the gap between them. Padding is already excluded by clientWidth,
+        // so the space reserved for the remove button is too.
+        const rightWidth = (column?.nextElementSibling as HTMLElement | null)?.offsetWidth ?? 0;
+        const rowWidth = (column?.clientWidth ?? 0) + (rightWidth ? rightWidth + gap : 0);
+
+        const text = {
+            Timezone: clockSubLabel(row.entry, 'Timezone'),
+            Zone: clockSubLabel(row.entry, 'Zone'),
+            TZ: clockSubLabel(row.entry, 'TZ'),
+        };
         return {
             row,
-            available,
-            labelled: long !== short,
-            region: { Timezone: widthOf(long, regionFont), Zone: widthOf(short, regionFont) },
+            region: regionEl,
+            rowWidth,
+            crowded,
+            labelled: text.Timezone !== text.Zone,
+            text,
+            region_: {
+                Timezone: widthOf(text.Timezone, regionFont),
+                Zone: widthOf(text.Zone, regionFont),
+                TZ: widthOf(text.TZ, regionFont),
+            },
             date: {
                 short: widthOf(`${row.dayShort}, ${row.timeDiff}`, dateFont),
                 full: widthOf(`${row.dayFull}, ${row.timeDiff}`, dateFont),
@@ -104,20 +145,32 @@ export function fitSecondLines(rows: SecondLineRow[]): void {
         };
     });
 
+    /** What this line has to itself, once the offset beside it is paid for. */
+    const room = (m: Measured, fullDay: boolean) =>
+        m.crowded ? m.rowWidth - gap - (fullDay ? m.date.full : m.date.short) : m.rowWidth;
+
     // A hair of slack: measureText and the layout engine round differently, and
     // being a third of a pixel over should not cost a word.
     const fits = (m: Measured, word: ZoneLabelWord, fullDay: boolean) =>
-        m.available <= 0                       // not laid out yet; decide nothing on it
-        || m.region[word] + (fullDay ? m.date.full : m.date.short) <= m.available + 0.5;
+        m.rowWidth <= 0                        // not laid out yet; decide nothing on it
+        || m.region_[word] <= room(m, fullDay) + 0.5;
 
-    const word: ZoneLabelWord =
-        measured.every((m) => !m.labelled || fits(m, 'Timezone', false)) ? 'Timezone' : 'Zone';
+    // Timezone, then Zone, then TZ. Each rung is the same fact in less room, and
+    // the last is an abbreviation rather than a word — which is why it is last
+    // and why the list only reaches it when a name really has nowhere to go.
+    const order: ZoneLabelWord[] = ['Timezone', 'Zone', 'TZ'];
+    const word = order.find((w) =>
+        measured.every((m) => !m.labelled || fits(m, w, false))) ?? 'TZ';
     const fullDay = measured.every((m) => fits(m, word, true));
 
     for (const m of measured) {
-        const region = m.row.el.querySelector('.region');
         const date = m.row.el.querySelector('.date-diff');
-        if (region) region.textContent = clockSubLabel(m.row.entry, word);
         if (date) date.textContent = `${fullDay ? m.row.dayFull : m.row.dayShort}, ${m.row.timeDiff}`;
+        if (!m.region) continue;
+        m.region.textContent = m.text[word];
+        // The width CSS could not work out: the left column is sized against the
+        // clock, and this line is only ever bounded by the offset — or by
+        // nothing, once the name has wrapped past it.
+        m.region.style.width = m.rowWidth > 0 ? `${Math.floor(room(m, fullDay))}px` : '';
     }
 }

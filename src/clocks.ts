@@ -74,7 +74,7 @@ export function clockLabel(entry: ClockEntry): string {
  * have about a place name; nobody wonders what "Royal Caribbean" is doing under
  * a ship.
  */
-export type ZoneLabelWord = 'Timezone' | 'Zone';
+export type ZoneLabelWord = 'Timezone' | 'Zone' | 'TZ';
 
 export function clockSubLabel(entry: ClockEntry, word: ZoneLabelWord = 'Timezone'): string {
   if (entry.kind === 'ship') {
