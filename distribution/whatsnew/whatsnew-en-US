@@ -1,5 +1,5 @@
-The widget now shows more of your clocks before it starts hiding any: it drops to compact rows first, and only then sets aside a zone whose time is already on screen. Whenever something is hidden it says so, so you can tell you are looking at part of the list.
+The widget now shows more of your clocks before it hides any: it drops to compact rows first, and only then sets aside a zone whose time is already on screen. When anything is hidden it says so.
 
-When two of your places keep the same time, the one you named — Mississauga rather than a bare zone — is the one that stays.
+When two places keep the same time, the one you named — Mississauga rather than a bare zone — is the one that stays. Renaming a place that shares a zone with one you already saved now sticks.
 
-Renaming a place that shares a zone with one you already saved now sticks.
+A port of call carries its anchor on the widget too, when the row has room.
