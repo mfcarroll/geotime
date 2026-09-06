@@ -36,6 +36,7 @@ import {
   voyageForShip,
 } from './shiptrack';
 import { distance } from './utils';
+import { wakeRuns } from './wake';
 
 /**
  * A hull seen from above: pointed bow, flared sides, square stern.
@@ -100,38 +101,7 @@ function nearOrigin(crumb: [number, number], origin: [number, number]): boolean 
       && Math.abs(crumb[1] - origin[1]) < NEAR_DEGREES;
 }
 
-/**
- * Whether the ship is close enough to the wake's last crumb to be joined to it.
- *
- * The same idea as nearOrigin at the other end, and it was missing. The join
- * exists to close a SAMPLING gap: the crumbs stop at the last fix the track feed
- * holds, which can be an hour behind the hull.
- *
- * It is not a sampling gap when the track is stale. Surveyed across the fleet,
- * the two populations do not overlap:
- *
- *   under way, 28 vessels    0-20 km from the last crumb
- *   retained track, 4        116, 432, 1014 and 1263 km
- *
- * and the 1014 was Star of the Seas, drawn as a straight line from off Cozumel
- * to her berth at Port Canaveral, 285 km of it across Florida.
- *
- * 75 km, which is the geometric midpoint of the gap — not of the OBSERVED gap,
- * which would put it near 48, but of the largest real one that is possible. An
- * hour behind at 22 knots, the fastest in the survey, is 41 km; 20 km is only
- * what one afternoon happened to show. So the floor is 41, the ceiling is 116,
- * and 75 sits between them with three quarters of a knot-hour on one side and a
- * third off the other.
- *
- * Erring low is the cheaper mistake, which is why it is not pitched at 100. Too
- * low and the wake stops short of the hull by a few tens of kilometres, which at
- * the zoom a cruise is drawn at is nearly invisible. Too high and it draws a
- * passage the ship never made, across land, at full confidence.
- */
-function nearWakeEnd(crumb: [number, number], fix: { lat: number; lon: number }): boolean {
-  const JOINABLE_KM = 75;
-  return distance(crumb[1], crumb[0], fix.lat, fix.lon) < JOINABLE_KM;
-}
+
 
 /**
  * A port's ring says whether that port keeps the ship's clock. Nothing else.
@@ -399,6 +369,15 @@ export function refreshShipMarkers(): void {
 const CASING = '#0B1219';
 
 /**
+ * The dotted stretch across a gap in the wake.
+ *
+ * Deliberately not any vessel's colour — the wake's hue says WHICH ship, and a
+ * grey says this stretch is not the ship's track at all. Light enough to read as
+ * subordinate to every real line on the chart.
+ */
+const GAP = '#9AA4B2';
+
+/**
  * The colour of a port that says nothing.
  *
  * Not the hull colour, which is what it was and which was wrong for a reason
@@ -452,6 +431,41 @@ function polyline(
     icons: options.icons,
   }));
   chart.push(new google.maps.Polyline({ map, path, clickable: false, ...options }));
+}
+
+/**
+ * A gap in the wake, drawn as what it is: a guess at the shape of an absence.
+ *
+ * Grey rather than the vessel's colour, and dotted rather than drawn, because
+ * the line is not saying "she sailed this". It is saying "she got from here to
+ * there and the feed does not say how" — the same thing a mapping app means by a
+ * dotted leg where it has no path.
+ *
+ * No casing under it, unlike polyline(): the casing exists to lift a real track
+ * off the sea, and lifting this one would give an inference the weight of a
+ * fact. `strokeOpacity: 0` with a repeating dash is how the Maps API draws a
+ * dotted line at all — the stroke itself is invisible and the icons are the
+ * whole of what is seen.
+ */
+function dottedGap(map: google.maps.Map, path: google.maps.LatLngLiteral[]): void {
+  chart.push(new google.maps.Polyline({
+    map,
+    path,
+    clickable: false,
+    strokeOpacity: 0,
+    zIndex: 19,   // under the wake, so a real track always wins an overlap
+    icons: [{
+      icon: {
+        path: 'M 0,-0.6 0,0.6',
+        strokeColor: GAP,
+        strokeOpacity: 0.75,
+        strokeWeight: 2,
+        scale: 1.6,
+      },
+      offset: '0',
+      repeat: '9px',
+    }],
+  }));
 }
 
 /** "Coco Cay · day 2 · departs 17:00", as much of it as we actually know. */
@@ -549,19 +563,26 @@ export async function drawShipChart(key: string, voyage: Promise<ShipVoyage | nu
   // and the fix the marker is standing on.
   const origin = resolved.route[0];
   if (origin && wake.length > 0 && nearOrigin(wake[0], origin)) wake.unshift(origin);
-  // Guarded at this end too. A wake that stops a thousand kilometres from the
-  // hull is not a wake with a gap in it — it is a wake belonging to an earlier
-  // day, and joining it draws a passage the ship never made.
-  if (fix && (wake.length === 0 || nearWakeEnd(wake[wake.length - 1], fix))) {
-    wake.push([fix.lon, fix.lat]);
-  }
-  if (wake.length >= 2) {
-    polyline(map, wake.map(toLatLng), {
+  if (fix) wake.push([fix.lon, fix.lat]);
+
+  // Solid where the trail is continuous, dotted across whatever it does not
+  // account for. The alternative to the dotted stretch is not "nothing missing"
+  // — it is a wake that stops in open water with no explanation, which reads as
+  // a rendering fault rather than as an absence of data.
+  const runs = wakeRuns(wake);
+  for (const run of runs) {
+    if (run.length < 2) continue;
+    polyline(map, run.map(toLatLng), {
       strokeColor: routeColour,
       strokeOpacity: 0.95,
       strokeWeight: 2.5,
       zIndex: 20,
     });
+  }
+  for (let i = 1; i < runs.length; i++) {
+    const before = runs[i - 1][runs[i - 1].length - 1];
+    const after = runs[i][0];
+    dottedGap(map, [before, after].map(toLatLng));
   }
 
   for (const port of resolved.ports) {
