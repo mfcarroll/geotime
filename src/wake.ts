@@ -277,3 +277,26 @@ export function voyageSlice(
     // correct empty answer into somebody else's voyage.
     return track.slice(departure.to);
 }
+
+/**
+ * Whether a voyage has finished, by its own account.
+ *
+ * Compared by calendar day rather than by instant, and the grace that buys is
+ * the point: a cruise ending TODAY is still under way as far as this is
+ * concerned, right up to midnight. Three vessels were checked while writing
+ * this — Brilliance, Radiance and Celebrity Infinity — each on the final leg of
+ * a cruise ending today with every port already departed, and each correctly
+ * still drawing the run into her last call.
+ *
+ * `endDate` arrives as "06 Sep, 2026". Parsed by Date, which reads that format,
+ * and treated as unfinished if it cannot be read — the safe direction, since the
+ * only thing this suppresses is a line we would otherwise draw.
+ */
+export function voyageIsOver(endDate: string | null, at: number): boolean {
+    if (!endDate) return false;
+    const end = Date.parse(endDate.replace(/,/g, ''));
+    if (!Number.isFinite(end)) return false;
+    const endOfThatDay = new Date(end);
+    endOfThatDay.setHours(23, 59, 59, 999);
+    return at > endOfThatDay.getTime();
+}

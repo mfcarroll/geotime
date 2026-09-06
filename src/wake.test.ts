@@ -1,6 +1,6 @@
 import { strict as assert } from 'node:assert';
 import { describe, it } from 'node:test';
-import { dayIndex, voyageSlice, wakeGaps, wakeRuns, type WakePort } from './wake';
+import { dayIndex, voyageIsOver, voyageSlice, wakeGaps, wakeRuns, type WakePort } from './wake';
 
 // Real coordinates throughout, because what this guards against was only ever
 // visible in real data: a wake drawn confidently through places the ship had
@@ -257,5 +257,33 @@ describe('voyage slice', () => {
     it('has nothing to do without an origin or a track', () => {
         assert.deepEqual(voyageSlice(track, undefined, marks, '06 Sep, 2026'), track);
         assert.deepEqual(voyageSlice([], PC, marks, '06 Sep, 2026'), []);
+    });
+});
+
+describe('voyage is over', () => {
+    const noon = (d: string) => Date.parse(`${d}T12:00:00`);
+
+    it('is not over on its last day, however late', () => {
+        // Brilliance, Radiance and Celebrity Infinity were all doing exactly this
+        // when it was written: final leg, every port departed, cruise ending
+        // today, and each correctly still drawing the run into her last call.
+        assert.equal(voyageIsOver('07 Sep, 2026', noon('2026-09-07')), false);
+        assert.equal(voyageIsOver('07 Sep, 2026', Date.parse('2026-09-07T23:59:00')), false);
+    });
+
+    it('is over the day after', () => {
+        assert.equal(voyageIsOver('06 Sep, 2026', noon('2026-09-07')), true);
+    });
+
+    it('is not over before it ends', () => {
+        assert.equal(voyageIsOver('13 Sep, 2026', noon('2026-09-07')), false);
+    });
+
+    it('says nothing when the date is missing or unreadable', () => {
+        // The safe direction: the only thing this suppresses is a line that
+        // would otherwise be drawn.
+        assert.equal(voyageIsOver(null, noon('2026-09-07')), false);
+        assert.equal(voyageIsOver('next Thursday', noon('2026-09-07')), false);
+        assert.equal(voyageIsOver('', noon('2026-09-07')), false);
     });
 });

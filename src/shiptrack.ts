@@ -23,7 +23,7 @@
 // reason this feature is smaller than the last one.
 
 import { Capacitor, CapacitorHttp } from '@capacitor/core';
-import { voyageSlice } from './wake';
+import { voyageIsOver, voyageSlice } from './wake';
 import { shipImo } from './ships';
 
 /**
@@ -505,6 +505,23 @@ export function routeAhead(
 ): Array<[number, number]> {
   const route = voyage.route;
   if (route.length < 2) return route;
+
+  // A voyage that has already ended has no route ahead, and the route we hold is
+  // not the one she is on.
+  //
+  // Left undrawn rather than drawn wrong, because what this produces otherwise
+  // is not a small error. Every port of a finished cruise has departed, so
+  // `nextCall` falls through to the last call — the only one without a departure
+  // time — and `limit` lands on the final vertex of a round trip. The line
+  // becomes the ship plus one point: a dashed stub back to the port she has just
+  // sailed FROM, pointing the wrong way down a voyage she has finished.
+  //
+  // Watched on Oasis of the Seas an hour out of New York on a new cruise, while
+  // the finished one was still cached: 2 points and 59 km where the answer was
+  // 36 points and 3,952 km. The window is ours rather than upstream's — thirty
+  // minutes of Worker cache and thirty of client cache — but it reopens at every
+  // turnaround, so it wants handling rather than waiting out.
+  if (voyageIsOver(voyage.voyage.endDate, Date.now())) return [];
 
   const floor = departedFloor(voyage, route);
   if (!position) return route.slice(floor);

@@ -283,6 +283,25 @@ function rankScore(populationRank: number, km: number): number {
  * `origin` is the user's position when known. Without it, results fall back to
  * pure prominence, which is the order the index is already stored in.
  */
+/**
+ * How many rows a search may return.
+ *
+ * Eight for a long time, which was a cap on a list that scrolls — the listbox is
+ * 19rem with `overflow-y: auto`, so about six show and the rest are a flick
+ * away. That made whole families unreachable rather than merely further down:
+ * thirty of the forty-four vessels are named "<something> of the Seas", and
+ * typing exactly that returned eight of them with no way to reach the other
+ * twenty-two.
+ *
+ * Forty covers that group with room, and costs almost nothing. The expensive
+ * part of a search does not scale with this number at all — every matching city
+ * is scanned and scored whatever the limit, and only the leading `limit` of each
+ * tier is ever turned into an object. Measured in the app against the real
+ * 63,000-city index, worst query of several: 15 ms at eight rows, 16 ms at
+ * forty.
+ */
+const SEARCH_LIMIT = 40;
+
 export function searchPlaces(
   query: string,
   zoneIds: string[],
@@ -290,7 +309,7 @@ export function searchPlaces(
   origin: Origin | null = null,
   ships: ShipRef[] = [],
   ports: PortRef[] = [],
-  limit = 8
+  limit = SEARCH_LIMIT
 ): PlaceResult[] {
   const q = fold(query.trim());
   if (!q) return [];
