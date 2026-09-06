@@ -37,6 +37,10 @@ struct WidgetRow: Identifiable {
     /// the user picked, not the zone's own city. Decides which of two rows on the
     /// same offset is the one worth keeping when only one fits.
     var namesAPlace: Bool = false
+    /// A port on a saved ship's itinerary, marked with an anchor when there is
+    /// room for one. Purely decorative: it is the first thing the width budget
+    /// gives up, ahead of every other garnish. See metrics(for:usableW:rich:).
+    var isPort: Bool = false
 }
 
 // Canonical row set — dedup by zone id (local/device win), sorted by offset then
@@ -63,6 +67,7 @@ enum ZoneRowResolver {
     ///   geographic anchor rather than anchoring on nothing.
     static func resolve(storedIds: [String], local: TimeZone, deviceTz: TimeZone, now: Date,
                         localPlaceName: String? = nil, labels: [String] = [],
+                        kinds: [String] = [],
                         ships: [WidgetSharedStore.Ship] = [],
                         aboardShipKey: String? = nil) -> [WidgetRow] {
         let geographicOffset = local.secondsFromGMT(for: now)
@@ -215,7 +220,8 @@ enum ZoneRowResolver {
                 // so letting it outrank an unlabelled zone would change the winner
                 // without changing anything the user can see.
                 namesAPlace: chosen != nil
-                    && chosen!.caseInsensitiveCompare(TimezoneDisplay.displayName(id)) != .orderedSame
+                    && chosen!.caseInsensitiveCompare(TimezoneDisplay.displayName(id)) != .orderedSame,
+                isPort: index < kinds.count && kinds[index] == "port"
             ))
         }
 

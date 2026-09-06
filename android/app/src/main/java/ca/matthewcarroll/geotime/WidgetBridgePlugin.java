@@ -26,6 +26,8 @@ public class WidgetBridgePlugin extends Plugin {
     static final String PREFS_LOCAL_PLACE_KEY = "localPlaceName";
     static final String PREFS_ABOARD_SHIP_KEY = "aboardShipKey";
     static final String PREFS_LABELS_KEY = "worldClockLabels";
+    /** Parallel to the zone list; "port" where the zone came from an itinerary. */
+    static final String PREFS_KINDS_KEY = "worldClockKinds";
     static final String PREFS_SHIPS_KEY = "shipClocks";
     /**
      * The Royal Caribbean app key, mirrored here so the widget can refresh on
@@ -64,6 +66,7 @@ public class WidgetBridgePlugin extends Plugin {
             return;
         }
         JSArray labels = call.getArray("labels");
+        JSArray kinds = call.getArray("kinds");
         // Ships cross as {key, name, offsetMinutes, fetchedAt} — never as a
         // timezone id. The provider builds a fixed-offset "GMT±HH:MM" zone from
         // the minutes, which is correct for a vessel: a crew-set clock has no
@@ -74,6 +77,7 @@ public class WidgetBridgePlugin extends Plugin {
            .edit()
            .putString(PREFS_KEY, timezones.toString()) // JSArray extends JSONArray => JSON text
            .putString(PREFS_LABELS_KEY, labels == null ? "[]" : labels.toString())
+           .putString(PREFS_KINDS_KEY, kinds == null ? "[]" : kinds.toString())
            .putString(PREFS_SHIPS_KEY, ships == null ? "[]" : ships.toString())
            .putString(PREFS_LOCAL_TZ_KEY, call.getString("localTimezone")) // may be null -> cleared
            .putString(PREFS_LOCAL_PLACE_KEY, call.getString("localPlaceName"))

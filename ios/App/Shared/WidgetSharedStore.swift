@@ -9,6 +9,8 @@ enum WidgetSharedStore {
     static let localTimezoneKey = "localTimezone"
     static let localPlaceKey = "localPlaceName"
     static let labelsKey = "worldClockLabels"
+    /// Parallel to `load()`; "port" where the zone came from a ship's itinerary.
+    static let kindsKey = "worldClockKinds"
     static let shipsKey = "shipClocks"
     static let appKeyKey = "rcclAppKey"
     static let aboardShipKey = "aboardShipKey"
@@ -30,6 +32,24 @@ enum WidgetSharedStore {
            let json = String(data: data, encoding: .utf8) {
             defaults.set(json, forKey: labelsKey)
         }
+    }
+
+    static func saveKinds(_ kinds: [String]) {
+        guard let defaults = UserDefaults(suiteName: suiteName) else { return }
+        if let data = try? JSONEncoder().encode(kinds),
+           let json = String(data: data, encoding: .utf8) {
+            defaults.set(json, forKey: kindsKey)
+        }
+    }
+
+    static func loadKinds() -> [String] {
+        guard let defaults = UserDefaults(suiteName: suiteName),
+              let json = defaults.string(forKey: kindsKey),
+              let data = json.data(using: .utf8),
+              let kinds = try? JSONDecoder().decode([String].self, from: data) else {
+            return []   // written by an older build; no row is a port
+        }
+        return kinds
     }
 
     static func loadLabels() -> [String] {

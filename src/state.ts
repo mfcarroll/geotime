@@ -192,6 +192,7 @@ export function syncWidget(): void {
     syncWidgetTimezones({
         timezones: state.addedTimezones,
         labels: state.zoneLabels,
+        kinds: state.zoneKinds,
         localTimezone: state.localTimezone,
         localPlaceName: state.localPlaceName,
         ships: state.shipClocks,

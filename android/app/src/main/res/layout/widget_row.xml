@@ -101,6 +101,19 @@
             android:textSize="11sp"
             android:includeFontPadding="false"
             android:visibility="gone" />
+
+        <!-- Last in the mark run, and the first mark to be taken back: see
+             decidePortMark. The anchor repeats what the row already says, so it
+             is the one mark that may not cost the name a character. -->
+        <ImageView
+            android:id="@+id/row_anchor"
+            android:layout_width="12dp"
+            android:layout_height="12dp"
+            android:layout_gravity="center_vertical"
+            android:layout_marginStart="5dp"
+            android:src="@drawable/ic_anchor"
+            android:visibility="gone"
+            android:contentDescription="@null" />
     </LinearLayout>
 
     <!-- Day label sits immediately before the time. -->

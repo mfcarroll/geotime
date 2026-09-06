@@ -163,6 +163,9 @@ public class GeoTimeWidgetProvider extends AppWidgetProvider {
         boolean showDeviceLabel = decideDeviceLabel(ctx, visible, opts);
         boolean showQualifier = decideQualifier(ctx, visible, opts, is24, useFullShipName,
                                                 useFullDay, showLocalLabel, showDeviceLabel, rich);
+        boolean showPortMark = decidePortMark(ctx, visible, opts, is24, useFullShipName,
+                                              useFullDay, showLocalLabel, showDeviceLabel,
+                                              showQualifier, rich);
         for (Row r : visible) {
             RemoteViews row = new RemoteViews(ctx.getPackageName(),
                     rich ? R.layout.widget_row_rich : R.layout.widget_row);
@@ -171,7 +174,8 @@ public class GeoTimeWidgetProvider extends AppWidgetProvider {
             // name either way. Only what ELSE is on that line differs, which
             // rowFurniture accounts for.
             Fitted fitted = fitCity(ctx, r, opts, is24, useFullShipName, useFullDay,
-                                    showLocalLabel, showDeviceLabel, showQualifier, rich);
+                                    showLocalLabel, showDeviceLabel, showQualifier, rich,
+                                    showPortMark);
             row.setTextViewText(R.id.row_city, fitted.label);
             row.setString(R.id.row_time, "setTimeZone", r.tzId);   // @RemotableViewMethod
             row.setString(R.id.row_period, "setTimeZone", r.tzId);
@@ -224,6 +228,8 @@ public class GeoTimeWidgetProvider extends AppWidgetProvider {
 
             row.setViewVisibility(R.id.row_device,
                     (r.isDevice && fitted.deviceMark) ? View.VISIBLE : View.GONE);
+            row.setViewVisibility(R.id.row_anchor,
+                    (r.isPort && showPortMark) ? View.VISIBLE : View.GONE);
             if (r.dayLabel != null) {
                 row.setTextViewText(R.id.row_day, useFullDay ? r.dayLabelFull : r.dayLabel);
                 row.setViewVisibility(R.id.row_day, View.VISIBLE);
@@ -308,6 +314,13 @@ public class GeoTimeWidgetProvider extends AppWidgetProvider {
          * rows on the same offset is the one worth keeping when only one fits.
          */
         boolean namesAPlace;
+        /**
+         * The zone came from a ship's itinerary — a port of call, not a place the
+         * user searched for. Earns the anchor mark, and nothing else: the row is
+         * an ordinary zone in every other respect. Mirrors WidgetRow.isPort in
+         * ZoneRowResolver.swift.
+         */
+        boolean isPort;
         final String dayLabel;     // "Tue" — null unless the calendar day differs
         final String dayLabelFull; // "Tuesday" — used when there's room
         final String offset;       // "+3 hrs" relative to local; "" for local
@@ -361,6 +374,7 @@ public class GeoTimeWidgetProvider extends AppWidgetProvider {
 
         List<String> stored = readStored(ctx);
         List<String> labels = readList(ctx, WidgetBridgePlugin.PREFS_LABELS_KEY);
+        List<String> kinds = readList(ctx, WidgetBridgePlugin.PREFS_KINDS_KEY);
         List<Ship> ships = readShips(ctx);
 
         String aboardKey = ctx.getSharedPreferences(WidgetBridgePlugin.PREFS_NAME, Context.MODE_PRIVATE)
@@ -455,6 +469,7 @@ public class GeoTimeWidgetProvider extends AppWidgetProvider {
             // outrank an unlabelled zone would change the winner without changing
             // anything the user can see.
             row.namesAPlace = chosen != null && !chosen.equalsIgnoreCase(cityLabel(id));
+            row.isPort = i < kinds.size() && "port".equals(kinds.get(i));
             rows.add(row);
         }
 
@@ -657,7 +672,8 @@ public class GeoTimeWidgetProvider extends AppWidgetProvider {
      */
     private static float rowFurniture(Context ctx, Row r, boolean is24, boolean useFullDay,
                                       boolean showLocalLabel, boolean showDeviceLabel,
-                                      boolean deviceMark, boolean showQualifier, boolean rich) {
+                                      boolean deviceMark, boolean showQualifier, boolean rich,
+                                      boolean portMark) {
         android.util.DisplayMetrics dm = ctx.getResources().getDisplayMetrics();
         float gap = 6 * dm.density;
         TextPaint city = new TextPaint();
@@ -667,7 +683,8 @@ public class GeoTimeWidgetProvider extends AppWidgetProvider {
 
         float need = 0;
         int marks = (r.isShip ? 1 : 0) + (r.isLocal ? 1 : 0)
-                + ((r.isDevice && deviceMark) ? 1 : 0);
+                + ((r.isDevice && deviceMark) ? 1 : 0)
+                + ((r.isPort && portMark) ? 1 : 0);
         need += marks * (12 * dm.density + gap);
 
         // Line 1 of a two-line row carries the name, its marks and the clock, and
@@ -724,7 +741,7 @@ public class GeoTimeWidgetProvider extends AppWidgetProvider {
     private static Fitted fitCity(Context ctx, Row r, Bundle opts, boolean is24,
                                   boolean useFullShipName, boolean useFullDay,
                                   boolean showLocalLabel, boolean showDeviceLabel,
-                                  boolean showQualifier, boolean rich) {
+                                  boolean showQualifier, boolean rich, boolean portMark) {
         String name = (!useFullShipName && r.shortLabel != null) ? r.shortLabel : r.label;
 
         android.util.DisplayMetrics dm = ctx.getResources().getDisplayMetrics();
@@ -747,11 +764,11 @@ public class GeoTimeWidgetProvider extends AppWidgetProvider {
         // dropping it cannot leave a ragged column behind.
         boolean deviceMark = true;
         float furniture = rowFurniture(ctx, r, is24, useFullDay, showLocalLabel,
-                                       showDeviceLabel, deviceMark, showQualifier, rich);
+                                       showDeviceLabel, deviceMark, showQualifier, rich, portMark);
         if (r.isDevice && city.measureText(name) + furniture > usable) {
             deviceMark = false;
             furniture = rowFurniture(ctx, r, is24, useFullDay, showLocalLabel,
-                                     showDeviceLabel, deviceMark, showQualifier, rich);
+                                     showDeviceLabel, deviceMark, showQualifier, rich, portMark);
         }
 
         float room = usable - furniture;
@@ -792,9 +809,63 @@ public class GeoTimeWidgetProvider extends AppWidgetProvider {
             // this against the row as it will actually be drawn.
             boolean mark = !r.isDevice
                     || city.measureText(name) + rowFurniture(ctx, r, is24, useFullDay,
-                            showLocalLabel, showDeviceLabel, true, true, rich) <= usable;
+                            showLocalLabel, showDeviceLabel, true, true, rich, false) <= usable;
             float furniture = rowFurniture(ctx, r, is24, useFullDay, showLocalLabel,
-                                           showDeviceLabel, mark, true, rich);
+                                           showDeviceLabel, mark, true, rich, false);
+            if (city.measureText(name) + furniture > usable) return false;
+        }
+        return true;
+    }
+
+    /**
+     * Whether a port of call carries its anchor. Decided LAST, and that is the
+     * whole point of it.
+     *
+     * Every other piece of furniture is priced against the row without an anchor,
+     * so each is weighed on its own merits and any of them can be granted. The
+     * anchor is then priced against the row with all of those ALREADY GRANTED: it
+     * has to fit in what is left over, and it is the only thing here that does.
+     * That makes "the first thing to drop" literal rather than a matter of
+     * ordering — nothing else can lose out to it, because nothing else is asked
+     * again after it is granted.
+     *
+     * On this platform the cost of overreaching is a truncated name rather than a
+     * smaller font (RemoteViews cannot scale text), so the test is that no port
+     * row loses a character to it. Same intent as showPortMark in
+     * GeoTimeWidget.swift, which tests that no row's font gets smaller.
+     *
+     * One answer for the whole widget, for the reason decideQualifier is: a
+     * column where one port shows an anchor and the next does not reads as a bug.
+     * Unlike the phone, there can be several port rows, so per-row really would
+     * leave a ragged column behind.
+     */
+    private static boolean decidePortMark(Context ctx, List<Row> rows, Bundle opts,
+                                          boolean is24, boolean useFullShipName,
+                                          boolean useFullDay, boolean showLocalLabel,
+                                          boolean showDeviceLabel, boolean showQualifier,
+                                          boolean rich) {
+        boolean anyPort = false;
+        for (Row r : rows) if (r.isPort) { anyPort = true; break; }
+        if (!anyPort) return false;
+
+        android.util.DisplayMetrics dm = ctx.getResources().getDisplayMetrics();
+        int widthDp = opts.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, 180);
+        float usable = (widthDp - 24) * dm.density;
+        TextPaint city = new TextPaint();
+        city.setTextSize(15 * dm.scaledDensity);
+
+        for (Row r : rows) {
+            if (!r.isPort) continue;
+            String name = (!useFullShipName && r.shortLabel != null) ? r.shortLabel : r.label;
+            // The phone priced as it would be with no anchor in play. Letting the
+            // anchor push the phone off the row would be the anchor costing
+            // something, which is exactly what it may not do.
+            boolean mark = !r.isDevice
+                    || city.measureText(name) + rowFurniture(ctx, r, is24, useFullDay,
+                            showLocalLabel, showDeviceLabel, true, showQualifier, rich,
+                            false) <= usable;
+            float furniture = rowFurniture(ctx, r, is24, useFullDay, showLocalLabel,
+                                           showDeviceLabel, mark, showQualifier, rich, true);
             if (city.measureText(name) + furniture > usable) return false;
         }
         return true;

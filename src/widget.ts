@@ -48,6 +48,8 @@ export interface WidgetPayload {
   timezones: string[];
   /** Parallel to `timezones`; '' where the user never named the place. */
   labels: string[];
+  /** Parallel to `timezones`; 'port' where the zone came from a ship's itinerary, else ''. */
+  kinds: string[];
   localTimezone: string | null;
   localPlaceName: string | null;
   /** Ships with a resolved offset. See WidgetShip. */
@@ -81,6 +83,8 @@ const WidgetBridge = registerPlugin<WidgetBridgePlugin>('WidgetBridge');
 export interface SyncOptions {
   timezones: string[];
   labels: Record<string, string>;
+  /** Which saved zones were added as a ship's port of call. Keyed like `labels`. */
+  kinds: Record<string, 'port'>;
   localTimezone: string | null;
   localPlaceName: string | null;
   ships: ShipClock[];
@@ -96,6 +100,7 @@ export interface SyncOptions {
 export function syncWidgetTimezones({
   timezones,
   labels,
+  kinds,
   localTimezone,
   localPlaceName,
   ships,
@@ -108,6 +113,10 @@ export function syncWidgetTimezones({
   WidgetBridge.setTimezones({
     timezones: [...timezones],
     labels: timezones.map((tz) => labels[tz] ?? ''),
+    // Parallel to `timezones` for the same reason as `labels`: the native side
+    // stores JSON arrays, and an empty string is a "no kind" that an older store
+    // degrades to on its own.
+    kinds: timezones.map((tz) => kinds[tz] ?? ''),
     localTimezone,
     localPlaceName,
     aboardShipKey,

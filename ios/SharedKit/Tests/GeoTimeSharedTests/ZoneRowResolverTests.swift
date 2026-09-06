@@ -100,17 +100,25 @@ final class ZoneRowResolverInvariants: XCTestCase {
         XCTAssertTrue(rows[0].isLocal)
     }
 
-    func testOnlyOneOfTwoZonesSharingAnOffsetIsShown() throws {
-        // CHANGED, deliberately. Vancouver and Los Angeles read the same today,
-        // and on a surface this small a second copy of a time buys nothing —
-        // the app itself still lists both, which is where the complete answer
-        // lives. In November they diverge and both appear, which is not a
-        // glitch: that is the day the distinction starts meaning something.
+    /// CHANGED AGAIN in 1.6.1, and back the other way.
+    ///
+    /// This test used to assert that the second of two zones on one offset was
+    /// dropped here. It was — and that turned out to be the wrong place to
+    /// decide it, because `resolve` has no idea how much room the widget has. A
+    /// zone vanished from a half-empty widget, and worse, it vanished BEFORE the
+    /// layout chose between one-line and two-line rows, so the two-line row was
+    /// picked "because everything fits" only after something had been thrown
+    /// away. Both are kept and flagged now; `fit` gives them up first, and only
+    /// when it must.
+    func testTwoZonesSharingAnOffsetAreBothKeptAndTheSecondIsFlagged() throws {
         let rows = ZoneRowResolver.resolve(
             storedIds: ["America/Vancouver", "America/Los_Angeles"],
             local: Fixture.newYork, deviceTz: Fixture.newYork, now: Fixture.now)
 
-        XCTAssertEqual(rows.filter { !$0.isLocal }.count, 1)
+        let saved = rows.filter { !$0.isLocal }
+        XCTAssertEqual(saved.count, 2)
+        XCTAssertEqual(saved.filter(\.sharesOffset).count, 1,
+                       "the second copy is flagged, not dropped — fit decides")
     }
 
     func testAChosenLabelWinsOverTheZoneName() throws {
@@ -119,6 +127,41 @@ final class ZoneRowResolverInvariants: XCTestCase {
             now: Fixture.now, labels: ["Home"])
 
         XCTAssertNotNil(rows.first { $0.name == "Home" })
+    }
+
+    // MARK: ports of call
+
+    /// `kinds` is parallel to `storedIds`, and the loop that reads it SKIPS
+    /// entries — a stored zone that is the base zone, or one already claimed.
+    /// Reading kinds positionally is only correct if the skip does not advance
+    /// the cursor, so this pins that with a skip in front of the port.
+    ///
+    /// Worth a test rather than a read-through because the failure is silent and
+    /// looks deliberate: an anchor lands on the wrong row and the widget still
+    /// renders a perfectly ordinary list.
+    func testTheAnchorFollowsItsZoneAcrossASkippedEntry() throws {
+        let rows = ZoneRowResolver.resolve(
+            storedIds: ["America/New_York", "America/Nassau", "Europe/London"],
+            local: Fixture.newYork, deviceTz: Fixture.newYork, now: Fixture.now,
+            labels: ["", "Coco Cay", ""],
+            kinds: ["", "port", ""])
+
+        // Entry 0 is the base zone and never becomes a row of its own, so the
+        // port's kind sits at index 1 while its row is the first non-base one.
+        let ports = rows.filter(\.isPort)
+        XCTAssertEqual(ports.count, 1)
+        XCTAssertEqual(ports.first?.name, "Coco Cay")
+        XCTAssertFalse(try XCTUnwrap(rows.first { $0.name == "London" }).isPort)
+    }
+
+    /// Every build before this one wrote no kinds at all, and a widget must not
+    /// wait for the app to be opened before it can draw a row.
+    func testZonesStoredByAnOlderBuildAreSimplyNotPorts() throws {
+        let rows = ZoneRowResolver.resolve(
+            storedIds: ["Europe/London", "Asia/Tokyo"],
+            local: Fixture.newYork, deviceTz: Fixture.newYork, now: Fixture.now)
+
+        XCTAssertTrue(rows.allSatisfy { !$0.isPort })
     }
 
     // MARK: ships
@@ -158,11 +201,17 @@ final class ZoneRowResolverInvariants: XCTestCase {
             local: Fixture.vancouver, deviceTz: Fixture.vancouver, now: Fixture.now,
             localPlaceName: "Vancouver", ships: [ship])
 
-        XCTAssertEqual(rows.count, 2)
+        XCTAssertEqual(rows.count, 3)
         XCTAssertEqual(try row(rows, named: "Vancouver").relativeText, "Local time")
         XCTAssertEqual(try row(rows, named: "Star of the Seas").relativeText, "+0 hrs")
-        XCTAssertNil(rows.first { $0.name == "Los Angeles" },
-                     "the city folds — where you actually are wins the slot")
+        // The city no longer folds here — see the note on
+        // testTwoZonesSharingAnOffsetAreBothKeptAndTheSecondIsFlagged. It is the
+        // one of the three that is expendable, and it says so, which is all this
+        // function is entitled to decide.
+        let city = try row(rows, named: "Los Angeles")
+        XCTAssertTrue(city.sharesOffset)
+        XCTAssertFalse(try row(rows, named: "Vancouver").sharesOffset)
+        XCTAssertFalse(try row(rows, named: "Star of the Seas").sharesOffset)
     }
 
     func testAshoreAShipOnADifferentClockStillGetsItsRow() throws {

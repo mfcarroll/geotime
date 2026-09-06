@@ -66,6 +66,17 @@
                 android:textSize="11sp"
                 android:includeFontPadding="false"
                 android:visibility="gone" />
+
+            <!-- Last in the mark run, and the first mark to be taken back: see
+                 decidePortMark. -->
+            <ImageView
+                android:id="@+id/row_anchor"
+                android:layout_width="12dp"
+                android:layout_height="12dp"
+                android:layout_marginStart="5dp"
+                android:src="@drawable/ic_anchor"
+                android:visibility="gone"
+                android:contentDescription="@null" />
         </LinearLayout>
 
         <!-- Offset, and the anchor's own words, and the device tag: on line 2 they

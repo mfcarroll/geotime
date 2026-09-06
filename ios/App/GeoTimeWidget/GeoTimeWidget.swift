@@ -40,6 +40,7 @@ private struct RowMetrics {
                                // single-line row, when the width allows
     let showDeviceLabel: Bool  // "· Device time" tag on the device row (single-line only)
     let showDeviceMark: Bool   // the phone glyph itself, dropped before a name truncates
+    let showPortMark: Bool     // the anchor on a port of call — the first thing width takes back
     let dayTimeGap: CGFloat    // extra space between day label and time
     let hGap: CGFloat          // base horizontal gap between elements (tighter on small)
     let timeColW: CGFloat
@@ -178,7 +179,7 @@ struct GeoTimeWidgetView: View {
         let clusterW = usableW - timeColW - (hGap * 2 + 4)
         func cityScale(fullDay: Bool, localLabel: Bool, deviceLabel: Bool,
                        fullShipName: Bool, deviceMark: Bool = true,
-                       inlineOffset: Bool) -> CGFloat {
+                       inlineOffset: Bool, portMark: Bool = false) -> CGFloat {
             var scale: CGFloat = 1
             for r in rows {
                 var reserved: CGFloat = 0
@@ -187,6 +188,7 @@ struct GeoTimeWidgetView: View {
                 // agreeing with either is marked there rather than given a row.
                 let marks = (r.isShip ? 1 : 0) + (r.isLocal ? 1 : 0)
                     + ((r.isDevice && deviceMark) ? 1 : 0)
+                    + ((r.isPort && portMark) ? 1 : 0)
                 // markW, not pinSize. pinSize is a FONT size, and nothing was
                 // holding a mark to that width: an SF Symbol draws wider than its
                 // point size, an emoji wider still, and the ship mark already
@@ -335,6 +337,39 @@ struct GeoTimeWidgetView: View {
                                deviceLabel: true, fullShipName: useFullShipName,
                                deviceMark: showDeviceMark, inlineOffset: inlineOffset)) >= clampedBase - 0.001
 
+        // The anchor on a port of call is decided LAST, and that is the whole
+        // point of it.
+        //
+        // Every other garnish is weighed against `clampedBase`, which has all of
+        // them OFF — so they are each priced on their own merits and any one of
+        // them can be granted. The anchor is weighed against `grantedBase`: the
+        // same scale with every one of those grants already spent. It is the only
+        // thing here that has to fit in what is left over, which is what "the
+        // first thing to drop" means. It earns that place by being the only mark
+        // that tells the reader nothing the row does not already say — "Coco Cay"
+        // and its time are there either way.
+        //
+        // Weighed against grantedBase and not clampedBase, and the difference is
+        // not pedantry. Each garnish above is granted if IT ALONE holds
+        // clampedBase, so two of them together can sit below it; measuring the
+        // anchor from clampedBase would charge it for their combined overspend
+        // and refuse it on rows where it is free. That is what happened on the
+        // first medium widget this was tried on — a port of call, half the row
+        // empty, and no anchor.
+        //
+        // grantedBase ≤ clampedBase always, since adding garnishes only ever
+        // lowers the scale, so this is the stricter of the two tests wherever
+        // they differ.
+        let grantedBase = min(1, cityScale(fullDay: useFullDay, localLabel: showLocalLabel,
+                                           deviceLabel: showDeviceLabel,
+                                           fullShipName: useFullShipName,
+                                           deviceMark: showDeviceMark, inlineOffset: inlineOffset))
+        let showPortMark = !atFloor
+            && min(1, cityScale(fullDay: useFullDay, localLabel: showLocalLabel,
+                                deviceLabel: showDeviceLabel, fullShipName: useFullShipName,
+                                deviceMark: showDeviceMark, inlineOffset: inlineOffset,
+                                portMark: true)) >= grantedBase - 0.001
+
         let cityFont = max(9, min(cityBase, cityBase * clampedBase))
 
         return RowMetrics(cityFont: cityFont, timeFont: timeFont, detailFont: detailFont,
@@ -342,7 +377,7 @@ struct GeoTimeWidgetView: View {
                           inlineOffset: inlineOffset, useFullDay: useFullDay,
                           useFullShipName: useFullShipName,
                           showLocalLabel: showLocalLabel, showDeviceLabel: showDeviceLabel,
-                          showDeviceMark: showDeviceMark,
+                          showDeviceMark: showDeviceMark, showPortMark: showPortMark,
                           dayTimeGap: dayTimeGap, hGap: hGap,
                           timeColW: timeColW, periodColW: periodColW)
     }
@@ -526,6 +561,7 @@ private struct RowView: View {
             if row.isShip { shipMark }
             if row.isLocal { pin }
             if row.isDevice && metrics.showDeviceMark { phone }
+            if row.isPort && metrics.showPortMark { anchor }
         }
     }
 
@@ -548,6 +584,18 @@ private struct RowView: View {
     // is 15.0 — raising the deployment target for one glyph would be the tail
     // wagging the dog. Drawing it also guarantees it matches Android exactly,
     // where the same path ships as ic_ship.xml.
+    /// The anchor on a port of call.
+    ///
+    /// The Font Awesome glyph rather than an SF Symbol, for the same reason the
+    /// ship is: SF Symbols has no anchor, and its nearest boats would sit beside
+    /// a traced Font Awesome ship looking like a different family. Both marks now
+    /// come from the same source the app's own rows use.
+    @ViewBuilder private var anchor: some View {
+        AnchorShape()
+            .fill(Color.widgetAccent)
+            .frame(width: metrics.markW, height: metrics.markW)
+    }
+
     @ViewBuilder private var shipMark: some View {
         ShipShape()
             .fill(Color.widgetAccent)
@@ -649,3 +697,60 @@ extension View {
         }
     }
 }
+
+// Generated by scripts/fa-path-to-swift.mjs from Font Awesome 'anchor'.
+// The same glyph the web app draws, so the two surfaces agree. Regenerate rather
+// than editing by hand; SVG arcs are converted to cubics, which is not something
+// to redo by eye.
+struct AnchorShape: Shape {
+    func path(in rect: CGRect) -> Path {
+        // Fit the glyph's box into the frame without distorting it, and centre
+        // what is left over.
+        let s = min(rect.width / 576, rect.height / 512)
+        let ox = rect.minX + (rect.width - 576 * s) / 2
+        let oy = rect.minY + (rect.height - 512 * s) / 2
+        func P(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
+            CGPoint(x: ox + x * s, y: oy + y * s)
+        }
+
+        var p = Path()
+        p.move(to: P(288, 64))
+        p.addCurve(to: P(256, 96), control1: P(270.33, 64), control2: P(256, 78.33))
+        p.addCurve(to: P(288, 128), control1: P(256, 113.67), control2: P(270.33, 128))
+        p.addCurve(to: P(320, 96), control1: P(305.67, 128), control2: P(320, 113.67))
+        p.addCurve(to: P(288, 64), control1: P(320, 78.33), control2: P(305.67, 64))
+        p.closeSubpath()
+        p.move(to: P(192, 96))
+        p.addCurve(to: P(288, 0), control1: P(192, 43), control2: P(235, 0))
+        p.addCurve(to: P(384, 96), control1: P(341, 0), control2: P(384, 43))
+        p.addCurve(to: P(320, 186.5), control1: P(384, 137.8), control2: P(357.3, 173.4))
+        p.addLine(to: P(320, 444.4))
+        p.addCurve(to: P(431.9, 307.9), control1: P(382.9, 430.1), control2: P(430.2, 374.7))
+        p.addLine(to: P(415.8, 322))
+        p.addCurve(to: P(381.9, 319.7), control1: P(405.8, 330.7), control2: P(390.7, 329.7))
+        p.addCurve(to: P(384.2, 285.8), control1: P(373.1, 309.7), control2: P(374.2, 294.6))
+        p.addLine(to: P(448.2, 229.8))
+        p.addCurve(to: P(479.8, 229.8), control1: P(457.2, 221.9), control2: P(470.8, 221.9))
+        p.addLine(to: P(543.8, 285.8))
+        p.addCurve(to: P(546.1, 319.7), control1: P(553.8, 294.5), control2: P(554.8, 309.7))
+        p.addCurve(to: P(512.2, 322), control1: P(537.4, 329.7), control2: P(522.2, 330.7))
+        p.addLine(to: P(496, 307.9))
+        p.addCurve(to: P(288, 512), control1: P(493.9, 421), control2: P(401.6, 512))
+        p.addCurve(to: P(80, 307.9), control1: P(174.4, 512), control2: P(82.1, 421))
+        p.addLine(to: P(63.8, 322.1))
+        p.addCurve(to: P(29.9, 319.8), control1: P(53.8, 330.8), control2: P(38.7, 329.8))
+        p.addCurve(to: P(32.2, 285.9), control1: P(21.1, 309.8), control2: P(22.2, 294.7))
+        p.addLine(to: P(96.2, 229.9))
+        p.addCurve(to: P(127.8, 229.9), control1: P(105.2, 222), control2: P(118.8, 222))
+        p.addLine(to: P(191.8, 285.9))
+        p.addCurve(to: P(194.1, 319.8), control1: P(201.8, 294.6), control2: P(202.8, 309.8))
+        p.addCurve(to: P(160.2, 322.1), control1: P(185.4, 329.8), control2: P(170.2, 330.8))
+        p.addLine(to: P(144.1, 308))
+        p.addCurve(to: P(256, 444.5), control1: P(145.9, 374.8), control2: P(193.2, 430.2))
+        p.addLine(to: P(256, 186.6))
+        p.addCurve(to: P(192, 96.1), control1: P(218.7, 173.4), control2: P(192, 137.9))
+        p.closeSubpath()
+        return p
+    }
+}
+
