@@ -378,6 +378,18 @@ interface ShapedVoyage {
   eta: string | null;
   voyage: { name: string | null; startDate: string | null; endDate: string | null; days: string | null };
   track: Array<[number, number]>;
+  /**
+   * The only time information the track carries, and it is easy to miss: about
+   * one point per calendar day arrives with a `label` like "06 Sep 00:30", and
+   * the other seven hundred are bare coordinates.
+   *
+   * Kept because it is the difference between clipping a voyage out of the
+   * rolling window by geometry alone — which cannot tell an arrival from the
+   * departure that follows it an hour later — and knowing which day each part
+   * of the window belongs to. Indices are into `track`, so the two must be
+   * replaced together or not at all.
+   */
+  dayMarks: Array<{ i: number; label: string }>;
   route: Array<[number, number]>;
   ports: unknown[];
   extent: number[] | null;
@@ -400,12 +412,17 @@ function shapeDetail(imo: string, payload: any): ShapedVoyage {
   // `track` arrives as {lat, lon} objects while `cruise.path.points` arrives as
   // [lon, lat] arrays. Normalising both to [lon, lat] here removes a footgun
   // that would otherwise sit in the client for good.
-  const track = Array.isArray(payload?.track)
-    ? payload.track.flatMap((p: any) => {
-        const at = coord(p?.lon, p?.lat);
-        return at ? [at] : [];
-      })
-    : [];
+  const track: Array<[number, number]> = [];
+  const dayMarks: Array<{ i: number; label: string }> = [];
+  if (Array.isArray(payload?.track)) {
+    for (const p of payload.track) {
+      const at = coord(p?.lon, p?.lat);
+      if (!at) continue;                    // index must follow the KEPT points
+      const label = typeof p?.label === 'string' ? p.label.trim() : '';
+      if (label) dayMarks.push({ i: track.length, label });
+      track.push(at);
+    }
+  }
 
   const route = Array.isArray(path?.points)
     ? path.points.flatMap((p: any) => {
@@ -446,6 +463,7 @@ function shapeDetail(imo: string, payload: any): ShapedVoyage {
       days: payload?.cruise?.days ?? null,
     },
     track,
+    dayMarks,
     route,
     ports,
     /** [minLat, minLon, maxLat, maxLon] — what the map fits to on selection. */
@@ -540,6 +558,13 @@ interface StoredTrack {
   /** When it was captured, epoch ms. */
   at: number;
   track: Array<[number, number]>;
+  /**
+   * Day labels for that track, indices into it. Stored WITH the track and
+   * restored with it, because an index is only meaningful against the array it
+   * was taken from — keeping one and not the other would clip a voyage at a
+   * point chosen from a different set of crumbs.
+   */
+  dayMarks?: Array<{ i: number; label: string }>;
 }
 
 /**
@@ -555,9 +580,13 @@ function readStored(raw: unknown): StoredTrack | null {
     return raw.length > 0 ? { at: 0, track: raw as Array<[number, number]> } : null;
   }
   if (raw && typeof raw === 'object') {
-    const track = (raw as StoredTrack).track;
-    if (Array.isArray(track) && track.length > 0) {
-      return { at: Number((raw as StoredTrack).at) || 0, track };
+    const stored = raw as StoredTrack;
+    if (Array.isArray(stored.track) && stored.track.length > 0) {
+      return {
+        at: Number(stored.at) || 0,
+        track: stored.track,
+        dayMarks: Array.isArray(stored.dayMarks) ? stored.dayMarks : [],
+      };
     }
   }
   return null;
@@ -594,7 +623,11 @@ function readStored(raw: unknown): StoredTrack | null {
 async function retainedTrack(
   env: Env,
   imo: string,
-  shaped: { track: Array<[number, number]>; voyage: { startDate: string | null } }
+  shaped: {
+    track: Array<[number, number]>;
+    dayMarks: Array<{ i: number; label: string }>;
+    voyage: { startDate: string | null };
+  }
 ): Promise<StoredTrack | null> {
   const key = trackKey(imo, shaped.voyage.startDate);
   if (!env.SHIP_TRACKS || !key) return null;
@@ -604,7 +637,11 @@ async function retainedTrack(
       // Expire well after any sailing ends, so the key clears itself.
       await env.SHIP_TRACKS.put(
         key,
-        JSON.stringify({ at: Date.now(), track: shaped.track } satisfies StoredTrack),
+        JSON.stringify({
+          at: Date.now(),
+          track: shaped.track,
+          dayMarks: shaped.dayMarks,
+        } satisfies StoredTrack),
         { expirationTtl: 60 * 60 * 24 * 30 }
       );
       return null;   // fresh is what we serve
@@ -692,6 +729,10 @@ export default {
           const retained = await retainedTrack(env, imo, shaped);
           if (retained) {
             shaped.track = retained.track;
+            // Together, always: see the note on StoredTrack.dayMarks. An entry
+            // written before this field existed restores an empty list, which
+            // costs the client its time-based clip and nothing else.
+            shaped.dayMarks = retained.dayMarks ?? [];
             shaped.trackRetained = true;
             if (retained.at) shaped.trackAt = retained.at;
           }

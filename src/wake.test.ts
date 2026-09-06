@@ -1,6 +1,6 @@
 import { strict as assert } from 'node:assert';
 import { describe, it } from 'node:test';
-import { wakeGaps, wakeRuns, type WakePort } from './wake';
+import { dayIndex, voyageSlice, wakeGaps, wakeRuns, type WakePort } from './wake';
 
 // Real coordinates throughout, because what this guards against was only ever
 // visible in real data: a wake drawn confidently through places the ship had
@@ -128,5 +128,134 @@ describe('wake runs', () => {
 
     it('returns nothing for an empty wake', () => {
         assert.deepEqual(wakeRuns([], new Set()), []);
+    });
+});
+
+describe('day index', () => {
+    const marks = [
+        { i: 336, label: '30 Aug 00:32' },
+        { i: 369, label: '31 Aug 00:00' },
+        { i: 672, label: '06 Sep 00:30' },
+        { i: 707, label: '07 Sep 00:00' },
+    ];
+
+    it('finds the day a voyage started', () => {
+        assert.equal(dayIndex(marks, '06 Sep, 2026'), 672);
+        assert.equal(dayIndex(marks, '30 Aug, 2026'), 336);
+    });
+
+    it('ignores the year, which the labels never carry', () => {
+        assert.equal(dayIndex(marks, '06 Sep, 2027'), 672);
+    });
+
+    it('ignores the time of day, which varies by half an hour either way', () => {
+        // Upstream's midnight marks drift: 00:00, 00:30, 02:45 all appear.
+        assert.equal(dayIndex([{ i: 5, label: '04 Sep 02:45' }], '04 Sep, 2026'), 5);
+    });
+
+    it('returns -1 when the window does not reach the voyage start', () => {
+        assert.equal(dayIndex(marks, '01 Aug, 2026'), -1);
+    });
+
+    it('returns -1 with nothing to go on', () => {
+        assert.equal(dayIndex(marks, null), -1);
+        assert.equal(dayIndex([], '06 Sep, 2026'), -1);
+        assert.equal(dayIndex(marks, '   '), -1);
+    });
+});
+
+describe('voyage slice', () => {
+    const PC: [number, number] = [-80.607, 28.404];   // Port Canaveral
+    /** Well clear of the port — the open-sea part of a passage. */
+    const away = (n: number): Array<[number, number]> =>
+        Array.from({ length: n }, (_, k) => [-84 - k * 0.1, 24 - k * 0.05] as [number, number]);
+    /** Alongside. */
+    const atPort = (n: number): Array<[number, number]> =>
+        Array.from({ length: n }, () => [PC[0] + 0.01, PC[1] + 0.01] as [number, number]);
+    /** An hour out, and still inside the 0.4 degree box — as Star was. */
+    const justOut = (n: number): Array<[number, number]> =>
+        Array.from({ length: n }, (_, k) => [PC[0] + 0.09 + k * 0.02, PC[1] - 0.05] as [number, number]);
+
+    /**
+     * The shape that broke it: two cruises in one window, and the visits to the
+     * home port are arrival, stay and next departure in one unbroken stretch —
+     * she never leaves the box in between.
+     *
+     *   0-2    alongside, before the cruise before last
+     *   3-12   at sea
+     *   13-16  alongside: arrival, turnaround, departure
+     *   17-22  at sea, the cruise that has just finished
+     *   23-25  alongside: arrival, turnaround, departure again
+     *   26-27  an hour into the current cruise, still inside the box
+     */
+    const track: Array<[number, number]> = [
+        ...atPort(3), ...away(10), ...atPort(4), ...away(6), ...atPort(3), ...justOut(2),
+    ];
+    /**
+     * Midnight falls while she is ALONGSIDE, because a cruise departs in the
+     * afternoon of its start date — so each mark sits at the beginning of the
+     * visit she then sails from, not after it. Star's real marks do the same:
+     * "06 Sep 00:30" at index 672, her departure at 691.
+     */
+    const marks = [
+        { i: 0, label: '26 Aug 00:10' },
+        { i: 13, label: '30 Aug 00:20' },
+        { i: 23, label: '06 Sep 00:30' },
+    ];
+
+    it('starts at the departure that began the CURRENT voyage', () => {
+        // Sailed an hour ago: an hour of wake, and not a minute of the cruise
+        // before it. This is Star and Symphony, both of which drew a finished
+        // voyage under the new one.
+        const slice = voyageSlice(track, PC, marks, '06 Sep, 2026');
+        assert.ok(slice.length <= 3, `drew ${slice.length} points of a 28 point window`);
+        assert.deepEqual(slice[slice.length - 1], track[track.length - 1]);
+    });
+
+    it('draws the whole cruise when she is alongside at the END of it', () => {
+        // The same geometry, a week earlier: the last visit is the ARRIVAL, and
+        // the voyage's first day points back to the departure it began with.
+        // Choosing the last visit at or after that day would draw a completed
+        // cruise as a single point.
+        const arrived: Array<[number, number]> = [
+            ...atPort(3), ...away(10), ...atPort(4), ...away(6), ...atPort(3),
+        ];
+        const slice = voyageSlice(arrived, PC, marks, '30 Aug, 2026');
+        assert.equal(slice.length, 10, 'from the 30 Aug departure through to the berth');
+        assert.deepEqual(slice[0], arrived[16]);
+    });
+
+    it('returns a short wake rather than the whole window', () => {
+        // A ship an hour into a cruise has an hour of wake. The old code read
+        // that as a rendering fault and drew all 720 points of somebody else's
+        // voyage instead.
+        const slice = voyageSlice(track, PC, marks, '06 Sep, 2026');
+        assert.ok(slice.length < track.length / 2);
+    });
+
+    it('leaves a ship in mid-passage alone, dated or not', () => {
+        const midCruise: Array<[number, number]> = [...atPort(3), ...away(20)];
+        const dated = voyageSlice(midCruise, PC, [{ i: 3, label: '06 Sep 00:30' }], '06 Sep, 2026');
+        const blind = voyageSlice(midCruise, PC, [], null);
+        assert.deepEqual(dated, blind);
+        assert.equal(dated.length, 21);
+    });
+
+    it('falls back to the last visit when the marks miss the start day', () => {
+        // A cruise longer than the window reaches back, or an entry retained
+        // before day labels were kept. Right for every ship not mid-turnaround.
+        const slice = voyageSlice(track, PC, marks, '14 Jul, 2026');
+        assert.deepEqual(slice, voyageSlice(track, PC, [], null));
+    });
+
+    it('keeps the whole window for a leg that never touches the origin', () => {
+        // A one-way or repositioning sailing. Everything is the best answer.
+        const leg = away(30);
+        assert.deepEqual(voyageSlice(leg, PC, marks, '06 Sep, 2026'), leg);
+    });
+
+    it('has nothing to do without an origin or a track', () => {
+        assert.deepEqual(voyageSlice(track, undefined, marks, '06 Sep, 2026'), track);
+        assert.deepEqual(voyageSlice([], PC, marks, '06 Sep, 2026'), []);
     });
 });

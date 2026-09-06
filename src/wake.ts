@@ -160,3 +160,120 @@ export function wakeRuns(
     if (run.length > 0) runs.push(run);
     return runs;
 }
+
+/** One point in the track that told us which day it belongs to. */
+export interface DayMark {
+    /** Index into the track. */
+    i: number;
+    /** Upstream's own wording, "06 Sep 00:30". No year, ever. */
+    label: string;
+}
+
+/**
+ * Where in the track the named day begins, or -1.
+ *
+ * Matched on day and month alone, because the labels carry no year and the
+ * window they cover is a fortnight — no two marks in it can share a date. That
+ * also means this survives a New Year without special handling, which a
+ * year-aware parse would not have done without inventing one.
+ *
+ * `startDate` arrives as "06 Sep, 2026" and labels as "06 Sep 00:30", so the
+ * comparison is the first two whitespace-separated words of each, lowercased,
+ * with punctuation dropped.
+ */
+export function dayIndex(marks: DayMark[], startDate: string | null): number {
+    if (!startDate) return -1;
+    const key = (s: string) => s.replace(/,/g, ' ').trim().split(/\s+/).slice(0, 2).join(' ').toLowerCase();
+    const want = key(startDate);
+    if (!want) return -1;
+    for (const mark of marks) {
+        if (key(mark.label) === want) return mark.i;
+    }
+    return -1;
+}
+
+/**
+ * The stretch of the rolling window belonging to the voyage in progress.
+ *
+ * The window is a fixed ~720 points however long ago the cruise started, so on a
+ * ship mid-sailing it reaches back through the previous voyage and sometimes the
+ * one before. Drawing it raw answers a question nobody asked.
+ *
+ * TWO SIGNALS, AND NEITHER IS ENOUGH ALONE.
+ *
+ * Geometry finds the visits to the embarkation port, but cannot say which one
+ * this voyage began at. On turnaround day the arrival, the stay and the next
+ * departure are ONE unbroken stretch of "near the port" — she never leaves the
+ * box in between — so the old rule, which asked whether she was still there and
+ * stepped back a visit if so, chose the previous cruise's departure and drew a
+ * finished voyage. Observed on Star and Symphony within minutes of each other,
+ * both sailing new itineraries with the old ones drawn under them.
+ *
+ * Time says which day each part of the window is, but not where in that day she
+ * sailed. Clipping at the voyage's first midnight still includes the run home
+ * from the cruise before, which shares the date.
+ *
+ * Together they are exact: take the visits to the embarkation port, and pick the
+ * last one that begins on or after the voyage's first day. That is the departure
+ * this voyage started with, whatever else happened at that berth.
+ *
+ * Degrades in the right direction. No marks, no start date, or a window that
+ * does not reach back to the voyage's first day — a long cruise, or an entry
+ * retained before day labels were kept — and it falls back to the last visit,
+ * which is right for every ship that is not mid-turnaround.
+ */
+export function voyageSlice(
+    track: Array<[number, number]>,
+    origin: [number, number] | undefined,
+    marks: DayMark[],
+    startDate: string | null
+): Array<[number, number]> {
+    if (!origin || track.length < 2) return track;
+
+    // Within about 25 nm of the departure port counts as being there. Loose
+    // enough to catch a track that never passes exactly through the marker,
+    // tight enough not to match a different port on the same coast.
+    const NEAR_DEGREES = 0.4;
+    const near = (i: number) =>
+        Math.abs(track[i][0] - origin[0]) < NEAR_DEGREES &&
+        Math.abs(track[i][1] - origin[1]) < NEAR_DEGREES;
+
+    const visits: Array<{ from: number; to: number }> = [];
+    for (let i = 0; i < track.length; i++) {
+        if (!near(i)) continue;
+        const last = visits[visits.length - 1];
+        if (last && i === last.to + 1) last.to = i;
+        else visits.push({ from: i, to: i });
+    }
+    // Never near the start: a one-way or repositioning leg, or a route that does
+    // not begin where the window does. The whole window is the best answer here.
+    if (visits.length === 0) return track;
+
+    // The FIRST visit at or after the voyage's opening day, not the last.
+    //
+    // Both are the same ship alongside the same berth, and only the date tells
+    // them apart:
+    //
+    //   TURNAROUND   she arrived, turned round and sailed again inside one
+    //                unbroken stretch of "near the port". The voyage's first day
+    //                falls inside that stretch, so it is the one chosen, and the
+    //                wake starts where she left — minutes ago.
+    //   ARRIVAL DAY  she is alongside at the END of the voyage. Its first day is
+    //                a week earlier, so the visit chosen is the departure back
+    //                then, and the whole completed cruise is drawn.
+    //
+    // Taking the LAST such visit gets turnaround right and arrival day wrong,
+    // drawing a finished cruise as a single point. Taking the first gets both.
+    const firstDay = dayIndex(marks, startDate);
+    const departure = (firstDay >= 0 ? visits.find((v) => v.to >= firstDay) : undefined)
+        ?? visits[visits.length - 1];
+
+    // From the LAST point of the visit — the moment she left, not the moment she
+    // arrived — so a long stay alongside is not drawn as part of the passage.
+    //
+    // Returned however short it comes out, which is the other half of the fix. A
+    // ship two hours into a cruise has two hours of wake, and the old code read
+    // that as a rendering fault and drew the entire window instead — turning a
+    // correct empty answer into somebody else's voyage.
+    return track.slice(departure.to);
+}

@@ -23,6 +23,7 @@
 // reason this feature is smaller than the last one.
 
 import { Capacitor, CapacitorHttp } from '@capacitor/core';
+import { voyageSlice } from './wake';
 import { shipImo } from './ships';
 
 /**
@@ -110,6 +111,17 @@ export interface ShipVoyage {
    * hand took a fleet survey and a bearing on Cozumel.
    */
   trackAt?: number;
+  /**
+   * The only time information the track carries: roughly one point per calendar
+   * day arrives labelled "06 Sep 00:30", the rest are bare coordinates. Indices
+   * are into `track`, so the two are replaced together or not at all.
+   *
+   * Optional because an entry the Worker retained before it started keeping
+   * these restores without them, and because a client on an older Worker will
+   * simply not see the field. Absence costs the time half of the voyage clip
+   * and nothing else.
+   */
+  dayMarks?: Array<{ i: number; label: string }>;
 }
 
 /** Anything cached carries when it was fetched, because age is displayed. */
@@ -394,68 +406,19 @@ function pruneVoyages(): void {
 /**
  * The part of the track belonging to the voyage in progress.
  *
- * The upstream window is a fixed 720 points regardless of when the cruise
- * started, so on a ship mid-sailing it reaches back through the previous voyage
- * and sometimes the one before. Drawing it raw answers a question nobody asked.
- *
- * There are no timestamps on the points to clip by — only 15 of 720 carry a
- * label, and the rest are bare coordinates — so the clip is geometric: find
- * where the ship last left the embarkation port and keep everything after it.
- * That is exact for the round trips these itineraries almost always are, and
- * degrades to "slightly too much history" rather than to nothing when it is not.
+ * The arithmetic is in wake.ts so it can be tested; this is the adapter. See
+ * voyageSlice for why it takes both the day labels and the geometry, and why
+ * neither on its own gets turnaround day right.
  */
 export function voyageTrack(voyage: ShipVoyage): Array<[number, number]> {
-  const start = voyage.route[0];
-  if (!start || voyage.track.length < 2) return voyage.track;
-
-  // Within about 25 nm of the departure port counts as being there. Loose
-  // enough to catch a track that never passes exactly through the marker,
-  // tight enough not to match a different port on the same coast.
-  const NEAR_DEGREES = 0.4;
-  const near = (i: number) =>
-    Math.abs(voyage.track[i][0] - start[0]) < NEAR_DEGREES &&
-    Math.abs(voyage.track[i][1] - start[1]) < NEAR_DEGREES;
-
-  // Contiguous stretches of "at the departure port". These itineraries are
-  // overwhelmingly round trips, so the window typically holds several: the start
-  // of each sailing, and — once the ship is home again — the end of one.
-  const visits: Array<{ from: number; to: number }> = [];
-  for (let i = 0; i < voyage.track.length; i++) {
-    if (!near(i)) continue;
-    const last = visits[visits.length - 1];
-    if (last && i === last.to + 1) last.to = i;
-    else visits.push({ from: i, to: i });
-  }
-
-  // Never near the start: a one-way or repositioning leg, or a route that does
-  // not begin where the window does. The whole window is the best answer we have.
-  if (visits.length === 0) return voyage.track;
-
-  // Which visit is *this* voyage's departure? The last one — unless the ship is
-  // sitting at that port right now, in which case the last visit is the arrival
-  // at the END of the voyage rather than a departure.
-  //
-  // Getting this wrong is not loud. Slicing from an arrival leaves a point or
-  // two, which trips the short-track fallback below and quietly draws the ENTIRE
-  // rolling window instead — measured at 732 points spanning two prior sailings,
-  // where the voyage itself is 131. So the failure is a track that looks
-  // plausible and is mostly somebody else's cruise, and it only appears on
-  // turnaround day.
-  const ARRIVED_WITHIN = 3;   // points, ~90 min at this sampling rate
-  const lastVisit = visits[visits.length - 1];
-  const stillThere = lastVisit.to >= voyage.track.length - 1 - ARRIVED_WITHIN;
-  const departure = stillThere && visits.length > 1
-    ? visits[visits.length - 2]
-    : lastVisit;
-
-  // Slice from the last point of the visit — the moment it left, not the moment
-  // it arrived — so a long stay alongside is not drawn as part of the passage.
-  const clipped = voyage.track.slice(departure.to);
-
-  // Embarkation day: the ship has barely moved, and a two-point line looks like
-  // a rendering bug rather than a short track.
-  return clipped.length >= 2 ? clipped : voyage.track;
+  return voyageSlice(
+    voyage.track,
+    voyage.route[0],
+    voyage.dayMarks ?? [],
+    voyage.voyage.startDate
+  );
 }
+
 
 /**
  * The fresh voyage, keeping the old track when the new one is missing.
