@@ -36,7 +36,7 @@ import {
   voyageForShip,
 } from './shiptrack';
 import { distance } from './utils';
-import { wakeRuns } from './wake';
+import { wakeGaps, wakeRuns } from './wake';
 
 /**
  * A hull seen from above: pointed bow, flared sides, square stern.
@@ -569,7 +569,8 @@ export async function drawShipChart(key: string, voyage: Promise<ShipVoyage | nu
   // account for. The alternative to the dotted stretch is not "nothing missing"
   // — it is a wake that stops in open water with no explanation, which reads as
   // a rendering fault rather than as an absence of data.
-  const runs = wakeRuns(wake);
+  const gaps = wakeGaps(wake, resolved.ports, Date.now());
+  const runs = wakeRuns(wake, gaps);
   for (const run of runs) {
     if (run.length < 2) continue;
     polyline(map, run.map(toLatLng), {
