@@ -382,6 +382,15 @@ interface ShapedVoyage {
   ports: unknown[];
   extent: number[] | null;
   trackRetained?: boolean;
+  /**
+   * When a retained track was captured, epoch ms. Absent on a fresh one, and on
+   * a retained one stored before this field existed.
+   *
+   * Served so the client can tell a track twenty minutes old from one four days
+   * old without a fleet survey to date it by geometry, which is what it took the
+   * first time.
+   */
+  trackAt?: number;
 }
 
 function shapeDetail(imo: string, payload: any): ShapedVoyage {
@@ -527,40 +536,81 @@ function trackKey(imo: string, startDate: string | null): string | null {
   return `track:${imo}:${startDate.replace(/[^0-9A-Za-z]/g, '')}`;
 }
 
+interface StoredTrack {
+  /** When it was captured, epoch ms. */
+  at: number;
+  track: Array<[number, number]>;
+}
+
+/**
+ * Reads a stored track, tolerating the bare-array form written before the
+ * capture time was kept.
+ *
+ * Those legacy entries live for up to thirty days after this deploys, and their
+ * age is exactly what cannot be known — so they report `at: 0`, and a caller
+ * that cares about age can tell "unknown" from "recent".
+ */
+function readStored(raw: unknown): StoredTrack | null {
+  if (Array.isArray(raw)) {
+    return raw.length > 0 ? { at: 0, track: raw as Array<[number, number]> } : null;
+  }
+  if (raw && typeof raw === 'object') {
+    const track = (raw as StoredTrack).track;
+    if (Array.isArray(track) && track.length > 0) {
+      return { at: Number((raw as StoredTrack).at) || 0, track };
+    }
+  }
+  return null;
+}
+
 /**
  * Keeps the newest usable track, and hands one back when upstream has none.
  *
- * Writes are deliberately rare: only when nothing is stored for this voyage yet,
- * or what is stored is empty. Upstream re-decimates the whole span on every
- * request, so a fresh non-empty response is never *worse* than a stored one and
- * overwriting would buy nothing at the cost of a write per request. That makes
- * this roughly one write per vessel per sailing.
+ * UPSTREAM SERVES NO TRACK WHILE A SHIP IS ALONGSIDE. That is the fact this
+ * whole function turns on, and it was not known when it was written. Surveyed
+ * across the fleet: of 45 vessels, all 28 under way had a track and all 16
+ * stopped had none, every one of them within about six kilometres of a port.
+ * There is no intermittency to it.
  *
- * Never throws. Retention is a nicety; a KV hiccup must not cost a user their
- * route and position too.
+ * So this is not a nicety for a rare upstream glitch, which is what the previous
+ * comment here called it. It is the only thing that draws a wake at any port
+ * call, for any ship, on any day — which is a large fraction of the time anyone
+ * is looking.
+ *
+ * Which is why the write is no longer once-per-sailing. It used to store the
+ * first non-empty track for a voyage and never replace it, on the reasoning that
+ * a fresh response is never worse than a stored one so overwriting buys nothing.
+ * That is true of what to SERVE and false of what to KEEP: the stored copy is
+ * the fallback for every later request, and one captured on day one is far worse
+ * than one captured an hour ago. Observed on Star of the Seas, whose wake was
+ * frozen inbound to Cozumel on day four and still being drawn on day eight —
+ * missing three ports, and joined to her berth by a line across Florida.
+ *
+ * A write per cache miss, and misses are capped by TTL.detail at two an hour per
+ * vessel anyone is actually watching.
+ *
+ * Never throws. A KV hiccup must not cost a user their route and position too.
  */
 async function retainedTrack(
   env: Env,
   imo: string,
   shaped: { track: Array<[number, number]>; voyage: { startDate: string | null } }
-): Promise<Array<[number, number]> | null> {
+): Promise<StoredTrack | null> {
   const key = trackKey(imo, shaped.voyage.startDate);
   if (!env.SHIP_TRACKS || !key) return null;
 
   try {
     if (shaped.track.length > 0) {
-      const stored = await env.SHIP_TRACKS.get<Array<[number, number]>>(key, 'json');
-      if (!stored || stored.length === 0) {
-        // Expire well after any sailing ends, so the key clears itself.
-        await env.SHIP_TRACKS.put(key, JSON.stringify(shaped.track), {
-          expirationTtl: 60 * 60 * 24 * 30,
-        });
-      }
+      // Expire well after any sailing ends, so the key clears itself.
+      await env.SHIP_TRACKS.put(
+        key,
+        JSON.stringify({ at: Date.now(), track: shaped.track } satisfies StoredTrack),
+        { expirationTtl: 60 * 60 * 24 * 30 }
+      );
       return null;   // fresh is what we serve
     }
 
-    const stored = await env.SHIP_TRACKS.get<Array<[number, number]>>(key, 'json');
-    return Array.isArray(stored) && stored.length > 0 ? stored : null;
+    return readStored(await env.SHIP_TRACKS.get(key, 'json'));
   } catch {
     return null;
   }
@@ -641,8 +691,9 @@ export default {
           const shaped = shapeDetail(imo, payload);
           const retained = await retainedTrack(env, imo, shaped);
           if (retained) {
-            shaped.track = retained;
+            shaped.track = retained.track;
             shaped.trackRetained = true;
+            if (retained.at) shaped.trackAt = retained.at;
           }
           return shaped;
         },

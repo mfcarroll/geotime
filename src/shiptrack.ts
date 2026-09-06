@@ -97,8 +97,19 @@ export interface ShipVoyage {
   /**
    * True when some of `track` is history we kept rather than history upstream
    * just sent. Diagnostics only — the points are equally real either way.
+   *
+   * Not a rare state. Upstream serves no track at all while a ship is alongside,
+   * so this is what is drawn at every port call — see retainedTrack in
+   * workers/ship-track.
    */
   trackRetained?: boolean;
+  /**
+   * When a retained track was captured, epoch ms; absent on a fresh one.
+   *
+   * Carried purely so the age can be read off a response. Dating the last one by
+   * hand took a fleet survey and a bearing on Cozumel.
+   */
+  trackAt?: number;
 }
 
 /** Anything cached carries when it was fetched, because age is displayed. */

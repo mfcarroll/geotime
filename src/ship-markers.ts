@@ -33,7 +33,9 @@ import {
   type ShipFix,
   type ShipPort,
   type ShipVoyage,
+  voyageForShip,
 } from './shiptrack';
+import { distance } from './utils';
 
 /**
  * A hull seen from above: pointed bow, flared sides, square stern.
@@ -96,6 +98,39 @@ function nearOrigin(crumb: [number, number], origin: [number, number]): boolean 
   const NEAR_DEGREES = 0.4;
   return Math.abs(crumb[0] - origin[0]) < NEAR_DEGREES
       && Math.abs(crumb[1] - origin[1]) < NEAR_DEGREES;
+}
+
+/**
+ * Whether the ship is close enough to the wake's last crumb to be joined to it.
+ *
+ * The same idea as nearOrigin at the other end, and it was missing. The join
+ * exists to close a SAMPLING gap: the crumbs stop at the last fix the track feed
+ * holds, which can be an hour behind the hull.
+ *
+ * It is not a sampling gap when the track is stale. Surveyed across the fleet,
+ * the two populations do not overlap:
+ *
+ *   under way, 28 vessels    0-20 km from the last crumb
+ *   retained track, 4        116, 432, 1014 and 1263 km
+ *
+ * and the 1014 was Star of the Seas, drawn as a straight line from off Cozumel
+ * to her berth at Port Canaveral, 285 km of it across Florida.
+ *
+ * 75 km, which is the geometric midpoint of the gap — not of the OBSERVED gap,
+ * which would put it near 48, but of the largest real one that is possible. An
+ * hour behind at 22 knots, the fastest in the survey, is 41 km; 20 km is only
+ * what one afternoon happened to show. So the floor is 41, the ceiling is 116,
+ * and 75 sits between them with three quarters of a knot-hour on one side and a
+ * third off the other.
+ *
+ * Erring low is the cheaper mistake, which is why it is not pitched at 100. Too
+ * low and the wake stops short of the hull by a few tens of kilometres, which at
+ * the zoom a cruise is drawn at is nearly invisible. Too high and it draws a
+ * passage the ship never made, across land, at full confidence.
+ */
+function nearWakeEnd(crumb: [number, number], fix: { lat: number; lon: number }): boolean {
+  const JOINABLE_KM = 75;
+  return distance(crumb[1], crumb[0], fix.lat, fix.lon) < JOINABLE_KM;
 }
 
 /**
@@ -514,7 +549,12 @@ export async function drawShipChart(key: string, voyage: Promise<ShipVoyage | nu
   // and the fix the marker is standing on.
   const origin = resolved.route[0];
   if (origin && wake.length > 0 && nearOrigin(wake[0], origin)) wake.unshift(origin);
-  if (fix) wake.push([fix.lon, fix.lat]);
+  // Guarded at this end too. A wake that stops a thousand kilometres from the
+  // hull is not a wake with a gap in it — it is a wake belonging to an earlier
+  // day, and joining it draws a passage the ship never made.
+  if (fix && (wake.length === 0 || nearWakeEnd(wake[wake.length - 1], fix))) {
+    wake.push([fix.lon, fix.lat]);
+  }
   if (wake.length >= 2) {
     polyline(map, wake.map(toLatLng), {
       strokeColor: routeColour,
@@ -599,10 +639,36 @@ function worthPolling(): boolean {
   return shipTrackAvailable() && markableShips().length > 0;
 }
 
+/**
+ * Keeps the wake current for every ship on the list, not just a selected one.
+ *
+ * voyageForShip was only ever called for a SELECTION, so the detail bundle — and
+ * with it the track the Worker retains and serves back during port calls — was
+ * refreshed only while somebody had that ship open on the map. Adding a ship to
+ * the World Clock refreshed nothing: the list needs an offset, and that comes
+ * from a different endpoint entirely.
+ *
+ * That mattered once the survey showed upstream serves no track while a ship is
+ * alongside. The retained copy is what gets drawn at every port call, and it was
+ * only as fresh as the last time someone happened to be looking at the map while
+ * she was under way. Star of the Seas was four days stale by that route.
+ *
+ * Cheap, because both caches are already sized for it: voyageForShip holds a
+ * voyage for thirty minutes and the Worker's edge cache holds the response for
+ * the same, so this is at most two requests per watched ship per hour no matter
+ * how often the poll runs, and upstream sees one of them however many people are
+ * watching. It also inherits the poll's manners — nothing happens while the page
+ * is hidden, or while the list holds no ships.
+ */
+function refreshWatchedVoyages(): void {
+  for (const ship of markableShips()) void voyageForShip(shipKey(ship)).catch(() => {});
+}
+
 async function pollOnce(): Promise<void> {
   if (!worthPolling()) return;
   await fleetFixes();
   refreshShipMarkers();
+  refreshWatchedVoyages();
 }
 
 /**
