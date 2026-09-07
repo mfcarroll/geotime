@@ -22,6 +22,7 @@ import { shipKey, type ShipClock } from './ships';
 import { shipTimeAvailable } from './rccl';
 import { anchorOffsetHours, mapSelection, utcOffsetForCoordinates } from './time';
 import {
+  cachedVoyageFor,
   fleetFixes,
   fixForShip,
   markerBearing,
@@ -36,7 +37,8 @@ import {
   voyageForShip,
 } from './shiptrack';
 import { brighter, distance } from './utils';
-import { routeAhead, wakeGaps, wakeRuns, type WakePort } from './wake';
+import { roundCorners, routeAhead, wakeGaps, wakeRuns, type WakePort } from './wake';
+import { destinationPort } from './voyage-line';
 import { callNote, departsAt, localDate, voyageYear, type PortCall } from './port-clock';
 
 /**
@@ -160,11 +162,13 @@ function portColour(
  * in that same hour looking like strangers to it — the one kind of answer this
  * app exists to give, withheld from the one kind of thing only it can show.
  *
- * Dimmer than SELECTED and no brighter than the wash it belongs to, so "this is
- * the one you picked" and "this keeps the same time" stay two different
- * sentences.
+ * Paler and less saturated than SELECTED rather than darker, which is the same
+ * move the ring makes under a pointer: what a band says is "these all agree",
+ * and washing the colour out says it where dimming it would only read as a
+ * second, weaker highlight. The vivid gold is then left doing one job — this is
+ * the one you picked — instead of two shades of it competing.
  */
-const MATCHING = '#C9A227';
+const MATCHING = '#D8C879';
 
 function shipColour(key: string): string {
   if (state.selectedShipKey === key) return SELECTED;
@@ -199,7 +203,7 @@ function hullElement(): HTMLElement {
   // centre — the point the fix actually refers to — with no transform-origin to
   // keep in step. The path is drawn in those same units.
   el.innerHTML =
-    `<svg viewBox="-10 -10 20 20"><path d="${HULL_PATH}" stroke="${OUTLINE}" stroke-width="1.5"/></svg>`;
+    `<svg viewBox="-10 -10 20 20"><path d="${HULL_PATH}" stroke="${OUTLINE}" stroke-width="1.1"/></svg>`;
   return el;
 }
 
@@ -232,7 +236,10 @@ function styleHull(
   path.setAttribute('fill', stale && !selected ? HULL_STALE : colour);
   // A rim rather than a fill, so hovering never hides which kind of ship it is.
   path.setAttribute('stroke', hovered ? HOVER_RING : OUTLINE);
-  path.setAttribute('stroke-width', hovered ? '2.5' : '1.5');
+  // Thin, because the hull is 20px of mostly straight edges and a heavy outline
+  // reads as a block rather than as a ship. Hover thickens it, but nowhere near
+  // as far as it used to.
+  path.setAttribute('stroke-width', hovered ? '1.9' : '1.1');
   // Faded rather than hidden: an hour-old position is still worth seeing, it
   // just should not read as current.
   path.setAttribute('fill-opacity', stale && !selected ? '0.55' : '1');
@@ -261,7 +268,15 @@ function titleFor(ship: ShipClock, fix: ShipFix, age: number | null): string {
   const parts = [ship.name];
   if (age !== null) parts.push(ageLabel(age));
   if (fix.sog !== null) parts.push(fix.sog > 0.5 ? `${Math.round(fix.sog)} kn` : 'stopped');
-  if (fix.destination) parts.push(`→ ${fix.destination}`);
+
+  // Named by her itinerary where we hold one, for the same reason the card is:
+  // half the fleet types a code into the AIS set. See destinationPort.
+  const voyage = cachedVoyageFor(shipKey(ship));
+  const target = voyage
+    ? destinationPort(voyage, ship.offsetHours, Date.now() + state.timeOffset)
+    : null;
+  const where = target?.name ?? fix.destination;
+  if (where) parts.push(`→ ${where}`);
   return parts.join(' · ');
 }
 
@@ -693,7 +708,10 @@ export async function drawShipChart(key: string, voyage: Promise<ShipVoyage | nu
     resolved.route, calls, resolved.voyage.endDate,
     fix ? [fix.lon, fix.lat] : null,
     fix && makingWay(fix) ? markerBearing(fix) : null, now);
-  if (ahead.length >= 2) dottedRoute(map, ahead.map(toLatLng), routeColour);
+  // Eased at the corners: a planned route is a handful of waypoints, so every
+  // course change is a hard angle, and nothing at sea turns on a point. Bounded
+  // in kilometres rather than proportionally — see roundCorners.
+  if (ahead.length >= 2) dottedRoute(map, roundCorners(ahead).map(toLatLng), routeColour);
 
   // The wake is the least reliable of the three layers, and silently so: the
   // upstream `track` array can come back EMPTY for a ship that had 720 points a

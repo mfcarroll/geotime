@@ -1,6 +1,7 @@
 import { strict as assert } from 'node:assert';
 import { describe, it } from 'node:test';
-import { dayIndex, routeAhead, voyageIsOver, voyageSlice, wakeGaps, wakeRuns, type WakePort } from './wake';
+import { dayIndex, roundCorners, routeAhead, voyageIsOver, voyageSlice, wakeGaps, wakeRuns, type WakePort } from './wake';
+import { distance } from './utils';
 
 // Real coordinates throughout, because what this guards against was only ever
 // visible in real data: a wake drawn confidently through places the ship had
@@ -444,5 +445,69 @@ describe('route ahead', () => {
     it('leaves a route of fewer than two points alone', () => {
         assert.deepEqual(routeAhead([], [], null, UNDER_WAY, COURSE, NOW), []);
         assert.deepEqual(routeAhead([COCO_CAY], [], null, UNDER_WAY, COURSE, NOW), [COCO_CAY]);
+    });
+});
+
+describe('rounded corners', () => {
+    const km = (a: [number, number], b: [number, number]) =>
+        distance(a[1], a[0], b[1], b[0]);
+
+    /** A right-angle turn with 300 km legs, well clear of any coast. */
+    const CORNER: Array<[number, number]> = [[-80, 25], [-80, 28], [-77, 28]];
+
+    it('leaves the ends exactly where they were', () => {
+        const eased = roundCorners(CORNER);
+        assert.deepEqual(eased[0], CORNER[0]);
+        assert.deepEqual(eased[eased.length - 1], CORNER[CORNER.length - 1]);
+    });
+
+    it('never moves the line further from the corner than its budget', () => {
+        // The whole safety argument: the curve stays inside the triangle made by
+        // the corner and its two trim points, so a turn drawn tight against a
+        // headland cannot be rounded out into it.
+        // The arc itself: everything between the two untouched end vertices.
+        const arc = roundCorners(CORNER, 4).slice(1, -1);
+        const furthest = Math.max(...arc.map((p) => km(p, CORNER[1])));
+        assert.ok(furthest <= 4.001, `moved ${furthest.toFixed(2)} km`);
+    });
+
+    it('actually rounds it', () => {
+        const eased = roundCorners(CORNER, 4);
+        assert.ok(eased.length > CORNER.length);
+        // No sample sits exactly on the vertex any more.
+        assert.ok(eased.every((p) => p[0] !== CORNER[1][0] || p[1] !== CORNER[1][1]));
+    });
+
+    it('trims a fixed distance, not a fraction of the leg', () => {
+        // The reason this is not Chaikin: a proportional cut takes twenty
+        // kilometres off a two-hundred kilometre leg.
+        const long: Array<[number, number]> = [[-80, 20], [-80, 30], [-70, 30]];
+        const short: Array<[number, number]> = [[-80, 29.8], [-80, 30], [-79.8, 30]];
+        const cut = (path: Array<[number, number]>) =>
+            Math.max(...roundCorners(path, 4).slice(1, -1).map((p) => km(p, path[1])));
+        assert.ok(Math.abs(cut(long) - cut(short)) < 1.5, 'the same cut on both');
+    });
+
+    it('leaves a port turn-back pointed', () => {
+        // A route goes in and out of a call through the same water. That vertex
+        // is a reversal, not a bend: rounding it pulls the line short of the
+        // very place it exists to reach.
+        const callAt: Array<[number, number]> = [[-79, 26], [-77.93411, 25.8169], [-79, 26]];
+        assert.deepEqual(roundCorners(callAt), callAt);
+    });
+
+    it('leaves a duplicated vertex alone', () => {
+        // Which is how an arrival and a departure at one port arrive.
+        const doubled: Array<[number, number]> = [
+            [-80, 25], [-77.93411, 25.8169], [-77.93411, 25.8169], [-79, 26],
+        ];
+        const eased = roundCorners(doubled);
+        assert.ok(eased.some((p) => p[0] === -77.93411 && p[1] === 25.8169));
+    });
+
+    it('has nothing to round in a straight line or a stub', () => {
+        assert.deepEqual(roundCorners([]), []);
+        assert.deepEqual(roundCorners([[-80, 25]]), [[-80, 25]]);
+        assert.deepEqual(roundCorners([[-80, 25], [-79, 26]]), [[-80, 25], [-79, 26]]);
     });
 });

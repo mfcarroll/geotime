@@ -29,7 +29,7 @@
 import { state } from './state';
 import { shipKey } from './ships';
 import { anchorOffsetHours, utcOffsetForCoordinates } from './time';
-import { distance } from './utils';
+import { distance, fold } from './utils';
 import { ALONGSIDE_KNOTS, fixForShip, type ShipFix, type ShipPort, type ShipVoyage } from './shiptrack';
 import { instantOf, localDate, parseWall, timeWithDay, voyageYear } from './port-clock';
 
@@ -117,16 +117,54 @@ export function voyageLine(voyage: ShipVoyage | null, key: string | null): strin
     return `${name} · Dep. ${timeWithDay(wall, today, year)}${basisSuffix(portOffset, shipOffset)}`;
   }
 
-  // Under way. The destination and its ETA, as the operator states them.
-  if (!voyage.destination) return '';
+  // Under way. Where she is going, named by the itinerary rather than by the
+  // AIS set — see destinationPort — and due when the operator says.
+  const target = destinationPort(voyage, shipOffset, now);
+  const name = target?.name ?? voyage.destination;
+  if (!name) return '';
+
   const wall = parseWall(voyage.eta);
-  if (!wall) return `→ ${voyage.destination}`;
+  if (!wall) return `→ ${name}`;
 
-  // The ETA belongs to the port being approached, which is the last one on the
-  // route rather than the nearest — so it is matched by name where we can, and
-  // left unqualified where we cannot.
-  const target = voyage.ports.find((p) => p.name && p.name === voyage.destination) ?? null;
   const portOffset = target ? portOffsetHours(target) : null;
+  return `→ ${name} · ETA ${timeWithDay(wall, today, year)}${basisSuffix(portOffset, shipOffset)}`;
+}
 
-  return `→ ${voyage.destination} · ETA ${timeWithDay(wall, today, year)}${basisSuffix(portOffset, shipOffset)}`;
+/**
+ * The port she is standing off, as a call on her itinerary.
+ *
+ * `destination` is free text an officer types into the AIS set, and a good deal
+ * of it is not a place name at all. The Worker already drops the shapes it can
+ * recognise as codes — bare LOCODEs, "MX COZ" — but the fleet produces plenty
+ * it cannot: "Bas Nas" for Bahamas/Nassau, "Nas>mia" for Nassau to Miami, "Us
+ * Pcv >>> Bs Coc". Widening that filter is how you lose New York, which has the
+ * same shape as a code and is a place.
+ *
+ * So the itinerary answers instead, because it is a list of real names for the
+ * places this ship is actually going. Matched by name first, which honours a
+ * crew who typed something recognisable — and where they did not, the next call
+ * she has not yet sailed from is where she is going, by definition.
+ *
+ * Null only for a voyage with no itinerary at all, where the typed string is
+ * still better than saying nothing.
+ */
+export function destinationPort(
+  voyage: ShipVoyage, shipOffset: number | null, now: number
+): ShipPort | null {
+  const stated = fold(voyage.destination ?? '');
+  const named = stated
+    ? voyage.ports.find((p) => p.name && fold(p.name) === stated)
+    : undefined;
+  if (named) return named;
+
+  const year = voyageYear(voyage.voyage.startDate, voyage.voyage.endDate);
+  for (const port of voyage.ports) {
+    // The final call states no departure — nobody leaves again — so reaching it
+    // means every other call is behind her and this is the one ahead.
+    if (!port.depart) return port;
+    const wall = parseWall(port.depart);
+    if (!wall) continue;
+    if (instantOf(wall, portOffsetHours(port) ?? shipOffset ?? 0, year) > now) return port;
+  }
+  return null;
 }

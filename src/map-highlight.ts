@@ -17,17 +17,34 @@ export interface ZoneStyle {
 // questions, and a zone can be in the selected band *and* under the cursor.
 export const FILLS = {
   base:            { fillColor: '#000000', fillOpacity: 0,    zIndex: 1 },
-  gpsBand:         { fillColor: '#3F80FF', fillOpacity: 0.35, zIndex: 2 },
+  gpsBand:         { fillColor: '#3F80FF', fillOpacity: 0.26, zIndex: 2 },
   // The clock you are living by, when that is a ship. Green rather than gold
   // because gold means "you picked this" — the ship is a fact about where you
   // are standing, in the same family as the blue band beside it, and the two
   // carry the same weight for that reason.
-  shipBand:        { fillColor: '#34C759', fillOpacity: 0.32, zIndex: 4 },
-  hoverBand:       { fillColor: '#FFFFFF', fillOpacity: 0.18, zIndex: 3 },
-  gpsSegment:      { fillColor: '#3F80FF', fillOpacity: 0.75, zIndex: 5 },
-  selectedBand:    { fillColor: '#FFD700', fillOpacity: 0.3,  zIndex: 6 },
-  selectedSegment: { fillColor: '#FFD700', fillOpacity: 0.8,  zIndex: 7 },
+  shipBand:        { fillColor: '#34C759', fillOpacity: 0.24, zIndex: 4 },
+  hoverBand:       { fillColor: '#FFFFFF', fillOpacity: 0.14, zIndex: 3 },
+  gpsSegment:      { fillColor: '#3F80FF', fillOpacity: 0.55, zIndex: 5 },
+  selectedBand:    { fillColor: '#FFD700', fillOpacity: 0.22, zIndex: 6 },
+  // A wash, not a coat. At 0.8 the gold was opaque enough that the coastline,
+  // the place names and the sea underneath it all went: the zone you picked was
+  // the one part of the map you could no longer read.
+  selectedSegment: { fillColor: '#FFD700', fillOpacity: 0.5,  zIndex: 7 },
 } as const;
+
+/**
+ * How much of the fill survives while a ship's chart is on the map.
+ *
+ * The bands answer "where else keeps this time", which is the question until
+ * the moment a cruise is drawn on top of them — and then it is not. A wake, a
+ * dotted route and a row of ports are fine lines and small rings, and they were
+ * being read through a gold wash laid over the whole hemisphere they cross.
+ *
+ * Dimmed rather than dropped, because the band is still the reason half of what
+ * is on screen is the colour it is. It should be legible and it should be
+ * quiet, in that order.
+ */
+export const CHART_FILL_SCALE = 0.35;
 
 // Same weight throughout — hover reads as a brighter border, not a thicker one.
 // A weight change nudges the boundary by a pixel, which looks like the shape
@@ -66,11 +83,20 @@ export interface ZoneStyleInput {
   anchorShipOffset: number | null;
   /** Current UTC offset of an arbitrary zone id. */
   offsetOf: (tzid: string) => number;
+  /**
+   * True while a selected ship's chart is drawn over the map.
+   *
+   * Not merely "aboard": the chart a passenger's own ship draws is the standing
+   * state of the app at sea, and fading the map permanently for it would make
+   * the quiet version the only version. This is about a deliberate look at one
+   * cruise.
+   */
+  chartShown?: boolean;
 }
 
 export function resolveZoneStyle(input: ZoneStyleInput): ZoneStyle {
   const { tzid, offset, selectedTzid, selectedOffset, gpsTzid, hoveredTzid, offsetOf,
-          anchorShipOffset } = input;
+          anchorShipOffset, chartShown } = input;
 
   const sameOffsetAs = (other: string | null) =>
     other !== null && offsetOf(other) === offset;
@@ -95,17 +121,22 @@ export function resolveZoneStyle(input: ZoneStyleInput): ZoneStyle {
   else if (sameOffsetAs(hoveredTzid)) fill = FILLS.hoverBand; // covers the hovered zone itself
   else fill = FILLS.base;
 
-  if (!isHovered) return { ...fill, ...OUTLINE.none };
+  const wash = (style: ZoneStyle): ZoneStyle => chartShown
+    ? { ...style, fillOpacity: style.fillOpacity * CHART_FILL_SCALE }
+    : style;
+
+  if (!isHovered) return wash({ ...fill, ...OUTLINE.none });
 
   // Hovering always outlines the zone under the pointer, whatever fill it
   // already carries. Without this a zone inside the selected band returned the
   // band style and dropped out of the chain before hover was ever considered,
   // so pointing at a neighbour gave no feedback at all. Lift it above its own
   // band too, or the outline gets painted over by an adjacent zone.
+  // The hover lift is applied AFTER the wash, so pointing at a zone still says
+  // so while a chart is up — a proportional dimming of the lift would have made
+  // it invisible in exactly the state where the map is quietest.
   return {
-    ...fill,
-    ...OUTLINE.hover,
-    fillOpacity: Math.min(1, fill.fillOpacity + 0.15),
-    zIndex: fill.zIndex + 10,
+    ...wash({ ...fill, ...OUTLINE.hover, zIndex: fill.zIndex + 10 }),
+    fillOpacity: Math.min(1, (chartShown ? fill.fillOpacity * CHART_FILL_SCALE : fill.fillOpacity) + 0.15),
   };
 }

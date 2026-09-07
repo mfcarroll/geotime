@@ -525,3 +525,97 @@ export function routeAhead(
     // which way along the route is ahead, which it now does.
     return [position, ...route.slice(at)];
 }
+
+/**
+ * How far into a leg a corner may be cut, in kilometres.
+ *
+ * The whole budget for this, and small on purpose. A rounded corner is a
+ * PRETTIER version of the route, never a different one: the curve stays inside
+ * the triangle made by the corner and its two trim points, so nothing can move
+ * further from the stated line than this, and a turn drawn tight against a
+ * headland cannot be rounded out into it.
+ *
+ * Four kilometres is under a pixel at the zoom a whole cruise is framed at, and
+ * about three at the zoom one leg fills the screen — which is the range where a
+ * corner reads as a corner rather than as a kink.
+ */
+const CORNER_KM = 4;
+
+/**
+ * Beyond this much of a turn, the corner is left alone.
+ *
+ * A route doubles back on itself at every port — in and out through the same
+ * water — and the vertex there is a reversal rather than a bend. Rounding it
+ * would pull the line short of the very place it exists to reach, and draw a
+ * loop where the ship turned round.
+ */
+const CORNER_MAX_TURN = 150;
+
+/**
+ * The same path with its corners eased.
+ *
+ * A planned route is a handful of waypoints, so every course change is a hard
+ * angle — which is honest about the data and wrong about the sea, where nothing
+ * turns on a point. Each interior vertex becomes a short quadratic curve
+ * between two points trimmed back along its own legs, with the vertex as the
+ * control point.
+ *
+ * Deliberately not a smoothing filter. Chaikin and friends move every vertex by
+ * a FRACTION of its legs, which is unbounded in kilometres and cuts a 200 km
+ * leg's corner by twenty; this trims a fixed distance, so the longer the leg the
+ * less of it proportionally is touched and the error stays where it can be
+ * reasoned about. See CORNER_KM.
+ */
+export function roundCorners(
+    path: Array<[number, number]>,
+    maxKm = CORNER_KM
+): Array<[number, number]> {
+    if (path.length < 3) return path;
+
+    const out: Array<[number, number]> = [path[0]];
+    for (let i = 1; i < path.length - 1; i++) {
+        const before = path[i - 1], at = path[i], after = path[i + 1];
+        const back = distance(at[1], at[0], before[1], before[0]);
+        const on = distance(at[1], at[0], after[1], after[0]);
+
+        // A duplicated vertex — which is how a port call arrives — has no leg to
+        // trim along and no corner to round.
+        if (back === 0 || on === 0 || turnAt(before, at, after) > CORNER_MAX_TURN) {
+            out.push(at);
+            continue;
+        }
+
+        // Never past halfway, or two corners on a short leg would meet in the
+        // middle and swallow the straight between them.
+        const from = along(at, before, Math.min(0.5, maxKm / back));
+        const to = along(at, after, Math.min(0.5, maxKm / on));
+
+        // Three samples is enough for an arc this short; a fourth is invisible
+        // and costs a point on every corner of every redraw.
+        for (const t of [0, 0.25, 0.5, 0.75, 1]) {
+            const u = 1 - t;
+            out.push([
+                u * u * from[0] + 2 * u * t * at[0] + t * t * to[0],
+                u * u * from[1] + 2 * u * t * at[1] + t * t * to[1],
+            ]);
+        }
+    }
+    out.push(path[path.length - 1]);
+    return out;
+}
+
+/** A point a fraction of the way from `at` toward `to`. */
+function along(at: [number, number], to: [number, number], t: number): [number, number] {
+    return [at[0] + (to[0] - at[0]) * t, at[1] + (to[1] - at[1]) * t];
+}
+
+/** Degrees of course change at a vertex: 0 is straight on, 180 is a reversal. */
+function turnAt(
+    before: [number, number], at: [number, number], after: [number, number]
+): number {
+    const scale = Math.cos((at[1] * Math.PI) / 180) || 1;
+    const inbound = Math.atan2((at[0] - before[0]) * scale, at[1] - before[1]);
+    const outbound = Math.atan2((after[0] - at[0]) * scale, after[1] - at[1]);
+    const degrees = ((outbound - inbound) * 180) / Math.PI;
+    return Math.abs(((degrees + 540) % 360) - 180);
+}

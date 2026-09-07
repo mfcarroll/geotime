@@ -1266,6 +1266,10 @@ function styleFor(feature: google.maps.Data.Feature): google.maps.Data.StyleOpti
     // marker says so. aboardShip() is null every other moment.
 
     anchorShipOffset: aboardShip()?.offsetHours ?? null,
+
+    // A chart is up because someone asked for one. Aboard with nothing picked
+    // is the app's resting state at sea and keeps the map at full strength.
+    chartShown: state.selectedShipKey !== null || state.selectedPort !== null,
   });
 }
 
