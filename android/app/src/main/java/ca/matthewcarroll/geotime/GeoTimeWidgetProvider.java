@@ -281,7 +281,10 @@ public class GeoTimeWidgetProvider extends AppWidgetProvider {
     };
 
     private static class Row {
-        final String label;
+        /** What the row is called. Not final: the last thing the row-builder
+         *  does is qualify the names that collide — see the disambiguation
+         *  pass. Mirrors `var name` in ZoneRowResolver.swift. */
+        String label;
         /** Shorter form of `label` where one exists (ships); null otherwise. */
         final String shortLabel;
         final String tzId;         // id passed to TextClock.setTimeZone
@@ -308,6 +311,15 @@ public class GeoTimeWidgetProvider extends AppWidgetProvider {
          * WidgetRow.sharesOffset in ZoneRowResolver.swift.
          */
         boolean sharesOffset;
+        /**
+         * "BC" / "Canada" / "" — held back until a name collides.
+         *
+         * A widget has no width to spend on saying where a place is when
+         * nothing is asking. It is spent when two rows draw the same name at
+         * DIFFERENT hours, which is the one case a reader cannot resolve for
+         * themselves. Mirrors WidgetRow.region in ZoneRowResolver.swift.
+         */
+        String region = "";
         /**
          * True when the row's name is one the zone could not have produced —
          * a place the user picked, not the zone's own city. Decides which of two
@@ -375,6 +387,7 @@ public class GeoTimeWidgetProvider extends AppWidgetProvider {
         List<String> stored = readStored(ctx);
         List<String> labels = readList(ctx, WidgetBridgePlugin.PREFS_LABELS_KEY);
         List<String> kinds = readList(ctx, WidgetBridgePlugin.PREFS_KINDS_KEY);
+        List<String> regionsOf = readList(ctx, WidgetBridgePlugin.PREFS_REGIONS_KEY);
         List<Ship> ships = readShips(ctx);
 
         String aboardKey = ctx.getSharedPreferences(WidgetBridgePlugin.PREFS_NAME, Context.MODE_PRIVATE)
@@ -471,17 +484,19 @@ public class GeoTimeWidgetProvider extends AppWidgetProvider {
         // clock. Two identical lines, which reads as a bug because there is
         // nothing there to tell apart.
         //
-        // Keyed on the ZONE as well as the name, so it only ever catches rows
-        // that really are one region of the world under two records. Two towns
-        // of one name in DIFFERENT zones stay two rows: they draw alike but they
-        // are not the same place, and giving one up is fitCity's decision when
-        // the space runs out, not this one's. Same reason "New York City" and
-        // "New York" both keep their rows — they draw differently, so there is
-        // something to see.
+        // Keyed on the OFFSET, not the zone: what a reader can tell apart is the
+        // name and the time, so two rows agreeing on both are one row to look at
+        // whatever their ids say. Vancouver BC and Vancouver WA are two zones
+        // and, while they keep the same hour, one line — the meaning is the
+        // same. When they part, in November, the offsets differ, both rows
+        // stand, and the pass at the end of this method says which is which.
+        //
+        // "New York City" and "New York" are never touched by this. They draw
+        // differently, so there is something to see.
         Set<String> drawn = new HashSet<>();
-        if (!mergeGroundIntoShip) drawn.add(baseId + "\u0001" + groundName);
+        if (!mergeGroundIntoShip) drawn.add(groundName + "\u0001" + geographicOffset);
         if (deviceOffset != anchorOffset && deviceOffset != geographicOffset) {
-            drawn.add(osTz.getID() + "\u0001" + cityLabel(osTz.getID()));
+            drawn.add(cityLabel(osTz.getID()) + "\u0001" + deviceOffset);
         }
         for (int i = 0; i < stored.size(); i++) {
             String id = stored.get(i);
@@ -490,9 +505,8 @@ public class GeoTimeWidgetProvider extends AppWidgetProvider {
             Resolved rz = resolveTimeZone(id);
             String place = placeKey(rz.tzId, named);
             if (seenPlaces.contains(place)) continue;
-            if (!drawn.add(rz.tzId + "\u0001"
-                    + (named != null ? named : cityLabel(id)))) continue;
             long off = rz.tz.getOffset(now) / 60000L;
+            if (!drawn.add((named != null ? named : cityLabel(id)) + "\u0001" + off)) continue;
             // Duplicates are kept and flagged rather than dropped here. Dropping
             // was unconditional, so a zone vanished from the widget even with
             // half the surface empty — and it happened before the layout had
@@ -524,6 +538,7 @@ public class GeoTimeWidgetProvider extends AppWidgetProvider {
             // answer and should win every time.
             row.namesAPlace = chosen != null;
             row.isPort = i < kinds.size() && "port".equals(kinds.get(i));
+            row.region = i < regionsOf.size() ? regionsOf.get(i) : "";
             rows.add(row);
         }
 
@@ -558,6 +573,28 @@ public class GeoTimeWidgetProvider extends AppWidgetProvider {
                     differs ? formatDay(tz, now, false) : null,
                     differs ? formatDay(tz, now, true) : null,
                     relativeOffset(ship.offsetMin, anchorOffset)));
+        }
+
+        // Two rows still sharing a name are two DIFFERENT hours by now — the
+        // pass above folded away the ones that agreed. So the reader is looking
+        // at two places called Vancouver reading two times, and nothing on the
+        // row says which is which. That is what the region is for, and the only
+        // thing it is for: "Vancouver, BC" against "Vancouver, WA", from
+        // November, when British Columbia and Washington part on daylight time.
+        //
+        // Only the rows that collide, and only where the app recorded a region
+        // to spend. A row with none keeps its bare name, which is still the
+        // truth about it — the anchor has its own mark besides.
+        Map<String, Integer> nameCounts = new HashMap<>();
+        for (Row r : rows) {
+            Integer seen = nameCounts.get(r.label);
+            nameCounts.put(r.label, seen == null ? 1 : seen + 1);
+        }
+        for (Row r : rows) {
+            Integer n = nameCounts.get(r.label);
+            if (n != null && n > 1 && r.region != null && !r.region.isEmpty()) {
+                r.label = r.label + ", " + r.region;
+            }
         }
 
         Collections.sort(rows, OFFSET_ORDER);

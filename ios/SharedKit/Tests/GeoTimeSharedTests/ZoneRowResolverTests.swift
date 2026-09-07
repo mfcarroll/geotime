@@ -191,15 +191,71 @@ final class ZoneRowResolverInvariants: XCTestCase {
                        "the bare zone is the one that yields when room runs short")
     }
 
-    /// And two towns of one name in different zones are two places, not one
-    /// line drawn twice — so neither hides the other here.
-    func testTwoTownsOfOneNameInDifferentZonesBothKeepRows() throws {
+    /// Two towns of one name keeping one hour are one line.
+    ///
+    /// Vancouver BC and Vancouver WA are two different places in two different
+    /// zones, and while their clocks agree there is nothing for a second row to
+    /// say: same word, same time. The meaning is the same.
+    func testTwoTownsOfOneNameKeepingOneHourAreOneLine() throws {
         let rows = ZoneRowResolver.resolve(
             storedIds: ["America/Vancouver", "America/Los_Angeles"],
-            local: Fixture.newYork, deviceTz: Fixture.newYork,
-            now: Fixture.now, labels: ["Vancouver", "Vancouver"])
+            local: Fixture.newYork, deviceTz: Fixture.newYork, now: Fixture.now,
+            labels: ["Vancouver", "Vancouver"], regions: ["BC", "WA"])
 
-        XCTAssertEqual(rows.filter { !$0.isLocal }.count, 2)
+        let saved = rows.filter { !$0.isLocal }
+        XCTAssertEqual(saved.count, 1)
+        XCTAssertEqual(saved.first?.name, "Vancouver", "nothing to disambiguate, nothing spent")
+    }
+
+    /// And told apart the moment their clocks part.
+    ///
+    /// Which BC and Washington do in November, when one of them stops moving
+    /// with daylight time. Two places called Vancouver reading two different
+    /// hours, and nothing on either row saying which is which — that is the one
+    /// case a reader cannot resolve for themselves, and the only case the region
+    /// is spent on.
+    ///
+    /// Three real Birminghams, because they are already in that state and need
+    /// no future date to prove it: England on UTC+1, Alabama on UTC-5, Michigan
+    /// on UTC-4. Their regions and zones are the ones the shipped city index
+    /// actually holds. They are also why the REGION is spent before the
+    /// country: two of them are in the United States, so "Birmingham, United
+    /// States" would tell nobody anything.
+    func testTownsOfOneNameOnDifferentHoursAreToldApart() throws {
+        let rows = ZoneRowResolver.resolve(
+            storedIds: ["Europe/London", "America/Chicago", "America/Detroit"],
+            local: Fixture.newYork, deviceTz: Fixture.newYork, now: Fixture.now,
+            labels: ["Birmingham", "Birmingham", "Birmingham"],
+            regions: ["England", "AL", "MI"])
+
+        let saved = rows.filter { !$0.isLocal }
+        XCTAssertEqual(Set(saved.map(\.name)),
+                       ["Birmingham, England", "Birmingham, AL", "Birmingham, MI"])
+        XCTAssertEqual(Set(saved.map(\.offsetSeconds)).count, 3, "three hours, three rows")
+    }
+
+    /// A name nothing collides with is left alone. The widget has no width to
+    /// spend on saying where a place is when nobody is asking.
+    func testARegionIsNotSpentOnANameThatStandsAlone() throws {
+        let rows = ZoneRowResolver.resolve(
+            storedIds: ["America/Vancouver"],
+            local: Fixture.newYork, deviceTz: Fixture.newYork, now: Fixture.now,
+            labels: ["Vancouver"], regions: ["BC"])
+
+        XCTAssertEqual(try row(rows, named: "Vancouver").region, "BC",
+                       "carried, so it is there when needed")
+    }
+
+    /// A collision the app recorded no region for keeps its bare name, which is
+    /// still the truth about it.
+    func testACollisionWithNoRegionToSpendKeepsTheBareName() throws {
+        let rows = ZoneRowResolver.resolve(
+            storedIds: ["America/Vancouver", "America/New_York"],
+            local: Fixture.london, deviceTz: Fixture.london, now: Fixture.now,
+            labels: ["Vancouver", "Vancouver"], regions: ["BC", ""])
+
+        let saved = rows.filter { !$0.isLocal }
+        XCTAssertEqual(Set(saved.map(\.name)), ["Vancouver, BC", "Vancouver"])
     }
 
     /// The ground zone, explicitly added, is a row of its own once the ground

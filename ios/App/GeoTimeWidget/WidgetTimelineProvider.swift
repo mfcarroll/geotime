@@ -65,6 +65,7 @@ struct Provider: TimelineProvider {
                                                         localPlaceName: WidgetSharedStore.loadLocalPlaceName(),
                                                         labels: WidgetSharedStore.loadLabels(),
                                                         kinds: WidgetSharedStore.loadKinds(),
+                                                        regions: WidgetSharedStore.loadRegions(),
                                                         ships: ships,
                                                         aboardShipKey: WidgetSharedStore.loadAboardShipKey()))
     }

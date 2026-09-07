@@ -20,7 +20,9 @@ extension WidgetRow {
 
 struct WidgetRow: Identifiable {
     let id: String
-    let name: String
+    /// What the row is called. A `var` because the last thing resolve() does is
+    /// qualify the names that collide — see the disambiguation pass.
+    var name: String
     /// A shorter form of `name`, when one exists (ships). The view uses it only
     /// when the full name would shrink the font every row shares — see
     /// GeoTimeWidget.metrics.
@@ -49,6 +51,13 @@ struct WidgetRow: Identifiable {
     /// It is only the first thing to give up when room runs out — ahead of a
     /// zone that shows an hour nothing else does. Defaulted so the rows that
     /// can never be duplicates (ground, phone, ship) say nothing about it.
+    /// "BC" / "Canada" / "" — held back until a name collides.
+    ///
+    /// A widget has no width to spend on saying where a place is when nothing
+    /// is asking. It is spent when two rows draw the same name at DIFFERENT
+    /// hours, which is the one case a reader cannot resolve for themselves.
+    var region: String = ""
+
     /// Mirrors Row.sharesOffset in GeoTimeWidgetProvider.java.
     var sharesOffset: Bool = false
     /// True when the row's name is one the zone could not have produced — a place
@@ -86,6 +95,7 @@ enum ZoneRowResolver {
     static func resolve(storedIds: [String], local: TimeZone, deviceTz: TimeZone, now: Date,
                         localPlaceName: String? = nil, labels: [String] = [],
                         kinds: [String] = [],
+                        regions: [String] = [],
                         ships: [WidgetSharedStore.Ship] = [],
                         aboardShipKey: String? = nil) -> [WidgetRow] {
         let geographicOffset = local.secondsFromGMT(for: now)
@@ -238,7 +248,7 @@ enum ZoneRowResolver {
             seenPlaces.insert(WidgetRow.placeKey(deviceTz.identifier, nil))
         }
 
-        // What a row would DRAW, which is a second question from what it is.
+        // One name at one hour is one line, however many records are behind it.
         //
         // Saving the city Vancouver and the timezone America/Vancouver makes two
         // records that are genuinely different — the app lists them as
@@ -247,19 +257,20 @@ enum ZoneRowResolver {
         // clock. Two identical lines, which reads as a bug because there is
         // nothing there to tell apart.
         //
-        // Keyed on the ZONE as well as the name, so it only ever catches rows
-        // that really are one region of the world under two records. Two towns
-        // of one name in DIFFERENT zones stay two rows: they draw alike but they
-        // are not the same place, and one of them yielding is fit()'s decision
-        // to make when the space runs out, not this one's. Same reason "New York
-        // City" and "New York" both keep their rows — they draw differently, so
-        // there is something to see.
+        // Keyed on the OFFSET, not the zone: what a reader can tell apart is
+        // the name and the time, so two rows agreeing on both are one row to
+        // look at whatever their ids say. Vancouver BC and Vancouver WA are two
+        // zones and, while they keep the same hour, one line — the meaning is
+        // the same. When they part, in November, the offsets differ, both rows
+        // stand, and the pass below is what says which is which.
+        //
+        // "New York City" and "New York" are never touched by this. They draw
+        // differently, so there is something to see.
         var drawn = Set<String>()
-        let drawnKey = { (tzId: String, name: String) in "\(tzId)\u{1}\(name)" }
-        if !mergeGroundIntoShip { drawn.insert(drawnKey(local.identifier, groundName)) }
+        let drawnKey = { (name: String, offset: Int) in "\(name)\u{1}\(offset)" }
+        if !mergeGroundIntoShip { drawn.insert(drawnKey(groundName, geographicOffset)) }
         if deviceShown {
-            drawn.insert(drawnKey(deviceTz.identifier,
-                                  TimezoneDisplay.displayName(deviceTz.identifier)))
+            drawn.insert(drawnKey(TimezoneDisplay.displayName(deviceTz.identifier), deviceOffset))
         }
 
         for (index, id) in storedIds.enumerated() {
@@ -267,10 +278,9 @@ enum ZoneRowResolver {
             guard let info = TimezoneDisplay.resolveZone(id) else { continue }
             let place = WidgetRow.placeKey(info.timeZone.identifier, chosen)
             if seenPlaces.contains(place) { continue }
-            if !drawn.insert(drawnKey(info.timeZone.identifier,
-                                      chosen ?? info.displayName)).inserted { continue }
-            seenPlaces.insert(place)
             let off = info.timeZone.secondsFromGMT(for: now)
+            if !drawn.insert(drawnKey(chosen ?? info.displayName, off)).inserted { continue }
+            seenPlaces.insert(place)
             let dup = claimedOffsets.contains(off)
             claimedOffsets.insert(off)
             let parts = TimezoneDisplay.timeParts(info.timeZone, at: now)
@@ -292,6 +302,7 @@ enum ZoneRowResolver {
                 weekdayFull: differs ? TimezoneDisplay.weekday(info.timeZone, at: now, full: true) : nil,
                 relativeText: TimezoneDisplay.relativeOffset(zoneSeconds: off, deviceSeconds: anchorOffset),
                 offsetSeconds: off,
+                region: index < regions.count ? regions[index] : "",
                 sharesOffset: dup,
                 // A row with a NAME of its own is a place; a row without one is the
                 // zone it stands in. So the place wins the clock they share, and the
@@ -355,6 +366,23 @@ enum ZoneRowResolver {
                 relativeText: TimezoneDisplay.relativeOffset(zoneSeconds: offset, deviceSeconds: anchorOffset),
                 offsetSeconds: offset
             ))
+        }
+
+        // Two rows still sharing a name are two DIFFERENT hours by now — the
+        // pass above folded away the ones that agreed. So the reader is looking
+        // at two places called Vancouver reading two times, and nothing on the
+        // row says which is which. That is what the region is for, and the only
+        // thing it is for: "Vancouver, BC" against "Vancouver, WA", from
+        // November, when British Columbia and Washington part on daylight time.
+        //
+        // Only the rows that collide, and only where the app recorded a region
+        // to spend. A row with none keeps its bare name, which is still the
+        // truth about it — the anchor has its own mark besides.
+        let collisions = Dictionary(grouping: rows, by: \.name).filter { $0.value.count > 1 }
+        if !collisions.isEmpty {
+            for i in rows.indices where collisions[rows[i].name] != nil && !rows[i].region.isEmpty {
+                rows[i].name = "\(rows[i].name), \(rows[i].region)"
+            }
         }
 
         rows.sort {

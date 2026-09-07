@@ -11,6 +11,7 @@ enum WidgetSharedStore {
     static let labelsKey = "worldClockLabels"
     /// Parallel to `load()`; "port" where the zone came from a ship's itinerary.
     static let kindsKey = "worldClockKinds"
+    static let regionsKey = "worldClockRegions"
     static let shipsKey = "shipClocks"
     static let appKeyKey = "rcclAppKey"
     static let aboardShipKey = "aboardShipKey"
@@ -40,6 +41,29 @@ enum WidgetSharedStore {
            let json = String(data: data, encoding: .utf8) {
             defaults.set(json, forKey: kindsKey)
         }
+    }
+
+    /// "BC" / "Canada" / "", parallel to the labels.
+    ///
+    /// Spent only on rows that would otherwise draw the same line as another —
+    /// see the disambiguation pass in ZoneRowResolver. A widget has no width to
+    /// give away, so this is not shown for its own sake.
+    static func saveRegions(_ regions: [String]) {
+        guard let defaults = UserDefaults(suiteName: suiteName) else { return }
+        if let data = try? JSONEncoder().encode(regions),
+           let json = String(data: data, encoding: .utf8) {
+            defaults.set(json, forKey: regionsKey)
+        }
+    }
+
+    static func loadRegions() -> [String] {
+        guard let defaults = UserDefaults(suiteName: suiteName),
+              let json = defaults.string(forKey: regionsKey),
+              let data = json.data(using: .utf8),
+              let regions = try? JSONDecoder().decode([String].self, from: data) else {
+            return []   // written by an older build; nothing to disambiguate with
+        }
+        return regions
     }
 
     static func loadKinds() -> [String] {

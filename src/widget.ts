@@ -7,7 +7,7 @@
 
 import { Capacitor, registerPlugin, type PluginListenerHandle } from '@capacitor/core';
 import type { ShipClock } from './ships';
-import type { StoredZone } from './stored-zones';
+import { placeRegion, type StoredZone } from './stored-zones';
 
 /**
  * A ship as the widget needs it.
@@ -51,6 +51,7 @@ export interface WidgetPayload {
   labels: string[];
   /** Parallel to `timezones`; 'port' where the zone came from a ship's itinerary, else ''. */
   kinds: string[];
+  regions: string[];
   localTimezone: string | null;
   localPlaceName: string | null;
   /** Ships with a resolved offset. See WidgetShip. */
@@ -119,6 +120,10 @@ export function syncWidgetTimezones({
     timezones: zones.map((zone) => zone.tz),
     labels: zones.map((zone) => zone.label ?? ''),
     kinds: zones.map((zone) => zone.kind ?? ''),
+    // Beside the name, never folded into it — identity on both natives is
+    // computed from the label. Spent only where two rows would otherwise be
+    // indistinguishable; see placeRegion.
+    regions: zones.map((zone) => placeRegion(zone)),
     localTimezone,
     localPlaceName,
     aboardShipKey,

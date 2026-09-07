@@ -31,6 +31,7 @@ public class WidgetBridgePlugin: CAPPlugin, CAPBridgedPlugin {
         WidgetSharedStore.save(zones)
         WidgetSharedStore.saveLabels(call.getArray("labels", String.self) ?? [])
         WidgetSharedStore.saveKinds(call.getArray("kinds", String.self) ?? [])
+        WidgetSharedStore.saveRegions(call.getArray("regions", String.self) ?? [])
         WidgetSharedStore.saveLocalTimezone(call.getString("localTimezone"))
         WidgetSharedStore.saveLocalPlaceName(call.getString("localPlaceName"))
         WidgetSharedStore.saveShips(Self.decodeShips(call.getArray("ships")))

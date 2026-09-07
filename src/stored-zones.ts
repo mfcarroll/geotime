@@ -172,8 +172,26 @@ export function zoneKey(zone: StoredZone): string {
 export function placeLabel(zone: StoredZone): string | null {
     const name = zone.label?.trim();
     if (!name) return null;
-    const where = zone.region?.trim() || zone.country?.trim();
+    const where = placeRegion(zone);
     return where ? `${name}, ${where}` : name;
+}
+
+/**
+ * The part after the comma: "BC", or the country where there is no region.
+ *
+ * Its own function because the widget needs it APART from the name. Identity
+ * over there is computed from the bare label — placeKey, mirroring zoneKey — so
+ * a composed "Vancouver, BC" arriving as the label would stop matching the
+ * ground row's "Vancouver" and bring back a duplicate that keying by place
+ * exists to prevent.
+ *
+ * It travels beside the name, and the widget spends it only where it has to:
+ * two rows drawing one name at one hour are collapsed instead, and this is what
+ * tells them apart on the day their clocks part company. Which BC and
+ * Washington do in November.
+ */
+export function placeRegion(zone: StoredZone): string {
+    return zone.region?.trim() || zone.country?.trim() || '';
 }
 
 /**
