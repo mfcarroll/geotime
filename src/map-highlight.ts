@@ -85,6 +85,31 @@ export const OUTLINE = {
  */
 export const HOVER_FILL_LIFT = 0.06;
 
+/**
+ * A nautical band rather than a country.
+ *
+ * The ocean is tiled into Etc/GMT±N, and the tiles are enormous — one of them
+ * can be most of a zoomed-in chart. Anything that repaints a whole zone
+ * therefore repaints the sea a ship is sailing on, which is the one part of
+ * that view nobody is asking about.
+ */
+const isOcean = (tzid: string) => tzid.startsWith('Etc/');
+
+/**
+ * The fill lift a hovered zone gets, which depends on what is on the map.
+ *
+ * With a cruise drawn, an ocean band gets NONE. Zoomed in on a chart the band
+ * under the ship is most of the screen, and lifting it flashes the whole view
+ * for a pointer that has not left the water — a change so large it reads as the
+ * map doing something rather than as an answer. Land gets half, because a
+ * country at that zoom is a shape you can see change without the change taking
+ * over. The outline says the rest, and says it the same way for both.
+ */
+function hoverLift(tzid: string, chartShown: boolean | undefined): number {
+  if (!chartShown) return HOVER_FILL_LIFT;
+  return isOcean(tzid) ? 0 : HOVER_FILL_LIFT / 2;
+}
+
 export interface ZoneStyleInput {
   tzid: string;
   /** Current UTC offset of `tzid`, precomputed on the feature. */
@@ -169,6 +194,7 @@ export function resolveZoneStyle(input: ZoneStyleInput): ZoneStyle {
   return {
     ...wash({ ...fill, ...OUTLINE.hover, zIndex: fill.zIndex + 10 }),
     fillOpacity: Math.min(1,
-      (chartShown ? fill.fillOpacity * CHART_FILL_SCALE : fill.fillOpacity) + HOVER_FILL_LIFT),
+      (chartShown ? fill.fillOpacity * CHART_FILL_SCALE : fill.fillOpacity)
+        + hoverLift(tzid, chartShown)),
   };
 }

@@ -10,9 +10,10 @@ import { CHART_FILL_SCALE, FILLS, HOVER_FILL_LIFT, OUTLINE, resolveZoneStyle,
 const NEW_YORK = 'America/New_York';
 const NASSAU = 'America/Nassau';      // same offset as New York
 const LONDON = 'Europe/London';
+const ATLANTIC = 'Etc/GMT+4';         // the sea Nassau sits in, same offset
 
 const OFFSETS: Record<string, number> = {
-    [NEW_YORK]: -4, [NASSAU]: -4, [LONDON]: 1,
+    [NEW_YORK]: -4, [NASSAU]: -4, [LONDON]: 1, [ATLANTIC]: -4,
 };
 
 const style = (tzid: string, over: Partial<ZoneStyleInput> = {}) => resolveZoneStyle({
@@ -47,6 +48,35 @@ describe('the chart wash', () => {
         assert.equal(washed.fillOpacity, 0);
     });
 
+    it('does not repaint the sea a ship is sailing on', () => {
+        // Zoomed in on a chart, one nautical band is most of the screen, and
+        // lifting it flashes the whole view for a pointer that never left the
+        // water. The outline still says which band it is.
+        const plain = style(ATLANTIC, { selectedOffset: -4, chartShown: true });
+        const hovered = style(ATLANTIC, {
+            selectedOffset: -4, hoveredTzid: ATLANTIC, chartShown: true,
+        });
+        assert.equal(hovered.fillOpacity, plain.fillOpacity, 'no fill change at all');
+        assert.equal(hovered.strokeColor, OUTLINE.hover.strokeColor, 'and the outline carries it');
+    });
+
+    it('gives land half a lift under a chart, and all of it without one', () => {
+        // A country at chart zoom is a shape you can see change without the
+        // change taking over.
+        const lift = (over: Partial<ZoneStyleInput>) =>
+            style(NASSAU, { selectedOffset: -4, hoveredTzid: NASSAU, ...over }).fillOpacity
+            - style(NASSAU, { selectedOffset: -4, ...over }).fillOpacity;
+
+        assert.ok(Math.abs(lift({ chartShown: true }) - HOVER_FILL_LIFT / 2) < 1e-9);
+        assert.ok(Math.abs(lift({}) - HOVER_FILL_LIFT) < 1e-9);
+    });
+
+    it('lifts an ocean band normally when no chart is drawn', () => {
+        const lift = style(ATLANTIC, { selectedOffset: -4, hoveredTzid: ATLANTIC }).fillOpacity
+            - style(ATLANTIC, { selectedOffset: -4 }).fillOpacity;
+        assert.ok(Math.abs(lift - HOVER_FILL_LIFT) < 1e-9);
+    });
+
     it('still answers a pointer while the map is quiet', () => {
         // A proportional dimming of the hover lift would have made it invisible
         // in exactly the state where everything else is faintest.
@@ -56,6 +86,7 @@ describe('the chart wash', () => {
         assert.equal(washed.strokeColor, OUTLINE.hover.strokeColor);
         assert.ok(washed.fillOpacity > FILLS.selectedBand.fillOpacity * CHART_FILL_SCALE,
             'lifted above its own washed band');
+        assert.ok(washed.zIndex > FILLS.selectedBand.zIndex, 'and above its neighbours');
     });
 
     it('changes nothing when no chart is drawn', () => {
