@@ -4,7 +4,7 @@
 import './style.css';
 import { Loader } from '@googlemaps/js-api-loader';
 import * as dom from './dom';
-import { addShipClock, loadDebugFleet, migrateStoredTimezones, persistTimezones, setZoneKind, setZoneLabel, state, syncWidget } from './state';
+import { addShipClock, loadDebugFleet, migrateStoredTimezones, persistTimezones, setZoneKind, setZoneLabel, setZonePlace, state, syncWidget } from './state';
 import { refreshAnchorChip, refreshMapStyles, initMaps, onLocationError, onLocationSuccess, selectTimezone, selectShip, selectPort, setHoveredShip, setHoveredPort, renderWorldClocks, addUniqueTimezoneToList, updateUserTimezoneDetails, showLocationUnavailable, loadTimezoneGeoJson } from './map';
 import { updateAllClocks, syncClock, startClockWatch, getDisplayTimezoneName, startClocks, findTimezoneFromGeoJSON } from './time';
 import { Capacitor } from '@capacitor/core';
@@ -222,6 +222,9 @@ async function startApp() {
       // calls rather than somewhere the user lives.
       setZoneLabel(place.tzid, place.kind === 'city' || place.kind === 'port' ? place.label : undefined);
       setZoneKind(place.tzid, place.kind === 'port' ? 'port' : undefined);
+      // And where it is, so the map can draw the berth rather than the region
+      // around it — the same thing tapping its ring on the chart records.
+      setZonePlace(place.tzid, place.kind === 'port' ? place.at : undefined);
       addUniqueTimezoneToList(place.tzid);
       selectTimezone(place.tzid);
       updateAllClocks();

@@ -19,6 +19,19 @@ export interface StoredZone {
      * a release had to be rolled back.
      */
     kind?: 'port';
+    /**
+     * Where the place actually is, for a port.
+     *
+     * A zone id names a region; a port is a point inside one, and the map has
+     * to be able to draw it without an itinerary loaded to look it up in.
+     * Saved with the row so a port the user kept is on the map at launch,
+     * before any ship has been selected — or ever again, if the cruise it came
+     * from has sailed and been replaced.
+     *
+     * Additive like `kind`: an older build ignores it, and a row without it is
+     * a zone rather than a place.
+     */
+    at?: { lat: number; lon: number };
 }
 
 /**
@@ -53,6 +66,10 @@ export function migrateStoredTimezones(raw: unknown): StoredZone[] {
         const zone: StoredZone = { tz: id };
         if (typeof source.label === 'string' && source.label.trim()) zone.label = source.label;
         if (source.kind === 'port') zone.kind = 'port';
+        const at = source.at;
+        if (at && Number.isFinite(Number(at.lat)) && Number.isFinite(Number(at.lon))) {
+            zone.at = { lat: Number(at.lat), lon: Number(at.lon) };
+        }
         out.push(zone);
     }
     return out;

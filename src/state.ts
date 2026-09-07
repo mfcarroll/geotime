@@ -57,6 +57,14 @@ export interface AppState {
     zoneLabels: Record<string, string>;
     /** Zones added as a ship's port of call, which the row marks with an anchor. */
     zoneKinds: Record<string, 'port'>;
+    /**
+     * Where a saved port actually is, keyed by its zone.
+     *
+     * Beside zoneLabels and zoneKinds rather than inside them because it
+     * answers a different question — those two say how to WRITE the row, this
+     * says where to DRAW it — and because only ports have one.
+     */
+    zonePlaces: Record<string, { lat: number; lon: number }>;
     /** Handle for the self-rescheduling clock tick; see scheduleNextTick. */
     clocksInterval: number | null;
     locationMap: google.maps.Map | null;
@@ -95,6 +103,17 @@ export interface AppState {
      * question you are asking right now, not a preference.
      */
     selectedShipKey: string | null;
+    /**
+     * The port of call the user picked, or null.
+     *
+     * Deliberately NOT a zone selection. A port is a point, and lighting the
+     * whole of America/Cancun gold because someone tapped Cozumel answers a
+     * question they did not ask — the zone is not the place. It is also
+     * deliberately not exclusive with `selectedShipKey`: a port belongs to an
+     * itinerary, so picking one is a request to see that cruise rather than to
+     * dismiss it.
+     */
+    selectedPort: { tzid: string; name: string; lat: number; lon: number } | null;
     timezonesFromUrl: string[] | null;
 }
 
@@ -161,6 +180,8 @@ export const state: AppState = {
         stored.flatMap((z) => (z.label ? [[z.tz, z.label]] : []))),
     zoneKinds: Object.fromEntries(
         stored.flatMap((z) => (z.kind ? [[z.tz, z.kind]] : []))),
+    zonePlaces: Object.fromEntries(
+        stored.flatMap((z) => (z.at ? [[z.tz, z.at]] : []))),
     clocksInterval: null,
     locationMap: null,
     timezoneMap: null,
@@ -179,6 +200,7 @@ export const state: AppState = {
     temporaryTimezone: null,
     gpsTimezoneSelected: false,
     selectedShipKey: null,
+    selectedPort: null,
     timezonesFromUrl: null,
 };
 
@@ -215,6 +237,9 @@ export function persistTimezones(timezones: string[]): void {
     for (const tz of Object.keys(state.zoneKinds)) {
         if (!timezones.includes(tz)) delete state.zoneKinds[tz];
     }
+    for (const tz of Object.keys(state.zonePlaces)) {
+        if (!timezones.includes(tz)) delete state.zonePlaces[tz];
+    }
 
     // Built field by field to match migrateStoredTimezones on the way back in.
     // A zone dropped from the list loses its name and its kind with it, so
@@ -223,6 +248,7 @@ export function persistTimezones(timezones: string[]): void {
         const zone: StoredZone = { tz };
         if (state.zoneLabels[tz]) zone.label = state.zoneLabels[tz];
         if (state.zoneKinds[tz]) zone.kind = state.zoneKinds[tz];
+        if (state.zonePlaces[tz]) zone.at = state.zonePlaces[tz];
         return zone;
     });
     localStorage.setItem('worldClocks', JSON.stringify(payload));
@@ -372,6 +398,12 @@ export function setLocalPlaceName(name: string | null): void {
 export function setZoneKind(tzid: string, kind: 'port' | undefined): void {
     if (kind) state.zoneKinds[tzid] = kind;
     else delete state.zoneKinds[tzid];
+}
+
+/** Records where a saved port stands, so the map can draw it (see zonePlaces). */
+export function setZonePlace(tzid: string, at: { lat: number; lon: number } | undefined): void {
+    if (at) state.zonePlaces[tzid] = at;
+    else delete state.zonePlaces[tzid];
 }
 
 /** Records the name the user picked for a zone (see AppState.zoneLabels). */

@@ -388,8 +388,15 @@ const CASING_WIDTH = 2;
  *
  * Dots rather than dashes because a dash long enough to read as a dash is
  * expensive under that rule: it buys its own length back four times over in
- * empty space, and the line went sparse. A 3px dot needs a quarter of the
- * period a 4px dash does, so the marks come twice as often for the same ink.
+ * empty space, and the line went sparse.
+ *
+ * The spacing is then set BELOW what that rule would allow, deliberately. At 6px
+ * a single pass reads as a fine dotted line, which is what the route wanted; a
+ * leg the ship retraces reads closer to solid, because two trains of 4px marks
+ * 3px apart have nowhere to leave a gap. That trade was made with both versions
+ * on screen — the retraced legs are a minority of any itinerary, and the whole
+ * line being too sparse was the fault worth fixing. 9px is where they separate
+ * again, if it ever wants going back.
  *
  * The dot carries its own dark rim instead of a casing polyline underneath.
  * Casing a dotted line would be worse than not casing it: the halo is wider
@@ -398,7 +405,7 @@ const CASING_WIDTH = 2;
  */
 const DOT_RADIUS = 1.5;
 const DOT_RIM = 1;
-const DOT_REPEAT_PX = 12;
+const DOT_REPEAT_PX = 6;
 
 /**
  * The dotted stretch across a gap in the wake.
@@ -444,6 +451,9 @@ function clearChart(): void {
     else piece.map = null;
   }
   chart = [];
+  // The rings are not part of it — see the port layer below — but the chart's
+  // own calls are, and they go with the lines they belonged to.
+  chartCalls = [];
 }
 
 /** A solid line, cased. Dotted lines case themselves — see dottedRoute. */
@@ -621,15 +631,6 @@ function portCalls(voyage: ShipVoyage, shipOffset: number | null): Call[] {
   }));
 }
 
-/** "Coco Cay · day 2 · arrives 7:00 AM", as much of it as we actually know. */
-function portTitle(call: Call): string {
-  return call.note ? `${call.name} · ${call.note}` : call.name;
-}
-
-function portDetail(call: Call): PortMarkerDetail {
-  return { name: call.name, lat: call.lat, lon: call.lon, detail: call.note };
-}
-
 /**
  * Draws the selected ship's chart. Safe to call repeatedly; replaces itself.
  *
@@ -718,31 +719,126 @@ export async function drawShipChart(key: string, voyage: Promise<ShipVoyage | nu
     dottedGap(map, [before, after].map(toLatLng));
   }
 
-  for (const call of calls) {
-    const port = call.port;
+  chartCalls = calls;
+  chartColour = routeColour;
+  chartShipOffset = shipOffset;
+  refreshPortMarkers();
+}
+
+// ---------------------------------------------------------------------------
+// Ports of call.
+//
+// Their own layer rather than part of the chart, because they outlive it. A
+// port kept on the World Clock is a place the user has said they care about,
+// and it should be on the map at launch — before any ship is selected, and
+// after the cruise it came from has sailed and been replaced by the next one.
+//
+// The chart's own calls are drawn here too, so the two cannot disagree about a
+// port that is both. Chart first: it knows the day, the times, and whether the
+// call keeps the ship's time, where a saved row knows only where it is.
+// ---------------------------------------------------------------------------
+
+/** The selected ship's calls, or none. Set by drawShipChart, cleared with it. */
+let chartCalls: Call[] = [];
+let chartColour = PORT_PLAIN;
+let chartShipOffset: number | null = null;
+
+const portMarkers = new Map<string, google.maps.marker.AdvancedMarkerElement>();
+
+/** One port, wherever it came from, in the form the marker layer needs. */
+interface PortPin {
+  key: string;
+  name: string;
+  lat: number;
+  lon: number;
+  note: string;
+  colour: string;
+}
+
+/** Ports are the same place at 11 m, which is finer than any of them is known. */
+const pinKey = (lat: number, lon: number) => `${lat.toFixed(4)},${lon.toFixed(4)}`;
+
+function portPins(): PortPin[] {
+  const pins = new Map<string, PortPin>();
+
+  for (const call of chartCalls) {
+    pins.set(pinKey(call.lat, call.lon), {
+      key: pinKey(call.lat, call.lon),
+      name: call.name,
+      lat: call.lat,
+      lon: call.lon,
+      note: call.note,
+      colour: portColour(call.port, chartShipOffset, chartColour),
+    });
+  }
+
+  // A saved port the chart has not already drawn. It carries no itinerary of
+  // its own — no day, no times — so it says only its name, which is the whole
+  // of what a row on the World Clock knows about it.
+  for (const [tzid, at] of Object.entries(state.zonePlaces)) {
+    if (state.zoneKinds[tzid] !== 'port') continue;
+    const key = pinKey(at.lat, at.lon);
+    if (pins.has(key)) continue;
+    pins.set(key, {
+      key,
+      name: state.zoneLabels[tzid] ?? tzid,
+      lat: at.lat,
+      lon: at.lon,
+      note: '',
+      colour: PORT_PLAIN,
+    });
+  }
+
+  return [...pins.values()];
+}
+
+/**
+ * Rebuilds the port rings. Cheap and idempotent, like refreshShipMarkers.
+ *
+ * Recreated rather than restyled, because a ring's content is three attributes
+ * of one SVG and rebuilding it is less code than reaching into it — and because
+ * a pin's identity is its position, which never changes while it exists.
+ */
+export function refreshPortMarkers(): void {
+  const map = state.timezoneMap;
+  if (!map) return;
+
+  const wanted = new Set<string>();
+  const selected = state.selectedPort;
+
+  for (const pin of portPins()) {
+    wanted.add(pin.key);
+    // Detach the previous ring at this position before replacing it.
+    const previous = portMarkers.get(pin.key);
+    if (previous) previous.map = null;
+    const isSelected = !!selected && pinKey(selected.lat, selected.lon) === pin.key;
+
     const ring = document.createElement('div');
-    ring.className = 'ship-port';
-    // Two circles: the ring you see, and a transparent one twice its size that
-    // is what you actually hit. A 4px ring is a fine thing to look at and a poor
-    // thing to aim a finger at, and the tap below is the whole point of it now.
-    const colour = portColour(port, shipOffset, routeColour);
-    // Hover is the same colour further up the scale, handed to CSS rather than
-    // repainted here — see .ship-port:hover in style.css, and brighter().
-    ring.style.setProperty('--port-hover', brighter(colour));
+    ring.className = isSelected ? 'ship-port is-selected' : 'ship-port';
+    // Hover and selection are the same colour further up the scale, handed to
+    // CSS rather than repainted here — see .ship-port in style.css, and
+    // brighter(). Never white: the ring's own colour is an answer, and hover
+    // must not overwrite it with the question.
+    ring.style.setProperty('--port-hover', brighter(pin.colour));
+    // Three circles: the halo that says this one is picked, the ring you see,
+    // and a transparent one twice its size that is what you actually hit. A 4px
+    // ring is a fine thing to look at and a poor thing to aim a finger at.
     ring.innerHTML =
       `<svg viewBox="-11 -11 22 22" width="22" height="22">` +
       `<circle r="10" fill="transparent"/>` +
+      `<circle class="port-halo" r="8" fill="none" stroke="${brighter(pin.colour)}" ` +
+      `stroke-width="1.5"/>` +
       `<circle class="port-ring" r="4" fill="${CASING}" fill-opacity="0.9" ` +
-      `stroke="${colour}" stroke-width="2" ` +
-      `stroke-opacity="0.95"/></svg>`;
+      `stroke="${pin.colour}" stroke-width="2" stroke-opacity="0.95"/></svg>`;
 
     const marker = new google.maps.marker.AdvancedMarkerElement({
       map,
-      position: { lat: port.lat, lng: port.lon },
-      title: portTitle(call),
+      position: { lat: pin.lat, lng: pin.lon },
+      title: pin.note ? `${pin.name} · ${pin.note}` : pin.name,
       content: ring,
-      // Under the ship itself, over the lines.
-      zIndex: 40,
+      // Under the ship itself, over the lines. The selected one rises above its
+      // neighbours, which matters where two calls share a coastline.
+      zIndex: isSelected ? 45 : 40,
       // Off by default on an AdvancedMarkerElement, so the tap would silently
       // never fire without it.
       gmpClickable: true,
@@ -753,9 +849,11 @@ export async function drawShipChart(key: string, voyage: Promise<ShipVoyage | nu
     // owns the wiring.
     //
     // Hover rides on the content element rather than a maps event — an
-    // AdvancedMarkerElement's content is ordinary DOM — and the white ring it
-    // paints is pure CSS, so pointing at a port costs no redraw.
-    const detail = portDetail(call);
+    // AdvancedMarkerElement's content is ordinary DOM — and what it paints is
+    // pure CSS, so pointing at a port costs no redraw.
+    const detail: PortMarkerDetail = {
+      name: pin.name, lat: pin.lat, lon: pin.lon, detail: pin.note,
+    };
     marker.addListener('gmp-click', () => {
       document.dispatchEvent(new CustomEvent('portmarkerclick', { detail }));
     });
@@ -765,13 +863,21 @@ export async function drawShipChart(key: string, voyage: Promise<ShipVoyage | nu
     ring.addEventListener('pointerleave', () => {
       document.dispatchEvent(new CustomEvent('portmarkerhover', { detail: null }));
     });
-    chart.push(marker);
+    portMarkers.set(pin.key, marker);
+  }
+
+  for (const [key, marker] of [...portMarkers]) {
+    if (wanted.has(key)) continue;
+    marker.map = null;
+    portMarkers.delete(key);
   }
 }
 
 /** Removes the chart. For deselection, and for selecting a zone instead. */
 export function clearShipChart(): void {
   clearChart();
+  // The saved ports outlive it and have to be put back; see the port layer.
+  refreshPortMarkers();
 }
 
 /**

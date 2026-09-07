@@ -57,6 +57,14 @@ export interface PortPlace extends PlaceBase {
   kind: 'port';
   /** IANA zone the port keeps time by. */
   tzid: string;
+  /**
+   * Where the port actually is.
+   *
+   * Carried so a port added from the search box is a point on the map rather
+   * than just a row — the same thing tapping its ring gives you. A zone id
+   * names a region and cannot be turned back into the berth inside it.
+   */
+  at: { lat: number; lon: number };
 }
 
 export type PlaceResult = ZonePlace | CityPlace | ShipPlace | PortPlace;
@@ -165,6 +173,7 @@ function portResult(port: PortRef): PortPlace {
   return {
     kind: 'port',
     tzid: port.tzid,
+    at: { lat: port.lat, lon: port.lon },
     label: port.name,
     primary: port.name,
     // The ship names the line, because that is what makes a port worth offering:

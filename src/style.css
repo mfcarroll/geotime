@@ -217,6 +217,23 @@
   attribute, so a stylesheet outranks it without !important, and the chart does
   not have to be rebuilt to show that a pointer moved.
 */
+/*
+  The halo is how a port says it is the one that was picked.
+
+  Outside the ring rather than instead of it, because the ring's colour is
+  already answering a different question — whether this call keeps the ship's
+  time — and a selection must not overwrite an answer any more than a hover may.
+  Zones do the same thing with two channels: fill for the band, outline for the
+  pointer.
+*/
+.ship-port .port-halo {
+  stroke-opacity: 0;
+  transition: stroke-opacity 120ms ease;
+}
+.ship-port.is-selected .port-halo {
+  stroke-opacity: 0.9;
+}
+
 .ship-port:hover .port-ring {
   stroke: var(--port-hover, #FFFFFF);
   stroke-width: 2.75;

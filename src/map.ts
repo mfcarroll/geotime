@@ -1,8 +1,8 @@
 // src/map.ts
 
 import * as dom from './dom';
-import { aboardShip, state, persistTimezones, setLocalPlaceName, setZoneKind, setZoneLabel, syncWidget } from './state';
-import { timezoneForCoordinates, findTimezoneFromGeoJSON, startClocks, relativeTextForZone, relativeTextForShip, getFormattedTime, getUtcOffset, getDisplayTimezoneName, getZoneLabel, updateAllClocks, formatOffsetDiff } from './time';
+import { aboardShip, state, persistTimezones, setLocalPlaceName, setZoneKind, setZoneLabel, setZonePlace, syncWidget } from './state';
+import { timezoneForCoordinates, findTimezoneFromGeoJSON, zoneForCoordinates, startClocks, relativeTextForZone, relativeTextForShip, getFormattedTime, getUtcOffset, getDisplayTimezoneName, getZoneLabel, updateAllClocks, formatOffsetDiff } from './time';
 import { locationMapStyles, worldTimezoneMapStyles } from './map-styles';
 import { debugFlag, distance, formatAccuracy, fold } from './utils';
 import { loadCityIndex, nearestPlace } from './cities';
@@ -10,8 +10,8 @@ import { feature as topoFeature } from 'topojson-client';
 import { resolveZoneStyle } from './map-highlight';
 import { clockKey, clockLabel, clockSubLabel, formatFixedOffsetTime, visibleClocks, type ClockEntry } from './clocks';
 import { shipKey, type ShipClock } from './ships';
-import { voyageForShip, type ShipVoyage } from './shiptrack';
-import { clearShipChart, drawShipChart, fitToShip, refreshShipMarkers, type PortMarkerDetail } from './ship-markers';
+import { cachedVoyageFor, voyageForShip, type ShipPort, type ShipVoyage } from './shiptrack';
+import { clearShipChart, drawShipChart, fitToShip, refreshPortMarkers, refreshShipMarkers, type PortMarkerDetail } from './ship-markers';
 import { voyageLine } from './voyage-line';
 import { isUnlocatedZone } from './ports';
 
@@ -255,8 +255,11 @@ export function updateUserTimezoneDetails(tzid: string) {
 function selectZone(newTzid: string | null) {
     if (!newTzid) return;
 
-    // One gold band, one "selected" card: picking a zone drops any ship.
+    // One gold band, one "selected" card: picking a zone drops any ship, and
+    // any port — a port is a point inside a zone, so a zone selection is a
+    // strictly coarser answer to the same question.
     state.selectedShipKey = null;
+    state.selectedPort = null;
 
     const isGpsTz = newTzid === state.gpsTzid;
     const isDeselecting = state.temporaryTimezone === newTzid;
@@ -304,6 +307,15 @@ function selectZone(newTzid: string | null) {
 }
 
 export function selectTimezone(tzid: string) {
+    // A saved port's row names a POINT, not the region around it, so it selects
+    // the same way its ring on the map does — including finding the cruise that
+    // calls there. Only rows we have coordinates for: a port kept by an older
+    // build has none, and falls back to being an ordinary zone.
+    const at = state.zoneKinds[tzid] === 'port' ? state.zonePlaces[tzid] : undefined;
+    if (at) {
+        selectPort({ name: state.zoneLabels[tzid] ?? tzid, lat: at.lat, lon: at.lon, detail: '' });
+        return;
+    }
     selectZone(tzid);
 }
 
@@ -324,6 +336,8 @@ export function selectTimezone(tzid: string) {
  */
 export function selectShip(key: string): void {
     const isDeselecting = state.selectedShipKey === key;
+    // Picking the vessel is a coarser answer than picking one of her calls.
+    state.selectedPort = null;
 
     state.selectedShipKey = isDeselecting ? null : key;
     // A ship and a zone cannot both be selected; clear the zone side, including
@@ -345,6 +359,7 @@ export function selectShip(key: string): void {
     if (isTouchDevice) setHoveredZone(null);
     refreshMapStyles();
     refreshShipMarkers();
+    refreshPortMarkers();
     document.dispatchEvent(new CustomEvent('temporarytimezonechanged'));
 
     if (isDeselecting) {
@@ -515,16 +530,104 @@ export function setHoveredPort(detail: PortMarkerDetail | null): void {
  * would, so a place reached two ways is stored one way.
  */
 export function selectPort(detail: PortMarkerDetail): void {
-    const tzid = findTimezoneFromGeoJSON(detail.lat, detail.lon);
+    const tzid = zoneForCoordinates(detail.lat, detail.lon);
     if (!tzid || isUnlocatedZone(tzid)) return;
+
+    const already = state.selectedPort;
+    const deselecting = !!already
+        && already.tzid === tzid
+        && Math.abs(already.lat - detail.lat) < 1e-6
+        && Math.abs(already.lon - detail.lon) < 1e-6;
 
     hoveredPort = null;
     hoveredZoneTzid = null;
-    paintHoverCard();
 
+    if (deselecting) {
+        state.selectedPort = null;
+        state.temporaryTimezone = null;
+        updateShipCard(selectedShip());
+        paintHoverCard();
+        refreshMapStyles();
+        refreshPortMarkers();
+        renderWorldClocks();
+        document.dispatchEvent(new CustomEvent('temporarytimezonechanged'));
+        return;
+    }
+
+    // The name and the anchor travel with it, exactly as picking the port out
+    // of the search would, so a place reached two ways is stored one way. The
+    // coordinates come too: a zone id names a region, and the map has to be
+    // able to draw the point once the itinerary it came from is gone.
     setZoneLabel(tzid, detail.name);
     setZoneKind(tzid, 'port');
-    selectZone(tzid);
+    setZonePlace(tzid, { lat: detail.lat, lon: detail.lon });
+
+    state.selectedPort = { tzid, name: detail.name, lat: detail.lat, lon: detail.lon };
+    // A row so it can be kept, and the pin beside it to keep it with. NOT
+    // `selectedTzid`, which is what paints a whole zone gold — the zone is not
+    // the place, and lighting America/Cancun because somebody tapped Cozumel
+    // answers a question they did not ask.
+    state.temporaryTimezone = tzid;
+    // A ship is NOT cleared here, unlike every other selection. A port belongs
+    // to an itinerary, so picking one is a request to see that cruise, not to
+    // dismiss it — and if none is showing, showCruiseFor finds the one that
+    // calls here.
+    showCruiseFor(detail);
+
+    updateCard(dom.selectedTimezoneDetailsEl, dom.selectedTimezoneNameEl,
+               dom.selectedTimezoneOffsetEl, tzid, 'offset');
+    setVoyageLine(dom.selectedShipVoyageEl, detail.detail);
+    paintHoverCard();
+    refreshMapStyles();
+    refreshPortMarkers();
+    renderWorldClocks();
+    document.dispatchEvent(new CustomEvent('temporarytimezonechanged'));
+}
+
+/** The ship on the clock list matching the current selection, or null. */
+function selectedShip(): ShipClock | null {
+    if (!state.selectedShipKey) return null;
+    return state.shipClocks.find((s) => shipKey(s) === state.selectedShipKey) ?? null;
+}
+
+/**
+ * How near a fix has to be to count as the same port. Generous, because several
+ * calls are tender berths marked at the anchorage rather than at a pier.
+ */
+const SAME_PORT_KM = 25;
+
+/**
+ * Brings up the cruise a port belongs to, when there is exactly one.
+ *
+ * The point of tapping a port is usually the voyage behind it — "who calls
+ * here, and when" — so leaving the map blank and the card alone would be
+ * answering half the question. But only when the answer is unambiguous: two
+ * ships calling at Cozumel this week is the common case in the Caribbean, and
+ * picking one of them would be inventing a preference the user did not express.
+ *
+ * Aboard is the exception, and it outranks the count. The ship underfoot is the
+ * one whose itinerary a passenger means, whoever else happens to call there.
+ */
+function showCruiseFor(detail: PortMarkerDetail): void {
+    if (state.selectedShipKey) return;          // already showing a cruise
+
+    const calling = state.shipClocks
+        .map((ship) => shipKey(ship))
+        .filter((key) => {
+            const voyage = cachedVoyageFor(key);
+            return !!voyage?.ports.some((p: ShipPort) =>
+                distance(p.lat, p.lon, detail.lat, detail.lon) <= SAME_PORT_KM);
+        });
+
+    const aboard = state.aboardShipKey;
+    if (aboard && calling.includes(aboard)) return;   // already drawn, being the anchor
+    if (calling.length !== 1) return;
+
+    const key = calling[0];
+    state.selectedShipKey = key;
+    refreshShipMarkers();
+    void drawShipChart(key, voyageForShip(key));
+    void fitToShip(key, voyageForShip(key));
 }
 
 /**
@@ -572,6 +675,9 @@ function refreshHoveredShipTime(): void {
  * forever.
  */
 function refreshSelectedShipTime(): void {
+    // The card belongs to the port while one is picked; her time is not what it
+    // is saying, and rewriting the value line here would put it back.
+    if (state.selectedPort) return;
     const key = state.selectedShipKey;
     if (!key) return;
 
@@ -1328,6 +1434,10 @@ export function renderWorldClocks() {
     for (const entry of visibleClocks()) {
         dom.worldClocksContainerEl.appendChild(createClockElement(entry));
     }
+
+    // The list is where ports are kept, so it is where the map hears that one
+    // has been kept or dropped. Cheap and idempotent; no map, no work.
+    refreshPortMarkers();
 
     // Times first, then measure. The template ships "--:--" as a placeholder and
     // the time column is flex-none, so its width is set by its content — measure
