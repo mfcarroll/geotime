@@ -20,7 +20,7 @@
 import { state } from './state';
 import { shipKey, type ShipClock } from './ships';
 import { shipTimeAvailable } from './rccl';
-import { anchorOffsetHours, utcOffsetForCoordinates } from './time';
+import { anchorOffsetHours, mapSelection, utcOffsetForCoordinates } from './time';
 import {
   fleetFixes,
   fixForShip,
@@ -151,9 +151,32 @@ function portColour(
  * objects the user picked — they are the vessel's own voyage, and colouring them
  * by the zone they happen to sit in would say something nobody asked about.
  */
+/**
+ * Gold, but dimmer: a hull that merely keeps the selected time.
+ *
+ * The same statement the zone band makes, in the one place on the map the band
+ * could not reach. A ship keeps a time without occupying a zone, so selecting
+ * Cozumel used to light every shore on UTC-5 and leave the two vessels sitting
+ * in that same hour looking like strangers to it — the one kind of answer this
+ * app exists to give, withheld from the one kind of thing only it can show.
+ *
+ * Dimmer than SELECTED and no brighter than the wash it belongs to, so "this is
+ * the one you picked" and "this keeps the same time" stay two different
+ * sentences.
+ */
+const MATCHING = '#C9A227';
+
 function shipColour(key: string): string {
   if (state.selectedShipKey === key) return SELECTED;
   if (state.aboardShipKey === key) return ABOARD;
+
+  // Only a resolved offset can match. An unresolved ship has no time to compare
+  // and must not read as one that happens to agree.
+  const selected = mapSelection().offset;
+  if (selected !== null) {
+    const ship = state.shipClocks.find((s) => shipKey(s) === key);
+    if (ship && ship.offsetHours !== null && ship.offsetHours === selected) return MATCHING;
+  }
   return HULL;
 }
 
@@ -911,19 +934,49 @@ export async function fitToShip(key: string, voyage: Promise<ShipVoyage | null>)
   // asking.
   if (state.selectedShipKey !== key) return;
 
+  // Framed on what will be DRAWN, not on what upstream measured.
+  //
+  // `extent` is the route's own bounding box and nothing else, so a wake that
+  // wanders outside the planned line gets cropped — and wakes do, because a
+  // route is a handful of great-circle waypoints and a track is where the hull
+  // actually went. Wonder of the Seas' route spanned 25.08 to 25.85 north while
+  // her wake reached 26.52, so the top of her own trail was off the map she had
+  // just been framed to. Her position can fall outside it too, for the same
+  // reason.
+  const fix = fixForShip(key);
+  const bounds = new google.maps.LatLngBounds();
+  let framed = false;
+  const include = (lon: number, lat: number) => {
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+    bounds.extend({ lat, lng: lon });
+    framed = true;
+  };
+
+  if (resolved) {
+    for (const [lon, lat] of resolved.route) include(lon, lat);
+    // The clipped wake, which is what the chart draws — not the rolling window,
+    // which reaches back through previous sailings.
+    for (const [lon, lat] of voyageTrack(resolved)) include(lon, lat);
+    for (const port of resolved.ports) include(port.lon, port.lat);
+  }
+  if (fix) include(fix.lon, fix.lat);
+
+  // Upstream's box only where we have nothing of our own — a voyage whose route
+  // and track both came back empty still frames somewhere better than the world.
   const extent = resolved?.extent;
-  if (extent && extent.length === 4 && extent.every((n) => Number.isFinite(n))) {
+  if (!framed && extent && extent.length === 4 && extent.every((n) => Number.isFinite(n))) {
     const [minLat, minLon, maxLat, maxLon] = extent;
-    map.fitBounds(
-      new google.maps.LatLngBounds({ lat: minLat, lng: minLon }, { lat: maxLat, lng: maxLon }),
-      // Enough margin that the route does not run into the edges, where the
-      // ports at each end of it would be half off the map.
-      48
-    );
+    include(minLon, minLat);
+    include(maxLon, maxLat);
+  }
+
+  if (framed) {
+    // Enough margin that the route does not run into the edges, where the ports
+    // at each end of it would be half off the map.
+    map.fitBounds(bounds, 48);
     return;
   }
 
-  const fix = fixForShip(key);
   if (!fix) return;
   map.setCenter({ lat: fix.lat, lng: fix.lon });
   map.setZoom(Math.max(map.getZoom() ?? 2, 4));

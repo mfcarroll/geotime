@@ -437,7 +437,41 @@ export function anchorOffsetHours(): number {
   return state.localTimezone ? getUtcOffset(state.localTimezone) : 0;
 }
 
-/** A saved zone's standing relative to the anchor. */
+/**
+ * What the map is currently reporting as selected.
+ *
+ * ONE definition, because three layers have to agree about it: the zone shapes
+ * paint a band from the offset, the clock rows border from the identity, and
+ * the ship markers now colour from the offset too. Two copies of this
+ * precedence would drift, and a drift here looks like the map disagreeing with
+ * itself about what you just clicked.
+ *
+ * `tzid` is null for anything that is not a region — a ship keeps a time without
+ * occupying a zone, and a port is a point inside one rather than the whole of
+ * it. Both still light the BAND, which is the map's way of saying "everywhere
+ * that keeps this time"; only a zone selection ever goes solid.
+ *
+ * Precedence is most-specific-first. A port outranks the ship it belongs to
+ * because the port is the thing that was picked and the cruise is the context
+ * around it.
+ */
+export function mapSelection(): { tzid: string | null; offset: number | null } {
+  const port = state.selectedPort;
+  if (port) return { tzid: null, offset: getUtcOffset(port.tzid) };
+
+  if (state.selectedShipKey) {
+    const ship = state.shipClocks.find((s) => shipKey(s) === state.selectedShipKey);
+    // No offset until one resolves — otherwise an unresolved ship reads as 0
+    // and lights up UTC.
+    return { tzid: null, offset: ship?.offsetHours ?? null };
+  }
+
+  // The GPS zone is shown as "selected" (gold) while it is the active choice.
+  const tzid = state.gpsTimezoneSelected ? state.gpsTzid : state.selectedTzid;
+  return { tzid, offset: tzid ? getUtcOffset(tzid) : null };
+}
+
+/** A saved zone's standing relative to the anchor. *//** A saved zone's standing relative to the anchor. */
 export function relativeTextForZone(tzid: string): string {
   const ship = aboardShip();
   // Ashore the anchor IS the local zone, and the existing helper already says
