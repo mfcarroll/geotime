@@ -406,7 +406,11 @@ function frameZone(tzid: string): void {
 }
 
 /**
- * Selects a ship, or toggles it off if it is already selected.
+ * Selects a ship, or toggles it off if it is already THE selection.
+ *
+ * Which is not the same as being on screen: a port of hers may be selected, in
+ * which case her route is drawn but the port is what is picked, and tapping the
+ * vessel promotes her rather than dismissing the cruise.
  *
  * The band this lights is "everywhere keeping the same time as this ship" —
  * which is a genuinely different question from the one a zone answers, and the
@@ -421,7 +425,12 @@ function frameZone(tzid: string): void {
  * selection in that case.
  */
 export function selectShip(key: string): void {
-    const isDeselecting = state.selectedShipKey === key;
+    // A ship is only the selection when nothing stands in front of it. Picking
+    // one of her ports puts the cruise on screen and leaves selectedShipKey set
+    // — the PORT is what is selected there, so reading the key alone made the
+    // ship's own tap deselect a ship the user had never selected, dropping the
+    // route instead of promoting the vessel.
+    const isDeselecting = state.selectedShipKey === key && !state.selectedPlace;
     // Picking the vessel is a coarser answer than picking one of her calls.
     state.selectedPlace = null;
 
