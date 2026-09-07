@@ -50,7 +50,7 @@ describe('the chart wash', () => {
 
     it('does not repaint the sea a ship is sailing on', () => {
         // Zoomed in on a chart, one nautical band is most of the screen, and
-        // lifting it flashes the whole view for a pointer that never left the
+        // painting it flashes the whole view for a pointer that never left the
         // water. The outline still says which band it is.
         const plain = style(ATLANTIC, { selectedOffset: -4, chartShown: true });
         const hovered = style(ATLANTIC, {
@@ -58,6 +58,38 @@ describe('the chart wash', () => {
         });
         assert.equal(hovered.fillOpacity, plain.fillOpacity, 'no fill change at all');
         assert.equal(hovered.strokeColor, OUTLINE.hover.strokeColor, 'and the outline carries it');
+    });
+
+    it('does not repaint water OUTSIDE the selected band either', () => {
+        // The case the first attempt missed, and the one actually being seen.
+        // Two fills answer a hover, not one: the lift on the hovered zone, and
+        // the BAND painted across everything sharing its offset — which
+        // includes the hovered zone. Pointing at the Gulf of Mexico while a
+        // Caribbean cruise was up took the sea from nothing to white, a bigger
+        // jump than the lift that had just been removed to prevent it.
+        const GULF = 'Etc/GMT+6';
+        const offsets = { ...OFFSETS, [GULF]: -6 };
+        const gulf = (hoveredTzid: string | null) => resolveZoneStyle({
+            tzid: GULF, offset: -6, selectedTzid: null, selectedOffset: -4,
+            gpsTzid: null, hoveredTzid, anchorShipOffset: null,
+            offsetOf: (id) => offsets[id as keyof typeof offsets], chartShown: true,
+        });
+        assert.equal(gulf(null).fillOpacity, 0);
+        assert.equal(gulf(GULF).fillOpacity, 0, 'and still nothing when pointed at');
+        assert.equal(gulf(GULF).strokeColor, OUTLINE.hover.strokeColor);
+    });
+
+    it('gives land outside the band half a band, not none', () => {
+        const GULF = 'Etc/GMT+6';
+        const MEXICO = 'America/Mexico_City';
+        const offsets = { ...OFFSETS, [GULF]: -6, [MEXICO]: -6 };
+        const mexico = (hoveredTzid: string | null) => resolveZoneStyle({
+            tzid: MEXICO, offset: -6, selectedTzid: null, selectedOffset: -4,
+            gpsTzid: null, hoveredTzid, anchorShipOffset: null,
+            offsetOf: (id) => offsets[id as keyof typeof offsets], chartShown: true,
+        });
+        assert.equal(mexico(null).fillOpacity, 0);
+        assert.equal(mexico(GULF).fillOpacity, FILLS.hoverBand.fillOpacity / 2 * CHART_FILL_SCALE);
     });
 
     it('gives land half a lift under a chart, and all of it without one', () => {

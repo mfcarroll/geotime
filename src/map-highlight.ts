@@ -96,18 +96,25 @@ export const HOVER_FILL_LIFT = 0.06;
 const isOcean = (tzid: string) => tzid.startsWith('Etc/');
 
 /**
- * The fill lift a hovered zone gets, which depends on what is on the map.
+ * How much of hover's FILL a zone gets, given what is on the map.
  *
  * With a cruise drawn, an ocean band gets NONE. Zoomed in on a chart the band
- * under the ship is most of the screen, and lifting it flashes the whole view
+ * under the ship is most of the screen, and painting it flashes the whole view
  * for a pointer that has not left the water — a change so large it reads as the
  * map doing something rather than as an answer. Land gets half, because a
  * country at that zoom is a shape you can see change without the change taking
  * over. The outline says the rest, and says it the same way for both.
+ *
+ * Applied to BOTH of hover's fills, which is the part that was missed the first
+ * time. The lift on the hovered zone is the obvious one; the hover BAND is the
+ * one that was actually being seen. It paints every zone sharing the hovered
+ * zone's offset — including that zone — so pointing at open water outside the
+ * selected band took the sea from nothing to white, a bigger jump than the lift
+ * that had just been removed to prevent exactly this.
  */
-function hoverLift(tzid: string, chartShown: boolean | undefined): number {
-  if (!chartShown) return HOVER_FILL_LIFT;
-  return isOcean(tzid) ? 0 : HOVER_FILL_LIFT / 2;
+function hoverFillScale(tzid: string, chartShown: boolean | undefined): number {
+  if (!chartShown) return 1;
+  return isOcean(tzid) ? 0 : 0.5;
 }
 
 export interface ZoneStyleInput {
@@ -159,7 +166,9 @@ export function resolveZoneStyle(input: ZoneStyleInput): ZoneStyle {
 
   const isHovered = tzid === hoveredTzid;
 
-  let fill: (typeof FILLS)[keyof typeof FILLS];
+  // Structural rather than one of FILLS, because the hover band is scaled
+  // rather than taken as it stands — see hoverFillScale.
+  let fill: { fillColor: string; fillOpacity: number; zIndex: number };
   if (tzid === selectedTzid) fill = FILLS.selectedSegment;
   else if (tzid === gpsTzid) fill = FILLS.gpsSegment;
   // The GPS band wins over the selected band where they are the same band.
@@ -174,7 +183,14 @@ export function resolveZoneStyle(input: ZoneStyleInput): ZoneStyle {
   else if (anchorShipOffset !== null && anchorShipOffset === offset) fill = FILLS.shipBand;
   else if (sameOffsetAs(gpsTzid)) fill = FILLS.gpsBand;
   else if (selectedOffset === offset) fill = FILLS.selectedBand;
-  else if (sameOffsetAs(hoveredTzid)) fill = FILLS.hoverBand; // covers the hovered zone itself
+  // Covers the hovered zone itself, which is why this is scaled and not just
+  // the lift below — see hoverFillScale.
+  else if (sameOffsetAs(hoveredTzid)) {
+    fill = {
+      ...FILLS.hoverBand,
+      fillOpacity: FILLS.hoverBand.fillOpacity * hoverFillScale(tzid, chartShown),
+    };
+  }
   else fill = FILLS.base;
 
   const wash = (style: ZoneStyle): ZoneStyle => chartShown
@@ -195,6 +211,6 @@ export function resolveZoneStyle(input: ZoneStyleInput): ZoneStyle {
     ...wash({ ...fill, ...OUTLINE.hover, zIndex: fill.zIndex + 10 }),
     fillOpacity: Math.min(1,
       (chartShown ? fill.fillOpacity * CHART_FILL_SCALE : fill.fillOpacity)
-        + hoverLift(tzid, chartShown)),
+        + HOVER_FILL_LIFT * hoverFillScale(tzid, chartShown)),
   };
 }
