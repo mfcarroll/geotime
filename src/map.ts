@@ -14,6 +14,7 @@ import { cachedVoyageFor, voyageForShip, type ShipPort, type ShipVoyage } from '
 import { clearShipChart, drawShipChart, fitToShip, refreshPortMarkers, refreshShipMarkers, type PortMarkerDetail } from './ship-markers';
 import { voyageLine } from './voyage-line';
 import { isUnlocatedZone } from './ports';
+import { fontOf, widthOf } from './second-line';
 
 /**
  * Cloud-styled vector maps.
@@ -774,13 +775,90 @@ const VOYAGE_LINES = () => [
 function applyShipReserve(): void {
     const reserve = state.shipClocks.length > 0;
 
-
     for (const el of VOYAGE_LINES()) {
         const text = el.textContent ?? '';
-        if (text !== '' && text !== RESERVED) continue;   // a real line: leave it
-        el.textContent = RESERVED;
+        // A real line is left alone; only an empty one is filled in.
+        if (text === '' || text === RESERVED) el.textContent = RESERVED;
         el.classList.toggle('hidden', !reserve);
     }
+
+    // Measured after un-hiding, because a display:none element has no width to
+    // measure against.
+    const rows = reserve ? voyageLineRows() : 1;
+    for (const el of VOYAGE_LINES()) {
+        el.style.minHeight = reserve ? `${rows * lineHeightOf(el)}px` : '';
+    }
+}
+
+/**
+ * How many lines the cards must hold open, not how many they are showing.
+ *
+ * One blank line stopped being enough the moment these lines got longer. "→
+ * Cozumel · ETA Tue 10:45 AM port time" wraps in the card at ordinary desktop
+ * widths, so hovering the ONE hull that says it grew the row by a line and
+ * shoved the map down — and moved it back when the pointer left. A map that
+ * jumps while you are sweeping a pointer across it is the exact fault the
+ * single reserved line was added to fix, reappearing one line further up.
+ *
+ * So the reserve is measured rather than assumed: every ship that could put a
+ * line in one of these cards is asked how wide its line is, and the row is held
+ * at whatever the widest of them needs. Every ship on the list, not just the
+ * one showing, because the whole point is to have the space already there
+ * before the pointer arrives.
+ *
+ * Measured on a canvas rather than by writing the text and reading the height
+ * back, for the same reason the clock rows are: this runs on the tick, and a
+ * layout pass per card per second to learn a number we can compute is a poor
+ * trade.
+ */
+function voyageLineRows(): number {
+    const width = cardLineWidth();
+    if (width <= 0) return 1;
+
+    const font = fontOf(dom.hoveredShipVoyageEl);
+    let widest = 0;
+    for (const ship of state.shipClocks) {
+        const key = shipKey(ship);
+        const line = voyageLine(cachedVoyageFor(key), key);
+        if (line) widest = Math.max(widest, widthOf(line, font));
+    }
+
+    // A hair of slack, because measureText and the layout engine round
+    // differently and a line that only just fits must not be called a wrap.
+    return Math.max(1, Math.ceil(widest / (width - 2)));
+}
+
+/**
+ * How wide a line inside one of these cards may be.
+ *
+ * Read from the GRID rather than from a card, because two of the three cards
+ * are display:none most of the time and a box with no layout has no width to
+ * measure. `grid-template-columns` resolves to used pixel values, so the column
+ * is there to be read whether anything is standing in it or not — which is the
+ * point, since what has to be measured is the card that has not appeared yet.
+ */
+function cardLineWidth(): number {
+    const card = dom.hoveredTimezoneDetailsEl;
+    const grid = card.parentElement;
+    if (!grid) return 0;
+
+    const columns = getComputedStyle(grid).gridTemplateColumns
+        .split(' ').map(parseFloat).filter((n) => Number.isFinite(n) && n > 0);
+    if (columns.length === 0) return 0;
+
+    const style = getComputedStyle(card);
+    const inset = parseFloat(style.paddingLeft) + parseFloat(style.paddingRight)
+        + parseFloat(style.borderLeftWidth) + parseFloat(style.borderRightWidth);
+    // The narrowest column sets it: the cards share a grid row, so the tallest
+    // of them is the height of all of them anyway.
+    return Math.min(...columns) - (Number.isFinite(inset) ? inset : 28);
+}
+
+/** A line's height in px, or a reasonable guess where the style will not say. */
+function lineHeightOf(el: HTMLElement): number {
+    const style = getComputedStyle(el);
+    const height = parseFloat(style.lineHeight);
+    return Number.isFinite(height) ? height : parseFloat(style.fontSize) * 1.35 || 16;
 }
 
 function setShipVoyageLine(voyage: ShipVoyage | null, key: string | null): void {

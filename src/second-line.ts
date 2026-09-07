@@ -38,13 +38,13 @@ export interface SecondLineRow {
  */
 const canvas = document.createElement('canvas').getContext('2d');
 
-function widthOf(text: string, font: string): number {
+export function widthOf(text: string, font: string): number {
     if (!canvas || !text) return 0;
     canvas.font = font;
     return canvas.measureText(text).width;
 }
 
-function fontOf(el: Element | null): string {
+export function fontOf(el: Element | null): string {
     if (!el) return '';
     const s = getComputedStyle(el);
     // Shorthand `font` comes back empty in some engines; build it either way.
