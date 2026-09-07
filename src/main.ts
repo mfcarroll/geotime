@@ -5,7 +5,7 @@ import './style.css';
 import { Loader } from '@googlemaps/js-api-loader';
 import * as dom from './dom';
 import { addShipClock, loadDebugFleet, migrateStoredTimezones, persistZones, savedZoneByKey, state, syncWidget } from './state';
-import { refreshAnchorChip, refreshMapStyles, initMaps, onLocationError, onLocationSuccess, selectSavedZone, selectShip, selectPlace, setHoveredShip, setHoveredPlace, renderWorldClocks, keepZone, updateUserTimezoneDetails, showLocationUnavailable, loadTimezoneGeoJson } from './map';
+import { refreshAnchorChip, refreshMapStyles, initMaps, onLocationError, onLocationSuccess, selectSavedZone, selectShip, selectPlace, setHoveredShip, setHoveredPlace, renderWorldClocks, keepZone, updateUserTimezoneDetails, showLocationUnavailable, loadTimezoneGeoJson, repairPlacePositions } from './map';
 import { updateAllClocks, syncClock, startClockWatch, getDisplayTimezoneName, startClocks, findTimezoneFromGeoJSON } from './time';
 import { Capacitor } from '@capacitor/core';
 import { getDeviceTimezone, onDeviceTimezoneChanged } from './widget';
@@ -159,6 +159,7 @@ async function startApp() {
   // which should wait on Google Maps — or be lost entirely when it fails to load.
   const geoJsonReady = loadTimezoneGeoJson();
 
+
   // Load maps separately. A failure here will not block location services.
   const loader = new Loader({
     apiKey: GOOGLE_MAPS_API_KEY,
@@ -182,6 +183,18 @@ async function startApp() {
   // when ship features are disabled, which removes ships from search.
   await initShipTime();
   await loadShipRoster();
+
+  // Ports kept before positions were recorded get theirs back, so the ring is on
+  // the map before anything is tapped.
+  //
+  // Every one of the three waits above is load-bearing, which is why this sits
+  // here and not beside the boundary load: the boundaries are what a port's
+  // coordinates resolve to a zone against, and the roster is what turns a saved
+  // ship's code into the IMO her cached itinerary is filed under. Reaching for
+  // the roster any earlier does not merely fail — loadShipRoster memoises the
+  // empty answer it gives while the app key is unresolved, which would take
+  // ship search down with it.
+  repairPlacePositions();
 
   // Positions come after the roster, not before: a marker is looked up by the
   // ship's IMO, and the IMO lives on the roster. Started here rather than beside

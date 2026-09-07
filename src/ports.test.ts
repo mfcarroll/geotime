@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { portRefsFrom, matchPortTiers, isUnlocatedZone } from './ports';
+import { portRefsFrom, matchPortTiers, isUnlocatedZone, portPositionFor } from './ports';
 import { fold } from './utils';
 
 const port = (name: string | null, lat: number, lon: number) =>
@@ -88,4 +88,41 @@ test('matching a query', async (t) => {
   await t.test('accents and case are ignored, as everywhere else in search', () => {
     assert.equal(matchPortTiers('ATHENS', ports, fold)[0].length, 1);
   });
+});
+
+test('repairing a port kept without a position', async (t) => {
+    const refs = [
+        { name: 'Coco Cay', tzid: 'America/Nassau', ship: 'Wonder', lat: 25.8169, lon: -77.93411 },
+        { name: 'San Juan', tzid: 'America/Puerto_Rico', ship: 'Wonder', lat: 18.46, lon: -66.11 },
+        { name: 'San Juan', tzid: 'America/Argentina/San_Juan', ship: 'Other', lat: -31.5, lon: -68.5 },
+    ];
+
+    await t.test('a stale row is given the berth the itinerary named', () => {
+        assert.deepEqual(portPositionFor('Coco Cay', 'America/Nassau', refs, fold),
+                         { lat: 25.8169, lon: -77.93411 });
+    });
+
+    await t.test('the name is folded, so case and accents still match', () => {
+        assert.deepEqual(portPositionFor('  coco cay  ', 'America/Nassau', refs, fold),
+                         { lat: 25.8169, lon: -77.93411 });
+    });
+
+    await t.test('the zone decides between two ports of one name', () => {
+        assert.deepEqual(portPositionFor('San Juan', 'America/Puerto_Rico', refs, fold),
+                         { lat: 18.46, lon: -66.11 });
+        assert.deepEqual(portPositionFor('San Juan', 'America/Argentina/San_Juan', refs, fold),
+                         { lat: -31.5, lon: -68.5 });
+    });
+
+    await t.test('a name in the wrong zone is not a match', () => {
+        assert.equal(portPositionFor('Coco Cay', 'America/New_York', refs, fold), null);
+    });
+
+    await t.test('a port nothing on the list calls at stays unrepaired', () => {
+        assert.equal(portPositionFor('Kings Wharf', 'Atlantic/Bermuda', refs, fold), null);
+    });
+
+    await t.test('an empty name matches nothing, rather than the first port', () => {
+        assert.equal(portPositionFor('   ', 'America/Nassau', refs, fold), null);
+    });
 });

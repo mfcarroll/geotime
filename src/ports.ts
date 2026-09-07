@@ -76,6 +76,34 @@ export function portRefsFrom(
   return [...byName.values()];
 }
 
+/**
+ * Where a port kept without a position actually is.
+ *
+ * Rows saved before the World Clock became a list of places carry a port's NAME
+ * and the zone it stands in, but not its coordinates — there was nowhere to put
+ * them. A place with no point cannot be selected as one, so the click falls
+ * through to the region underneath and the map answers "Coco Cay" with the
+ * whole of America/Nassau: precisely the confusion the place model exists to
+ * end.
+ *
+ * The itinerary that named the port still knows where it is, so the row can be
+ * repaired from the source it came from. Matched on the folded name AND the
+ * zone, because a name alone is not an identity: two ports called San Juan sit
+ * in two different zones, and repairing one with the other's berth would move a
+ * saved place across an ocean.
+ */
+export function portPositionFor(
+  name: string,
+  tzid: string,
+  ports: PortRef[],
+  fold: (s: string) => string,
+): { lat: number; lon: number } | null {
+  const wanted = fold(name.trim());
+  if (!wanted) return null;
+  const hit = ports.find((port) => port.tzid === tzid && fold(port.name) === wanted);
+  return hit ? { lat: hit.lat, lon: hit.lon } : null;
+}
+
 /** Ports whose folded name matches a query, in the same three tiers as cities. */
 export function matchPortTiers(query: string, ports: PortRef[], fold: (s: string) => string): PortRef[][] {
   const q = fold(query.trim());
