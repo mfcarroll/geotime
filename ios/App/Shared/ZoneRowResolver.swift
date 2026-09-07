@@ -146,7 +146,14 @@ enum ZoneRowResolver {
             let parts = TimezoneDisplay.timeParts(local, at: now)
             let differs = !isAnchor && TimezoneDisplay.dayDiffers(local, anchorTz, at: now)
             rows.append(WidgetRow(
-                id: local.identifier,
+                // Namespaced like the ship and the phone above, and for the
+                // reason the stored rows are keyed by PLACE: this is what
+                // ForEach identifies a row by, and the bare zone id collided
+                // with a saved row for the same zone the moment one was allowed
+                // to exist. Two rows, one id, and SwiftUI drew the first of
+                // them twice — the ground card's own name appearing under both
+                // clocks, which is a list quietly losing a row.
+                id: "ground:\(local.identifier)",
                 name: localPlaceName ?? TimezoneDisplay.displayName(local.identifier),
                 shortName: nil,
                 isLocal: true,
@@ -200,28 +207,37 @@ enum ZoneRowResolver {
         // ground goes first, so where you actually are always wins: in Vancouver
         // with San Francisco saved, Vancouver leads and San Francisco is the
         // flagged one.
-        // The device zone is excluded by identity as well as the ground. The SAME
-        // zone must never appear twice, and until now the offset rule hid that
-        // case by accident: saving Vancouver while the phone is on Vancouver was
-        // dropped for sharing an offset, not for being the same place. Now that a
-        // shared offset is allowed, identity has to say so itself. Two DIFFERENT
-        // zones agreeing today still both show.
-        //
-        // A NAMED place is exempt from both skips. The app's list is one record
-        // per place and two of them may share a zone — Tampa is a city in the
-        // New York timezone, not a name for it — so an unnamed row for the
-        // ground zone is the ground card's own and drops out, while Tampa in the
-        // same zone is a different thing and keeps its row.
         let deviceShown = deviceOffset != anchorOffset && deviceOffset != geographicOffset
         // Deduped by place, which the app already does on its own side — this is
         // the widget refusing to render a store that has been left in a state
         // the app would not have written, and it is what keeps the two platforms
         // agreeing: Android has always deduped here and this never did.
         var seenPlaces = Set<String>()
+        // Seeded with the rows already drawn above, each under the name it
+        // actually SHOWS. One rule of place identity, where two rules used to
+        // stand in for it — "skip an unnamed row for the ground zone" and "a
+        // named place is exempt" were both approximations of "is this the same
+        // place the ground card is already showing", and both got it wrong at
+        // one end.
+        //
+        // Standing in Nelson: the ground row IS Nelson, so a saved Nelson is
+        // the same place and goes (it used to print twice, once as "Local time"
+        // and once as "+0 hrs"), while a saved America/Vancouver is the ZONE —
+        // a different thing, which now keeps its row and yields only when space
+        // runs out. Mid-ocean with no town to name, the ground row is the zone
+        // itself, and a saved copy of it is a duplicate again. The key says all
+        // of that without being told any of it.
+        //
+        // Only rows that were drawn: a ground folded into a ship's row, or a
+        // phone whose zone earned no row, block nothing.
+        if !mergeGroundIntoShip {
+            seenPlaces.insert(WidgetRow.placeKey(local.identifier, localPlaceName))
+        }
+        if deviceShown {
+            seenPlaces.insert(WidgetRow.placeKey(deviceTz.identifier, nil))
+        }
         for (index, id) in storedIds.enumerated() {
             let chosen = index < labels.count && !labels[index].isEmpty ? labels[index] : nil
-            if chosen == nil && id == local.identifier { continue }
-            if chosen == nil && deviceShown && id == deviceTz.identifier { continue }
             guard let info = TimezoneDisplay.resolveZone(id) else { continue }
             let place = WidgetRow.placeKey(info.timeZone.identifier, chosen)
             if seenPlaces.contains(place) { continue }

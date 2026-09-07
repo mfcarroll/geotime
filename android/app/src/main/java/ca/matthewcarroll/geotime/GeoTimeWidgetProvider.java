@@ -438,13 +438,25 @@ public class GeoTimeWidgetProvider extends AppWidgetProvider {
         // was dropped here — silently, and only on Android, since iOS never
         // deduped at all. A name is part of the identity for exactly as long as
         // the app says it is.
+        // Seeded with the rows already drawn above, each under the name it
+        // actually SHOWS. One rule of place identity, where two rules used to
+        // stand in for it — "skip an unnamed row for the ground zone" and "a
+        // named place is exempt" were both approximations of "is this the same
+        // place the ground card is already showing", and both got it wrong at
+        // one end.
+        //
+        // Standing in Nelson: the ground row IS Nelson, so a saved Nelson is
+        // the same place and goes (it used to print twice, once as "Local time"
+        // and once as "+0 hrs"), while a saved America/Vancouver is the ZONE —
+        // a different thing, which now keeps its row and yields only when space
+        // runs out. Mid-ocean with no town to name, the ground row is the zone
+        // itself, and a saved copy of it is a duplicate again. The key says all
+        // of that without being told any of it.
+        //
+        // Only rows that were drawn: a ground folded into a ship's row, or a
+        // phone whose zone earned no row, block nothing.
         Set<String> seenPlaces = new HashSet<>();
-        seenPlaces.add(placeKey(baseId, null));
-        // The device zone too. The same PLACE must never appear twice, and until
-        // now the offset rule hid that case by accident: saving Vancouver while
-        // the phone is on Vancouver was dropped for sharing an offset, not for
-        // being the same place. Now that a shared offset is allowed, identity has
-        // to say so itself. Two DIFFERENT zones agreeing today still both show.
+        if (!mergeGroundIntoShip) seenPlaces.add(placeKey(baseId, localPlace));
         if (deviceOffset != anchorOffset && deviceOffset != geographicOffset) {
             seenPlaces.add(placeKey(osTz.getID(), null));
         }
@@ -452,9 +464,6 @@ public class GeoTimeWidgetProvider extends AppWidgetProvider {
             String id = stored.get(i);
             if (id.isEmpty()) continue;
             String named = (i < labels.size() && !labels.get(i).isEmpty()) ? labels.get(i) : null;
-            // The unnamed row for the ground zone is the ground card's own; a
-            // NAMED place there is a different thing and keeps its row.
-            if (named == null && id.equals(baseId)) continue;
             Resolved rz = resolveTimeZone(id);
             String place = placeKey(rz.tzId, named);
             if (seenPlaces.contains(place)) continue;
