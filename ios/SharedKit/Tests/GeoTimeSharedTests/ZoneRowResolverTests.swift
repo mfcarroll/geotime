@@ -129,6 +129,76 @@ final class ZoneRowResolverInvariants: XCTestCase {
         XCTAssertNotNil(rows.first { $0.name == "Home" })
     }
 
+    /// A place beats the zone it stands in, whichever was added first.
+    ///
+    /// The rule used to want more than a name: the label had to differ from
+    /// what the zone would have called itself, so a saved city "London" did not
+    /// outrank Europe/London — the reasoning being that preferring one over the
+    /// other changed the winner without changing anything visible.
+    ///
+    /// Which held while a city and its zone were one row between them. They are
+    /// two rows now, and the consequence was that whichever had been added
+    /// first survived a trim: the same text on screen either way, and no way to
+    /// tell whether you were looking at the city or the timezone. So this
+    /// asserts the order does NOT decide it.
+    func testANamedPlaceWinsTheClockItSharesWithItsOwnZone() throws {
+        for labels in [["London", ""], ["", "London"]] {
+            let rows = ZoneRowResolver.resolve(
+                storedIds: ["Europe/London", "Europe/London"],
+                local: Fixture.newYork, deviceTz: Fixture.newYork,
+                now: Fixture.now, labels: labels)
+
+            let saved = rows.filter { !$0.isLocal }
+            XCTAssertEqual(saved.count, 2, "both are kept; fit decides which is given up")
+            let speaker = saved.first { !$0.sharesOffset }
+            XCTAssertEqual(speaker?.id, "Europe/London|london",
+                           "the city speaks for the clock, added \(labels[0].isEmpty ? "second" : "first")")
+        }
+    }
+
+    /// The ground zone, explicitly added, is a row of its own once the ground
+    /// card is naming a TOWN — they are no longer the same thing. It yields
+    /// first when space runs short, which is what `sharesOffset` is for.
+    func testTheGroundZoneKeepsItsRowWhenTheGroundNamesATown() throws {
+        let rows = ZoneRowResolver.resolve(
+            storedIds: ["America/Vancouver"],
+            local: Fixture.vancouver, deviceTz: Fixture.vancouver, now: Fixture.now,
+            localPlaceName: "Nelson")
+
+        XCTAssertEqual(rows.count, 2)
+        XCTAssertNotNil(rows.first { $0.isLocal && $0.name == "Nelson" })
+        let zone = try row(rows, named: "Vancouver")
+        XCTAssertFalse(zone.isLocal)
+        XCTAssertTrue(zone.sharesOffset, "a second copy of the ground clock gives way first")
+    }
+
+    /// But the ground's own TOWN is not a second row. Saving Nelson while
+    /// standing in Nelson printed it twice, once as "Local time" and once as
+    /// "+0 hrs" — the ground row's exemption for named places outliving the
+    /// reason for it.
+    func testTheGroundsOwnTownIsNotRepeatedAsAStoredRow() throws {
+        let rows = ZoneRowResolver.resolve(
+            storedIds: ["America/Vancouver"],
+            local: Fixture.vancouver, deviceTz: Fixture.vancouver, now: Fixture.now,
+            localPlaceName: "Nelson", labels: ["Nelson"])
+
+        XCTAssertEqual(rows.count, 1)
+        XCTAssertTrue(rows[0].isLocal)
+    }
+
+    /// Two rows, two identities. WidgetRow is Identifiable and the widget draws
+    /// it with ForEach, so a shared id is not a near-miss — SwiftUI renders one
+    /// of them twice under the other's name, which is how the ground card's own
+    /// name came to appear under both clocks.
+    func testEveryRowHasAnIdOfItsOwn() throws {
+        let rows = ZoneRowResolver.resolve(
+            storedIds: ["America/Vancouver", "America/Vancouver", "America/Edmonton"],
+            local: Fixture.vancouver, deviceTz: Fixture.vancouver, now: Fixture.now,
+            localPlaceName: "Nelson", labels: ["Nelson", "", "Calgary"])
+
+        XCTAssertEqual(Set(rows.map(\.id)).count, rows.count, "ids: \(rows.map(\.id))")
+    }
+
     // MARK: ports of call
 
     /// `kinds` is parallel to `storedIds`, and the loop that reads it SKIPS

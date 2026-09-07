@@ -265,13 +265,20 @@ enum ZoneRowResolver {
                 relativeText: TimezoneDisplay.relativeOffset(zoneSeconds: off, deviceSeconds: anchorOffset),
                 offsetSeconds: off,
                 sharesOffset: dup,
-                // A name the zone could not have produced itself — "Mississauga"
-                // for America/Toronto, "Coco Cay" for America/Nassau. Plain
-                // "Toronto" does not count: it is what the row would read anyway,
-                // so letting it outrank an unlabelled zone would change the winner
-                // without changing anything the user can see.
-                namesAPlace: chosen != nil
-                    && chosen!.caseInsensitiveCompare(TimezoneDisplay.displayName(id)) != .orderedSame,
+                // A row with a NAME of its own is a place; a row without one is the
+                // zone it stands in. So the place wins the clock they share, and the
+                // zone is the one that yields when the widget runs out of room.
+
+                // It used to take more than a name: the label had to differ from what
+                // the zone would have called itself, on the grounds that preferring
+                // "Toronto" over "Toronto" changed the winner without changing
+                // anything the user could see. True while a city and its zone were one
+                // row between them. They are two records now — the app lists
+                // "Toronto, ON" and "Toronto (Timezone)" separately — and with the old
+                // rule which of them survived a trim came down to which had been added
+                // first, the same text either way. The city is the more specific
+                // answer and should win every time.
+                namesAPlace: chosen != nil,
                 isPort: index < kinds.count && kinds[index] == "port"
             ))
         }
