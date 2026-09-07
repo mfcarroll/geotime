@@ -15,21 +15,27 @@ export interface ZoneStyle {
 // Fill says which band a zone belongs to; outline says which single zone the
 // pointer is on. They are separate channels because they answer different
 // questions, and a zone can be in the selected band *and* under the cursor.
+// Every one of these is lighter than it looks like it should be, and that is a
+// consequence of where hover moved to. While pointing at a zone was a JUMP IN
+// FILL, each level had to sit far enough below the next that the jump could be
+// seen — so the standing state was as heavy as the hovered one needed it to be,
+// and the map underneath paid for it. The outline carries hover now (see
+// OUTLINE), which frees every fill to be only as strong as its own job needs.
 export const FILLS = {
   base:            { fillColor: '#000000', fillOpacity: 0,    zIndex: 1 },
-  gpsBand:         { fillColor: '#3F80FF', fillOpacity: 0.26, zIndex: 2 },
+  gpsBand:         { fillColor: '#3F80FF', fillOpacity: 0.20, zIndex: 2 },
   // The clock you are living by, when that is a ship. Green rather than gold
   // because gold means "you picked this" — the ship is a fact about where you
   // are standing, in the same family as the blue band beside it, and the two
   // carry the same weight for that reason.
-  shipBand:        { fillColor: '#34C759', fillOpacity: 0.24, zIndex: 4 },
-  hoverBand:       { fillColor: '#FFFFFF', fillOpacity: 0.14, zIndex: 3 },
-  gpsSegment:      { fillColor: '#3F80FF', fillOpacity: 0.55, zIndex: 5 },
-  selectedBand:    { fillColor: '#FFD700', fillOpacity: 0.22, zIndex: 6 },
+  shipBand:        { fillColor: '#34C759', fillOpacity: 0.19, zIndex: 4 },
+  hoverBand:       { fillColor: '#FFFFFF', fillOpacity: 0.11, zIndex: 3 },
+  gpsSegment:      { fillColor: '#3F80FF', fillOpacity: 0.36, zIndex: 5 },
+  selectedBand:    { fillColor: '#FFD700', fillOpacity: 0.19, zIndex: 6 },
   // A wash, not a coat. At 0.8 the gold was opaque enough that the coastline,
   // the place names and the sea underneath it all went: the zone you picked was
   // the one part of the map you could no longer read.
-  selectedSegment: { fillColor: '#FFD700', fillOpacity: 0.5,  zIndex: 7 },
+  selectedSegment: { fillColor: '#FFD700', fillOpacity: 0.32, zIndex: 7 },
 } as const;
 
 /**
@@ -42,17 +48,42 @@ export const FILLS = {
  *
  * Dimmed rather than dropped, because the band is still the reason half of what
  * is on screen is the colour it is. It should be legible and it should be
- * quiet, in that order.
+ * quiet, in that order — and the first attempt got that order backwards. At
+ * 0.35 of a fill that was itself built for a fill-based hover, a selected
+ * ship's band came out at 0.08 and simply was not there. The fills below have
+ * since come down on their own account, so this no longer has to do the work of
+ * two decisions at once.
  */
-export const CHART_FILL_SCALE = 0.35;
+export const CHART_FILL_SCALE = 0.8;
 
-// Same weight throughout — hover reads as a brighter border, not a thicker one.
-// A weight change nudges the boundary by a pixel, which looks like the shape
-// moved; brightness alone plus the fill lift is enough to pick a zone out.
+/**
+ * Hover, almost entirely.
+ *
+ * This used to be brightness alone at a constant weight, on the reasoning that
+ * a weight change nudges the boundary and looks like the shape moved. It was
+ * true and it was the wrong trade: carrying hover on brightness alone meant the
+ * FILL had to carry it too, and a fill big enough to be noticed is a fill that
+ * hides the coastline, the place names and the sea under every highlighted
+ * zone on the map.
+ *
+ * So the outline does the work and the fill barely moves. The stroke is centred
+ * on the boundary and grows symmetrically, which is what keeps it from reading
+ * as movement — the earlier objection was to the pixel, not to the principle,
+ * and a pixel is a price worth paying to get the map back.
+ */
 export const OUTLINE = {
   none:  { strokeColor: 'rgba(255,255,255,0.2)', strokeWeight: 1 },
-  hover: { strokeColor: '#FFFFFF', strokeWeight: 1 },
+  hover: { strokeColor: '#FFFFFF', strokeWeight: 2 },
 } as const;
+
+/**
+ * How much of the hover is left for the fill to say.
+ *
+ * Small on purpose. Enough that a zone whose outline is hidden behind a card or
+ * running off the edge of the map still answers a pointer, and not enough to
+ * put the fill back in charge.
+ */
+export const HOVER_FILL_LIFT = 0.04;
 
 export interface ZoneStyleInput {
   tzid: string;
@@ -132,11 +163,12 @@ export function resolveZoneStyle(input: ZoneStyleInput): ZoneStyle {
   // band style and dropped out of the chain before hover was ever considered,
   // so pointing at a neighbour gave no feedback at all. Lift it above its own
   // band too, or the outline gets painted over by an adjacent zone.
-  // The hover lift is applied AFTER the wash, so pointing at a zone still says
-  // so while a chart is up — a proportional dimming of the lift would have made
-  // it invisible in exactly the state where the map is quietest.
+  // The lift is applied AFTER the wash, so pointing at a zone still says so
+  // while a chart is up — a proportional dimming of it would have made it
+  // faintest in exactly the state where the map is quietest.
   return {
     ...wash({ ...fill, ...OUTLINE.hover, zIndex: fill.zIndex + 10 }),
-    fillOpacity: Math.min(1, (chartShown ? fill.fillOpacity * CHART_FILL_SCALE : fill.fillOpacity) + 0.15),
+    fillOpacity: Math.min(1,
+      (chartShown ? fill.fillOpacity * CHART_FILL_SCALE : fill.fillOpacity) + HOVER_FILL_LIFT),
   };
 }

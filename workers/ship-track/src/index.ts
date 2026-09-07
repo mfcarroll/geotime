@@ -260,11 +260,17 @@ function portNamesByPoi(itinerary: unknown): Map<string, string> {
 interface ItineraryStop {
   poi: string;
   name: string | null;
-  /** "08 Sep" — day and month, never a year. */
-  date: string | null;
-  /** "08:00", or null where the row states only a departure. */
+  /** "07 Sep" — day and month, never a year. Null where no time is stated. */
+  arriveDate: string | null;
+  /** "14:00", or null where the row states only a departure. */
   arrive: string | null;
-  /** "18:00", or null on the final call, where nobody leaves again. */
+  /**
+   * "08 Sep". Its own date because a call can span midnight: Kings Wharf reads
+   * "07 Sep 14:00 - 08 Sep 11:59", and reading the second time against the
+   * first date would have a ship leaving Bermuda a day before she got there.
+   */
+  departDate: string | null;
+  /** "11:59", or null on the final call, where nobody leaves again. */
   depart: string | null;
 }
 
@@ -280,17 +286,26 @@ const MONTHS3 = [
  * say when a ship leaves a port and never when she gets there — which is the
  * half a passenger looking at a future call actually wants.
  *
- * The date cell is one of three shapes, and which one it is says what the time
+ * The date cell is one of four shapes, and which one it is says what the time
  * means:
  *
- *   "05 Sep 16:00"           first row: embarkation. A departure.
- *   "08 Sep 08:00 - 18:00"   a call. Arrival, then departure, same calendar day.
- *   "13 Sep 06:00"           last row: disembarkation. An arrival.
+ *   "05 Sep 16:00"                    embarkation. A departure, no arrival.
+ *   "08 Sep 08:00 - 18:00"            a call inside one day.
+ *   "07 Sep 14:00 - 08 Sep 11:59"     a call that stays the night.
+ *   "13 Sep 06:00"                    disembarkation. An arrival, no departure.
  *
- * Checked against every vessel in the fleet: the range form never spans
- * midnight and never carries a second date, so the two times share the row's
- * date. A shape not listed above yields nulls rather than a guess — the same
- * way an unparsed name yields null and lets the client name the port itself.
+ * The overnight form was missed on the first pass, because the five vessels it
+ * was checked against did not have one — and the comment here said so, which is
+ * how a sample became a claim. Vision of the Seas lies at Kings Wharf from
+ * Monday afternoon to Tuesday lunchtime, and her arrival came back null.
+ *
+ * WHICH row is which is read from the icon rather than from its position: a
+ * plain flag starts the cruise, a chequered flag ends it, and a map pin is an
+ * ordinary call. Position was the first draft and works right up until an
+ * itinerary is served in a different order or gains a row.
+ *
+ * A shape not listed above yields nulls rather than a guess — the same way an
+ * unparsed name yields null and lets the client name the port itself.
  */
 function itineraryStops(itinerary: unknown): ItineraryStop[] {
   if (!itinerary || typeof itinerary !== 'object') return [];
@@ -300,31 +315,58 @@ function itineraryStops(itinerary: unknown): ItineraryStop[] {
     .map(([, stop]) => stop);
 
   const stops: ItineraryStop[] = [];
+  const DATE = '(\\d{1,2} [A-Za-z]{3})';
+  const CLOCK = '(\\d{1,2}:\\d{2})';
+
   rows.forEach((stop, index) => {
     const portHtml = typeof stop?.port === 'string' ? stop.port : '';
     const match = portHtml.match(/<a[^>]*href="[^"]*?-(\d+)\/?"[^>]*>([^<]+)<\/a>/);
     if (!match) return;
 
-    const text = typeof stop?.date === 'string'
-      ? stop.date.replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim()
-      : '';
-    const range = text.match(/^(\d{1,2} [A-Za-z]{3}) (\d{1,2}:\d{2})\s*[-\u2013]\s*(\d{1,2}:\d{2})$/);
-    const single = text.match(/^(\d{1,2} [A-Za-z]{3}) (\d{1,2}:\d{2})$/);
+    const html = typeof stop?.date === 'string' ? stop.date : '';
+    const text = html
+      .replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
 
-    // A single time is a departure on the first row and an arrival on the last.
-    // Anywhere else it is a shape we have not seen, and the departure reading is
-    // the one that agrees with dep_datetime.
-    const arrivalOnly = !!single && index === rows.length - 1;
+    // "07 Sep 14:00 - 08 Sep 11:59", or the same-day form with the second date
+    // left off, or one time on its own.
+    const range = text.match(
+      new RegExp(`^${DATE} ${CLOCK}\\s*[-\u2013]\\s*(?:${DATE} )?${CLOCK}$`));
+    const single = text.match(new RegExp(`^${DATE} ${CLOCK}$`));
+
+    // Which end of the cruise this is, from the icon that marks it. Position is
+    // the fallback: a single time on the last row is an arrival, and anywhere
+    // else the departure reading is the one that agrees with dep_datetime.
+    const ends = /fa-flag-checkered/.test(html)
+      || (!/fa-flag|fa-map-marker/.test(html) && index === rows.length - 1);
+    const arrivalOnly = !!single && ends;
 
     stops.push({
       poi: match[1],
       name: decodeEntities(match[2]) || null,
-      date: range?.[1] ?? single?.[1] ?? null,
+      arriveDate: range?.[1] ?? (arrivalOnly ? single![1] : null),
       arrive: range?.[2] ?? (arrivalOnly ? single![2] : null),
-      depart: range?.[3] ?? (single && !arrivalOnly ? single[2] : null),
+      // The second date where the call stays the night, the first where it does
+      // not — which is the whole reason both are carried.
+      departDate: range ? (range[3] ?? range[1]) : (single && !arrivalOnly ? single[1] : null),
+      depart: range?.[4] ?? (single && !arrivalOnly ? single[2] : null),
     });
   });
   return stops;
+}
+
+/**
+ * The year an arrival belongs to, given the year of its own departure.
+ *
+ * The same year in every case but one: a call that stays the night across New
+ * Year's Eve arrives in December and leaves in January, and the departure's
+ * year would put the arrival eleven months in the future. Detected by the
+ * months going backwards, which nothing else in an itinerary does.
+ */
+function arrivalYear(stop: ItineraryStop, departYear: number | null): number | null {
+  if (departYear === null || !stop.arriveDate || !stop.departDate) return departYear;
+  const monthOf = (date: string) =>
+    MONTHS3.indexOf((date.split(' ')[1] ?? '').slice(0, 3).toLowerCase());
+  return monthOf(stop.arriveDate) > monthOf(stop.departDate) ? departYear - 1 : departYear;
 }
 
 /** "08 Sep" plus a year and "08:00" -> "2026-09-08 08:00:00", or null. */
@@ -554,7 +596,7 @@ function shapeDetail(imo: string, payload: any): ShapedVoyage {
            * came from did not state one — the embarkation call, or markup we
            * could not read. Same shape and same clock as `depart`.
            */
-          arrive: stop ? stampOf(stop.date, stop.arrive, year) : null,
+          arrive: stop ? stampOf(stop.arriveDate, stop.arrive, arrivalYear(stop, year)) : null,
           /** Local departure time as upstream states it; null on the final call. */
           depart,
         }];
