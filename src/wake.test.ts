@@ -511,3 +511,41 @@ describe('rounded corners', () => {
         assert.deepEqual(roundCorners([[-80, 25], [-79, 26]]), [[-80, 25], [-79, 26]]);
     });
 });
+
+describe('rounding a measured track', () => {
+    // A wake is a long run of fixes, most of them all but collinear. Easing
+    // every one of them would multiply the line fivefold to move it by nothing.
+    const drift = (n: number): Array<[number, number]> =>
+        Array.from({ length: n }, (_, i) => [
+            -80 + i * 0.02,
+            25 + i * 0.02 + (i % 2 ? 0.0004 : 0),   // a degree or two of wobble
+        ] as [number, number]);
+
+    it('leaves a nearly straight run at its own length', () => {
+        const track = drift(60);
+        assert.equal(roundCorners(track).length, track.length);
+    });
+
+    it('still rounds where the course genuinely changes', () => {
+        const turned: Array<[number, number]> = [...drift(20)];
+        const last = turned[turned.length - 1];
+        turned.push([last[0] + 0.4, last[1] - 0.3]);
+        turned.push([last[0] + 0.9, last[1] - 0.3]);
+        assert.ok(roundCorners(turned).length > turned.length);
+    });
+
+    it('moves a densely sampled line by less than its own sampling', () => {
+        // The bound that makes this safe on data rather than on a plan: no point
+        // of the eased line lies further from the vertex it replaced than a
+        // third of its own leg.
+        const turned: Array<[number, number]> = [[-80, 25], [-79.98, 25.02], [-79.94, 25.02]];
+        const legs = [
+            distance(25, -80, 25.02, -79.98),
+            distance(25.02, -79.98, 25.02, -79.94),
+        ];
+        const arc = roundCorners(turned, 4).slice(1, -1);
+        const furthest = Math.max(...arc.map((p) => distance(p[1], p[0], 25.02, -79.98)));
+        assert.ok(furthest <= Math.max(...legs) / 3 + 0.001,
+            `moved ${furthest.toFixed(2)} km on legs of ${legs.map((l) => l.toFixed(2))}`);
+    });
+});

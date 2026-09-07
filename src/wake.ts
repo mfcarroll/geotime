@@ -552,6 +552,27 @@ const CORNER_KM = 4;
 const CORNER_MAX_TURN = 150;
 
 /**
+ * Below this much of a turn, there is nothing to round.
+ *
+ * Cheap on a planned route, which has few vertices and means them all. It
+ * earns its place on a WAKE: a track is a long run of fixes a few kilometres
+ * apart, most of them all but collinear, and easing each one would multiply the
+ * line fivefold to move it by nothing. Five degrees keeps the points where a
+ * course actually changed.
+ */
+const CORNER_MIN_TURN = 5;
+
+/**
+ * The most of a leg a corner may eat, whatever CORNER_KM says.
+ *
+ * CORNER_KM alone bounds a long leg; this bounds a short one, where four
+ * kilometres would be most of it. Together they give the invariant the whole
+ * thing rests on: no point of the eased line lies further from the vertex it
+ * replaced than the smaller of CORNER_KM and a third of its own leg.
+ */
+const CORNER_MAX_SHARE = 1 / 3;
+
+/**
  * The same path with its corners eased.
  *
  * A planned route is a handful of waypoints, so every course change is a hard
@@ -565,6 +586,12 @@ const CORNER_MAX_TURN = 150;
  * leg's corner by twenty; this trims a fixed distance, so the longer the leg the
  * less of it proportionally is touched and the error stays where it can be
  * reasoned about. See CORNER_KM.
+ *
+ * Which is also what makes it safe on a WAKE, where the line is measured rather
+ * than planned and inventing positions would be a different kind of wrong. The
+ * trim never exceeds a third of its own leg either, so on a track sampled every
+ * couple of kilometres the curve moves by a few hundred metres — less than the
+ * straight line between two fixes already invents by being straight.
  */
 export function roundCorners(
     path: Array<[number, number]>,
@@ -580,15 +607,17 @@ export function roundCorners(
 
         // A duplicated vertex — which is how a port call arrives — has no leg to
         // trim along and no corner to round.
-        if (back === 0 || on === 0 || turnAt(before, at, after) > CORNER_MAX_TURN) {
+        const turn = back === 0 || on === 0 ? 0 : turnAt(before, at, after);
+        if (turn < CORNER_MIN_TURN || turn > CORNER_MAX_TURN) {
             out.push(at);
             continue;
         }
 
-        // Never past halfway, or two corners on a short leg would meet in the
-        // middle and swallow the straight between them.
-        const from = along(at, before, Math.min(0.5, maxKm / back));
-        const to = along(at, after, Math.min(0.5, maxKm / on));
+        // A third of a leg at most, so two corners on a short one leave a
+        // straight between them — and so the curve on a densely sampled track
+        // stays well inside its own sampling.
+        const from = along(at, before, Math.min(CORNER_MAX_SHARE, maxKm / back));
+        const to = along(at, after, Math.min(CORNER_MAX_SHARE, maxKm / on));
 
         // Three samples is enough for an arc this short; a fourth is invisible
         // and costs a point on every corner of every redraw.

@@ -747,7 +747,11 @@ export async function drawShipChart(key: string, voyage: Promise<ShipVoyage | nu
   const runs = wakeRuns(wake, gaps);
   for (const run of runs) {
     if (run.length < 2) continue;
-    polyline(map, run.map(toLatLng), {
+    // Eased at the corners like the route, and bounded the same way. A wake is
+    // measured rather than planned, so the bound is what makes it honest: the
+    // trim never exceeds half the shorter leg, and between two fixes a couple of
+    // kilometres apart that is a few hundred metres.
+    polyline(map, roundCorners(run).map(toLatLng), {
       strokeColor: routeColour,
       strokeOpacity: 0.95,
       strokeWeight: 2,
