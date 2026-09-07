@@ -135,10 +135,24 @@ function nearOrigin(crumb: [number, number], origin: [number, number]): boolean 
  * the same", because unknown is not a match.
  */
 function placeColour(
-  port: { lat: number; lon: number }, shipOffset: number | null, shipHue: string,
+  at: { lat: number; lon: number }, shipOffset: number | null, shipHue: string,
 ): string {
-  if (shipOffset === null) return PLACE_PLAIN;
-  return utcOffsetForCoordinates(port.lat, port.lon) === shipOffset ? shipHue : PLACE_PLAIN;
+  const offset = utcOffsetForCoordinates(at.lat, at.lon);
+  if (offset === null) return PLACE_PLAIN;
+
+  // Her own hue first, and it outranks the band for the same reason a selected
+  // ship's hull does: this says "the call keeps HER time", which is a fact about
+  // the cruise being looked at rather than about the hour it happens to be in.
+  if (shipOffset !== null && offset === shipOffset) return shipHue;
+
+  // Otherwise the band, in the same washed gold the hulls take. A place keeps a
+  // time whether or not any ship is going there, and the map had no way to say
+  // so — select New York and Tampa sat there in plain white, a stranger to the
+  // answer the rest of the map was giving.
+  const selected = mapSelection().offset;
+  if (selected !== null && offset === selected) return MATCHING;
+
+  return PLACE_PLAIN;
 }
 
 /**
@@ -848,7 +862,7 @@ function placePins(): PlacePin[] {
       lat: at.lat,
       lon: at.lon,
       note: '',
-      colour: PLACE_PLAIN,
+      colour: placeColour(at, chartShipOffset, chartColour),
       kind: zone.kind,
     });
   };

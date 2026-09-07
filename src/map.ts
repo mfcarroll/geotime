@@ -658,6 +658,14 @@ export function selectPlace(detail: PlaceMarkerDetail, reveal = false): void {
     }
 
     state.selectedPlace = { tzid, name: detail.name, lat: detail.lat, lon: detail.lon };
+    // Dropped like every other selection drops it. Left standing, the ground
+    // zone kept its gold while a place elsewhere took the card — which is how
+    // Nelson, Vancouver and Calgary came to be picked all at once.
+    if (state.gpsTimezoneSelected) {
+        state.gpsTimezoneSelected = false;
+        document.dispatchEvent(
+            new CustomEvent('gpstimezoneSelectionChanged', { detail: { selected: false } }));
+    }
     // A row of its own so it can be kept, and the pin beside it to keep it
     // with. The row carries the port's name, its anchor and its position — it
     // does not WRITE them onto the zone, which is how a look at Cabo San Lucas
@@ -1624,6 +1632,27 @@ export function addUniqueTimezoneToList(tz: string) {
     keepZone({ tz });
 }
 
+/**
+ * The one row that stands for where you are, or null.
+ *
+ * ONE row, which is the whole point of it existing. Blue means "this is where
+ * you are", and standing in Vancouver with Nelson also on the list used to
+ * paint both of them — they share a zone, and the zone was what was being
+ * compared. Only one of them is where you are.
+ *
+ * The bare row wins where there is one, because that row IS the zone and the
+ * app added it on your behalf. Where a named place got there first — and the
+ * auto-add then stood down, deliberately — that place is the only row for the
+ * zone and so it is the one you are standing in.
+ */
+function localRowKey(): string | null {
+    const tz = state.gpsTzid;
+    if (!tz) return null;
+    const here = state.savedZones.filter((zone) => zone.tz === tz);
+    if (here.length === 0) return null;
+    return zoneKey(here.find((zone) => !zone.label) ?? here[0]);
+}
+
 export function renderWorldClocks() {
     dom.worldClocksContainerEl.innerHTML = '';
 
@@ -1667,12 +1696,17 @@ function createClockElement(entry: ClockEntry): HTMLElement {
         && shipKey(entry.ship) === state.selectedShipKey
         && !state.selectedPlace;
 
-    if (tzid && tzid === state.gpsTzid && state.gpsTimezoneSelected) {
+    // Compared by PLACE, all of it. Both of these used to test the ZONE, which
+    // was the same thing right up until a zone could hold two rows: standing in
+    // Vancouver with Nelson also saved lit them both, and picking a third place
+    // left all three bordered at once because nothing had cleared the first.
+    const picked = !!zone && !!state.temporaryZone
+        && zoneKey(zone) === zoneKey(state.temporaryZone);
+
+    if (picked) {
         clockDiv.classList.add('border-yellow-500');
-    } else if (tzid && tzid === state.gpsTzid) {
+    } else if (zone && zoneKey(zone) === localRowKey()) {
         clockDiv.classList.add('border-blue-500');
-    } else if (zone && state.temporaryZone && zoneKey(zone) === zoneKey(state.temporaryZone)) {
-        clockDiv.classList.add('border-yellow-500');
     } else if (isSelectedShip) {
         // Same gold as a selected zone: the row, the band and the marker are one
         // selection shown three ways, so they should not look like three states.
@@ -1683,9 +1717,7 @@ function createClockElement(entry: ClockEntry): HTMLElement {
 
     // Transient means picked but not kept — the row with the pin beside it.
     // Compared by PLACE: Tampa is not "already saved" because New York is.
-    const isTransient = !!zone && !!state.temporaryZone
-        && zoneKey(zone) === zoneKey(state.temporaryZone)
-        && !savedZoneByKey(zoneKey(zone));
+    const isTransient = picked && !savedZoneByKey(zoneKey(zone!));
 
     if (isTransient) {
         clockDiv.classList.add('bg-yellow-800', 'bg-opacity-50');

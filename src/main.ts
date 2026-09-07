@@ -292,7 +292,11 @@ async function startApp() {
         const zone = savedZoneByKey(key)
           ?? (state.temporaryZone && zoneKey(state.temporaryZone) === key
                 ? state.temporaryZone : null);
-        if (zone) selectSavedZone(zone);
+        // And shown, the way a ship's row has always shown her. Tapping a row is
+        // asking about that place; leaving the map wherever it happened to be
+        // answered half the question, and answered it differently depending on
+        // which kind of row was tapped.
+        if (zone) selectSavedZone(zone, zone.at ?? 'zone');
     }
   });
 
