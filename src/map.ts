@@ -685,9 +685,9 @@ export function selectPlace(detail: PlaceMarkerDetail, reveal = false): void {
     };
     // A ship is NOT cleared here, unlike every other selection. A port belongs
     // to an itinerary, so picking one is a request to see that cruise, not to
-    // dismiss it — and if none is showing, showCruiseFor finds the one that
+    // dismiss it — and if none is showing, framedCruiseFor finds the one that
     // calls here.
-    const framed = showCruiseFor(detail);
+    const framed = framedCruiseFor(detail);
 
     // Reached from the search box rather than from the map, the map is wherever
     // it was — usually the whole world, where a ring four pixels across says
@@ -739,9 +739,17 @@ const SAME_PORT_KM = 25;
  *
  * Aboard is the exception, and it outranks the count. The ship underfoot is the
  * one whose itinerary a passenger means, whoever else happens to call there.
+ *
+ * Returns whether THIS CALL framed the map, which is a narrower thing than
+ * whether a cruise is up: only the branch that fits to an itinerary claims the
+ * viewport. Everything else leaves the place free to frame itself.
  */
-function showCruiseFor(detail: PlaceMarkerDetail): boolean {
-    if (state.selectedShipKey) return true;     // already showing a cruise
+function framedCruiseFor(detail: PlaceMarkerDetail): boolean {
+    // A cruise on screen is not a map that has been MOVED. Saying "framed" here
+    // is what stopped a city from framing itself once any port had been tapped:
+    // the port selected a cruise, selectedShipKey stayed set for the rest of the
+    // session, and every later place was told its viewport had been dealt with.
+    if (state.selectedShipKey) return false;
 
     const calling = state.shipClocks
         .map((ship) => shipKey(ship))
@@ -751,14 +759,17 @@ function showCruiseFor(detail: PlaceMarkerDetail): boolean {
                 distance(p.lat, p.lon, detail.lat, detail.lon) <= SAME_PORT_KM);
         });
 
+    // Drawn already, as the anchor always is — so, again, nothing has moved.
     const aboard = state.aboardShipKey;
-    if (aboard && calling.includes(aboard)) return true;   // already drawn, being the anchor
+    if (aboard && calling.includes(aboard)) return false;
     if (calling.length !== 1) return false;
 
     const key = calling[0];
     state.selectedShipKey = key;
     refreshShipMarkers();
     void drawShipChart(key, voyageForShip(key));
+    // The one branch that does own the viewport: the whole itinerary is a
+    // better answer than the single point on it that was picked.
     void fitToShip(key, voyageForShip(key));
     return true;
 }
