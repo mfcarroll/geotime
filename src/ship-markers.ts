@@ -17,7 +17,7 @@
 // treatment is to show it with its age rather than to pretend either that it is
 // live or that it is unknown.
 
-import { state } from './state';
+import { state, whenMapReady } from './state';
 import { shipKey, type ShipClock } from './ships';
 import { shipTimeAvailable } from './rccl';
 import { anchorOffsetHours, mapSelection, utcOffsetForCoordinates } from './time';
@@ -994,8 +994,10 @@ export async function fitToShip(key: string, voyage: Promise<ShipVoyage | null>)
 
   if (framed) {
     // Enough margin that the route does not run into the edges, where the ports
-    // at each end of it would be half off the map.
-    map.fitBounds(bounds, 48);
+    // at each end of it would be half off the map. Deferred if the map cannot
+    // yet work a zoom out of a box — see whenMapReady, and the cold load that
+    // found it.
+    whenMapReady((ready) => ready.fitBounds(bounds, 48));
     return;
   }
 

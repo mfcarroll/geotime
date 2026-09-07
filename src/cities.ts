@@ -31,6 +31,14 @@ export interface CityPlace extends PlaceBase {
   kind: 'city';
   /** IANA zone this place resolves to. */
   tzid: string;
+  /**
+   * Where the town is.
+   *
+   * So picking one out of the search box can show it. Framing the whole zone
+   * instead would answer a question nobody asked — somebody who types "Nelson"
+   * wants Nelson, not the western half of Canada.
+   */
+  at: { lat: number; lon: number };
 }
 
 /**
@@ -187,6 +195,7 @@ function cityResult(index: CityIndex, i: number): CityPlace {
   const name = index.names[i];
   return {
     tzid: index.zones[index.zoneOf[i]],
+    at: { lat: index.cityAt[i * 2], lon: index.cityAt[i * 2 + 1] },
     label: name,
     primary: `${name}, ${index.regions[index.regionOf[i]]}`,
     secondary: index.zones[index.zoneOf[i]],

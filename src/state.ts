@@ -383,6 +383,27 @@ export function aboardShip(): ShipClock | null {
     return state.shipClocks.find((s) => shipKey(s) === state.aboardShipKey) ?? null;
 }
 
+/**
+ * Runs once the world map can do geometry, which is not the moment it exists.
+ *
+ * fitBounds needs a projection and a laid-out container to work a zoom out of,
+ * and before it has them it does nothing AT ALL — no error, no approximation,
+ * just a map that stays where it was. Caught by searching for a zone a few
+ * seconds into a cold load and watching the card change while the map did not.
+ *
+ * setCenter and setZoom are exempt, needing neither, which is what makes the
+ * failure selective enough to miss.
+ *
+ * Here rather than in map.ts because ship-markers.ts frames the map too and
+ * cannot import from map.ts, which imports from it.
+ */
+export function whenMapReady(run: (map: google.maps.Map) => void): void {
+    const map = state.timezoneMap;
+    if (!map) return;
+    if (map.getProjection()) { run(map); return; }
+    google.maps.event.addListenerOnce(map, 'idle', () => run(map));
+}
+
 /** Single write path for the resolved local place name (see AppState). */
 export function setLocalPlaceName(name: string | null): void {
     state.localPlaceName = name;

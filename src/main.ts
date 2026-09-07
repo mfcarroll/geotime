@@ -218,12 +218,20 @@ async function startApp() {
       findTimezoneFromGeoJSON),
     onSelect: (place) => {
       if (place.kind === 'ship') {
-        // No map selection: a ship has no position on it, and its clock is set
-        // by the crew rather than by where it happens to be floating.
-        addShipClock(place.ship);
+        const clock = addShipClock(place.ship);
         renderWorldClocks();
         updateAllClocks();
         void resolveAllShipClocks();
+        // And shown, like every other thing picked out of this box. This used
+        // to add the row and stop, on the reasoning that a ship has no position
+        // on the map — which stopped being true the day she got a hull, a wake
+        // and a route. Picking her here now does what picking her row does:
+        // lights her band, draws her chart, and frames the cruise.
+        //
+        // Guarded because selectShip toggles: without this, searching for the
+        // vessel already selected would turn her off.
+        const key = shipKey(clock);
+        if (state.selectedShipKey !== key) selectShip(key);
         return;
       }
       // A port keeps its own name on the row ("Cozumel"), the same way a city
@@ -235,7 +243,11 @@ async function startApp() {
       // around it — the same thing tapping its ring on the chart records.
       setZonePlace(place.tzid, place.kind === 'port' ? place.at : undefined);
       addUniqueTimezoneToList(place.tzid);
-      selectTimezone(place.tzid);
+      // Shown as well as selected. The map is wherever it was left — usually
+      // the whole world, where a port's ring is four pixels and a city is none
+      // at all — so picking a place here frames it: the point for a town or a
+      // berth, the whole shape for a zone, which is what its name refers to.
+      selectTimezone(place.tzid, place.kind === 'zone' ? 'zone' : place.at);
       updateAllClocks();
     },
   });

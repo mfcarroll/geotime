@@ -1,7 +1,7 @@
 // src/map.ts
 
 import * as dom from './dom';
-import { aboardShip, state, persistTimezones, setLocalPlaceName, setZoneKind, setZoneLabel, setZonePlace, syncWidget } from './state';
+import { aboardShip, state, persistTimezones, setLocalPlaceName, setZoneKind, setZoneLabel, setZonePlace, syncWidget, whenMapReady } from './state';
 import { timezoneForCoordinates, findTimezoneFromGeoJSON, mapSelection, zoneForCoordinates, startClocks, relativeTextForZone, relativeTextForShip, getFormattedTime, getUtcOffset, getDisplayTimezoneName, getZoneLabel, updateAllClocks, formatOffsetDiff } from './time';
 import { locationMapStyles, worldTimezoneMapStyles } from './map-styles';
 import { debugFlag, distance, formatAccuracy, fold } from './utils';
@@ -307,17 +307,65 @@ function selectZone(newTzid: string | null) {
     document.dispatchEvent(new CustomEvent('temporarytimezonechanged'));
 }
 
-export function selectTimezone(tzid: string) {
+/**
+ * Where to put the map when something is picked, or nothing to leave it alone.
+ *
+ * A coordinate frames that point; 'zone' frames the whole region. The
+ * difference matters: somebody who types "Nelson" wants Nelson, and somebody
+ * who types "America/Vancouver" wants the shape that name refers to.
+ */
+export type Frame = { lat: number; lon: number } | 'zone';
+
+export function selectTimezone(tzid: string, frame?: Frame) {
     // A saved port's row names a POINT, not the region around it, so it selects
     // the same way its ring on the map does — including finding the cruise that
     // calls there. Only rows we have coordinates for: a port kept by an older
     // build has none, and falls back to being an ordinary zone.
     const at = state.zoneKinds[tzid] === 'port' ? state.zonePlaces[tzid] : undefined;
     if (at) {
-        selectPort({ name: state.zoneLabels[tzid] ?? tzid, lat: at.lat, lon: at.lon, detail: '' });
+        selectPort(
+            { name: state.zoneLabels[tzid] ?? tzid, lat: at.lat, lon: at.lon, detail: '' },
+            frame !== undefined);
         return;
     }
     selectZone(tzid);
+    if (frame === 'zone') frameZone(tzid);
+    else if (frame) frameAt(frame.lat, frame.lon);
+}
+
+/** Centres on a point, coming closer if the map was further out than PLACE_ZOOM. */
+function frameAt(lat: number, lon: number): void {
+    whenMapReady((map) => {
+        map.setCenter({ lat, lng: lon });
+        map.setZoom(Math.max(map.getZoom() ?? 0, PLACE_ZOOM));
+    });
+}
+
+/**
+ * Fits the map to a zone's own shape.
+ *
+ * Walked from the Data layer rather than the raw GeoJSON, so a zone drawn as
+ * several features — most of them are — is framed as the one place it is. An
+ * enormous zone honestly zooms out, and a nautical band that runs pole to pole
+ * honestly zooms all the way out: the answer to "where is Etc/GMT+5" really is
+ * "a stripe down the whole map".
+ *
+ * LatLngBounds.extend grows the shorter way round, which is what keeps Alaska
+ * from being framed as the entire Pacific because the Aleutians cross 180.
+ */
+function frameZone(tzid: string): void {
+    whenMapReady((map) => {
+        const bounds = new google.maps.LatLngBounds();
+        let framed = false;
+        map.data.forEach((feature) => {
+            if (feature.getProperty('tzid') !== tzid) return;
+            feature.getGeometry()?.forEachLatLng((latLng) => {
+                bounds.extend(latLng);
+                framed = true;
+            });
+        });
+        if (framed) map.fitBounds(bounds, 48);
+    });
 }
 
 /**
@@ -530,7 +578,7 @@ export function setHoveredPort(detail: PortMarkerDetail | null): void {
  * "Cancun" — and the anchor beside it, exactly as picking it out of the search
  * would, so a place reached two ways is stored one way.
  */
-export function selectPort(detail: PortMarkerDetail): void {
+export function selectPort(detail: PortMarkerDetail, reveal = false): void {
     const tzid = zoneForCoordinates(detail.lat, detail.lon);
     if (!tzid || isUnlocatedZone(tzid)) return;
 
@@ -590,7 +638,14 @@ export function selectPort(detail: PortMarkerDetail): void {
     // to an itinerary, so picking one is a request to see that cruise, not to
     // dismiss it — and if none is showing, showCruiseFor finds the one that
     // calls here.
-    showCruiseFor(detail);
+    const framed = showCruiseFor(detail);
+
+    // Reached from the search box rather than from the map, the map is wherever
+    // it was — usually the whole world, where a ring four pixels across says
+    // nothing. Picking a place there is a request to be shown it. Tapping its
+    // ring is not: the map is already where you were looking, and moving it
+    // under you would be the surprise.
+    if (reveal && !framed) frameAt(detail.lat, detail.lon);
 
     updateCard(dom.selectedTimezoneDetailsEl, dom.selectedTimezoneNameEl,
                dom.selectedTimezoneOffsetEl, tzid, 'offset');
@@ -602,6 +657,15 @@ export function selectPort(detail: PortMarkerDetail): void {
     renderWorldClocks();
     document.dispatchEvent(new CustomEvent('temporarytimezonechanged'));
 }
+
+/**
+ * Close enough to see a place and the coast or country it sits on.
+ *
+ * Never zooms OUT: someone who was already looking at one island does not want
+ * the map pulled back to a region because they searched for the place they were
+ * already standing on.
+ */
+const PLACE_ZOOM = 6;
 
 /** The ship on the clock list matching the current selection, or null. */
 function selectedShip(): ShipClock | null {
@@ -627,8 +691,8 @@ const SAME_PORT_KM = 25;
  * Aboard is the exception, and it outranks the count. The ship underfoot is the
  * one whose itinerary a passenger means, whoever else happens to call there.
  */
-function showCruiseFor(detail: PortMarkerDetail): void {
-    if (state.selectedShipKey) return;          // already showing a cruise
+function showCruiseFor(detail: PortMarkerDetail): boolean {
+    if (state.selectedShipKey) return true;     // already showing a cruise
 
     const calling = state.shipClocks
         .map((ship) => shipKey(ship))
@@ -639,14 +703,15 @@ function showCruiseFor(detail: PortMarkerDetail): void {
         });
 
     const aboard = state.aboardShipKey;
-    if (aboard && calling.includes(aboard)) return;   // already drawn, being the anchor
-    if (calling.length !== 1) return;
+    if (aboard && calling.includes(aboard)) return true;   // already drawn, being the anchor
+    if (calling.length !== 1) return false;
 
     const key = calling[0];
     state.selectedShipKey = key;
     refreshShipMarkers();
     void drawShipChart(key, voyageForShip(key));
     void fitToShip(key, voyageForShip(key));
+    return true;
 }
 
 /**

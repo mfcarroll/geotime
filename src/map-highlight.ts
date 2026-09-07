@@ -70,15 +70,15 @@ export const CHART_FILL_SCALE = 0.8;
  * the region, and shifts it by a pixel while it is at it. Brightness at a
  * constant weight is the whole of it.
  *
- * A thinner line at a higher opacity, for both. Three quarters of a pixel is a
- * finer grid than a full one and reads more sharply for being nearer its own
- * colour, which is what lets the resting state come UP — and the resting state
- * coming up is what takes the bang out of hover without taking the answer out
- * of it. Roughly twice the brightness now, where it was four times.
+ * A thinner line at a higher opacity, for both. Half a pixel is a finer grid
+ * than a full one and reads more sharply for being nearer its own colour, which
+ * is what lets the resting state come UP — and the resting state coming up is
+ * what takes the bang out of hover without taking the answer out of it. Roughly
+ * twice the brightness now, where it was four times.
  */
 export const OUTLINE = {
-  none:  { strokeColor: 'rgba(255,255,255,0.35)', strokeWeight: 0.75 },
-  hover: { strokeColor: 'rgba(255,255,255,0.8)',  strokeWeight: 0.75 },
+  none:  { strokeColor: 'rgba(255,255,255,0.35)', strokeWeight: 0.5 },
+  hover: { strokeColor: 'rgba(255,255,255,0.8)',  strokeWeight: 0.5 },
 } as const;
 
 /**
