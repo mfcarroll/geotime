@@ -407,10 +407,11 @@ public class GeoTimeWidgetProvider extends AppWidgetProvider {
                     null, null, "Ship time"));
         }
 
+        String groundName = localPlace != null ? localPlace : cityLabel(baseId);
         if (!mergeGroundIntoShip) {
             boolean isAnchor = aboardShip == null;
             boolean differs = !isAnchor && dayDiffers(baseTz, anchorTz, now);
-            rows.add(new Row(localPlace != null ? localPlace : cityLabel(baseId), null, baseId,
+            rows.add(new Row(groundName, null, baseId,
                     geographicOffset, true,
                     deviceOffset == geographicOffset && !isAnchor, false, isAnchor,
                     differs ? formatDay(baseTz, now, false) : null,
@@ -460,6 +461,28 @@ public class GeoTimeWidgetProvider extends AppWidgetProvider {
         if (deviceOffset != anchorOffset && deviceOffset != geographicOffset) {
             seenPlaces.add(placeKey(osTz.getID(), null));
         }
+
+        // What a row would DRAW, which is a second question from what it is.
+        //
+        // Saving the city Vancouver and the timezone America/Vancouver makes two
+        // records that are genuinely different — the app lists them as
+        // "Vancouver, BC" and "Vancouver (Timezone)" — and the widget has room
+        // for neither suffix, so both came out as "Vancouver" against the same
+        // clock. Two identical lines, which reads as a bug because there is
+        // nothing there to tell apart.
+        //
+        // Keyed on the ZONE as well as the name, so it only ever catches rows
+        // that really are one region of the world under two records. Two towns
+        // of one name in DIFFERENT zones stay two rows: they draw alike but they
+        // are not the same place, and giving one up is fitCity's decision when
+        // the space runs out, not this one's. Same reason "New York City" and
+        // "New York" both keep their rows — they draw differently, so there is
+        // something to see.
+        Set<String> drawn = new HashSet<>();
+        if (!mergeGroundIntoShip) drawn.add(baseId + "\u0001" + groundName);
+        if (deviceOffset != anchorOffset && deviceOffset != geographicOffset) {
+            drawn.add(osTz.getID() + "\u0001" + cityLabel(osTz.getID()));
+        }
         for (int i = 0; i < stored.size(); i++) {
             String id = stored.get(i);
             if (id.isEmpty()) continue;
@@ -467,6 +490,8 @@ public class GeoTimeWidgetProvider extends AppWidgetProvider {
             Resolved rz = resolveTimeZone(id);
             String place = placeKey(rz.tzId, named);
             if (seenPlaces.contains(place)) continue;
+            if (!drawn.add(rz.tzId + "\u0001"
+                    + (named != null ? named : cityLabel(id)))) continue;
             long off = rz.tz.getOffset(now) / 60000L;
             // Duplicates are kept and flagged rather than dropped here. Dropping
             // was unconditional, so a zone vanished from the widget even with

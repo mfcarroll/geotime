@@ -129,31 +129,77 @@ final class ZoneRowResolverInvariants: XCTestCase {
         XCTAssertNotNil(rows.first { $0.name == "Home" })
     }
 
-    /// A place beats the zone it stands in, whichever was added first.
+    /// A place beats a bare zone on the clock they share, whichever came first.
     ///
-    /// The rule used to want more than a name: the label had to differ from
-    /// what the zone would have called itself, so a saved city "London" did not
-    /// outrank Europe/London — the reasoning being that preferring one over the
-    /// other changed the winner without changing anything visible.
+    /// Different ZONES here, because the same-zone case no longer reaches this
+    /// rule — two records that draw the same name in one zone are collapsed
+    /// before it, which is the better answer for them. What is left is a real
+    /// choice between two visibly different rows: a city and some other zone
+    /// keeping the same hour. The city is the more specific answer, and which
+    /// one survived a trim should not come down to which was added first.
     ///
-    /// Which held while a city and its zone were one row between them. They are
-    /// two rows now, and the consequence was that whichever had been added
-    /// first survived a trim: the same text on screen either way, and no way to
-    /// tell whether you were looking at the city or the timezone. So this
-    /// asserts the order does NOT decide it.
-    func testANamedPlaceWinsTheClockItSharesWithItsOwnZone() throws {
-        for labels in [["London", ""], ["", "London"]] {
+    /// The label is "Vancouver", which is exactly what its own zone would have
+    /// called itself — the case the old rule declined to count.
+    func testANamedPlaceBeatsABareZoneOnAClockTheyShare() throws {
+        for labels in [["Vancouver", ""], ["", "Vancouver"]] {
+            let ids = labels[0].isEmpty
+                ? ["America/Los_Angeles", "America/Vancouver"]
+                : ["America/Vancouver", "America/Los_Angeles"]
             let rows = ZoneRowResolver.resolve(
-                storedIds: ["Europe/London", "Europe/London"],
+                storedIds: ids, local: Fixture.newYork, deviceTz: Fixture.newYork,
+                now: Fixture.now, labels: labels)
+
+            let saved = rows.filter { !$0.isLocal }
+            XCTAssertEqual(saved.count, 2, "two different zones, two rows")
+            XCTAssertEqual(saved.first { !$0.sharesOffset }?.name, "Vancouver",
+                           "the place speaks for the clock, added \(labels[0].isEmpty ? "second" : "first")")
+        }
+    }
+
+    /// Two records drawing one line are one row to look at.
+    ///
+    /// Saving the city Vancouver and the timezone America/Vancouver is two
+    /// genuinely different records — the app lists "Vancouver, BC" and
+    /// "Vancouver (Timezone)" — but the widget has room for neither suffix, so
+    /// both came out as "Vancouver" against the same clock. Two identical
+    /// lines, which reads as a bug because there is nothing there to tell apart.
+    func testACityAndItsOwnZoneDrawingOneNameCollapse() throws {
+        for labels in [["Vancouver", ""], ["", "Vancouver"]] {
+            let rows = ZoneRowResolver.resolve(
+                storedIds: ["America/Vancouver", "America/Vancouver"],
                 local: Fixture.newYork, deviceTz: Fixture.newYork,
                 now: Fixture.now, labels: labels)
 
             let saved = rows.filter { !$0.isLocal }
-            XCTAssertEqual(saved.count, 2, "both are kept; fit decides which is given up")
-            let speaker = saved.first { !$0.sharesOffset }
-            XCTAssertEqual(speaker?.id, "Europe/London|london",
-                           "the city speaks for the clock, added \(labels[0].isEmpty ? "second" : "first")")
+            XCTAssertEqual(saved.count, 1, "one line drawn, one row kept")
+            XCTAssertEqual(saved.first?.name, "Vancouver")
         }
+    }
+
+    /// But only when the line really is the same. "New York City" is not "New
+    /// York", so both keep their rows and the reader can see which is which;
+    /// giving one up when the space runs out is fit()'s call, not this one's.
+    func testACityNamedUnlikeItsZoneKeepsItsOwnRow() throws {
+        let rows = ZoneRowResolver.resolve(
+            storedIds: ["America/New_York", "America/New_York"],
+            local: Fixture.vancouver, deviceTz: Fixture.vancouver,
+            now: Fixture.now, labels: ["New York City", ""])
+
+        let saved = rows.filter { !$0.isLocal }
+        XCTAssertEqual(Set(saved.map(\.name)), ["New York City", "New York"])
+        XCTAssertEqual(saved.filter(\.sharesOffset).count, 1,
+                       "the bare zone is the one that yields when room runs short")
+    }
+
+    /// And two towns of one name in different zones are two places, not one
+    /// line drawn twice — so neither hides the other here.
+    func testTwoTownsOfOneNameInDifferentZonesBothKeepRows() throws {
+        let rows = ZoneRowResolver.resolve(
+            storedIds: ["America/Vancouver", "America/Los_Angeles"],
+            local: Fixture.newYork, deviceTz: Fixture.newYork,
+            now: Fixture.now, labels: ["Vancouver", "Vancouver"])
+
+        XCTAssertEqual(rows.filter { !$0.isLocal }.count, 2)
     }
 
     /// The ground zone, explicitly added, is a row of its own once the ground

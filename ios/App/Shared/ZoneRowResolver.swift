@@ -141,6 +141,7 @@ enum ZoneRowResolver {
             ))
         }
 
+        let groundName = localPlaceName ?? TimezoneDisplay.displayName(local.identifier)
         if !mergeGroundIntoShip {
             let isAnchor = aboardShip == nil
             let parts = TimezoneDisplay.timeParts(local, at: now)
@@ -154,7 +155,7 @@ enum ZoneRowResolver {
                 // them twice — the ground card's own name appearing under both
                 // clocks, which is a list quietly losing a row.
                 id: "ground:\(local.identifier)",
-                name: localPlaceName ?? TimezoneDisplay.displayName(local.identifier),
+                name: groundName,
                 shortName: nil,
                 isLocal: true,
                 isDevice: deviceOffset == geographicOffset && !isAnchor,
@@ -236,11 +237,38 @@ enum ZoneRowResolver {
         if deviceShown {
             seenPlaces.insert(WidgetRow.placeKey(deviceTz.identifier, nil))
         }
+
+        // What a row would DRAW, which is a second question from what it is.
+        //
+        // Saving the city Vancouver and the timezone America/Vancouver makes two
+        // records that are genuinely different — the app lists them as
+        // "Vancouver, BC" and "Vancouver (Timezone)" — and the widget has room
+        // for neither suffix, so both came out as "Vancouver" against the same
+        // clock. Two identical lines, which reads as a bug because there is
+        // nothing there to tell apart.
+        //
+        // Keyed on the ZONE as well as the name, so it only ever catches rows
+        // that really are one region of the world under two records. Two towns
+        // of one name in DIFFERENT zones stay two rows: they draw alike but they
+        // are not the same place, and one of them yielding is fit()'s decision
+        // to make when the space runs out, not this one's. Same reason "New York
+        // City" and "New York" both keep their rows — they draw differently, so
+        // there is something to see.
+        var drawn = Set<String>()
+        let drawnKey = { (tzId: String, name: String) in "\(tzId)\u{1}\(name)" }
+        if !mergeGroundIntoShip { drawn.insert(drawnKey(local.identifier, groundName)) }
+        if deviceShown {
+            drawn.insert(drawnKey(deviceTz.identifier,
+                                  TimezoneDisplay.displayName(deviceTz.identifier)))
+        }
+
         for (index, id) in storedIds.enumerated() {
             let chosen = index < labels.count && !labels[index].isEmpty ? labels[index] : nil
             guard let info = TimezoneDisplay.resolveZone(id) else { continue }
             let place = WidgetRow.placeKey(info.timeZone.identifier, chosen)
             if seenPlaces.contains(place) { continue }
+            if !drawn.insert(drawnKey(info.timeZone.identifier,
+                                      chosen ?? info.displayName)).inserted { continue }
             seenPlaces.insert(place)
             let off = info.timeZone.secondsFromGMT(for: now)
             let dup = claimedOffsets.contains(off)
