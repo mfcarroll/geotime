@@ -375,6 +375,102 @@ export function selectSavedZone(zone: StoredZone, frame?: Frame) {
     else if (frame) frameAt(frame.lat, frame.lon);
 }
 
+/**
+ * Puts what a card names back on the map, without changing what is selected.
+ *
+ * The cards above the map name things — the place you are standing, the ship
+ * underfoot, whatever is picked — so they are worth being able to point at. What
+ * they are NOT is a second way to choose: tapping the gold card to be shown the
+ * port it names should not toggle that port off, and tapping the blue one should
+ * not quietly take the selection away from the card beside it. So these frame
+ * and nothing else.
+ */
+export function revealSelected(): void {
+    // The same order of precedence mapSelection reads, because that order is
+    // what decided which of the three the card is currently showing.
+    const place = state.selectedPlace;
+    if (place) { frameAt(place.lat, place.lon); return; }
+
+    const ship = state.selectedShipKey;
+    if (ship) { void fitToShip(ship, voyageForShip(ship)); return; }
+
+    if (state.selectedTzid) frameZone(state.selectedTzid);
+}
+
+/** Puts the anchor — where you are, or the ship you are on — back on the map. */
+export function revealAnchor(): void {
+    // One answer for both, because aboard the device IS the ship: a phone's own
+    // fix is where you are either way, and it is fresher than an AIS position
+    // relayed through a Worker.
+    const at = state.deviceFix ?? state.lastFetchedCoords;
+    if (at) { frameAt(at.lat, at.lon); return; }
+
+    // No fix at all, so the card is naming a ZONE rather than a point — the
+    // device's own, which is what it falls back to displaying.
+    const zone = state.gpsTzid ?? state.localTimezone;
+    if (zone && !isUnlocatedZone(zone)) frameZone(zone);
+}
+
+/**
+ * Lights the band a card names, without moving anything.
+ *
+ * The map's own hover minus the card. `hoveredZoneTzid` is what raises the grey
+ * one, and this deliberately leaves it alone: a third card repeating what the
+ * gold card already says is noise, not information. What it reaches for instead
+ * is the BAND — everywhere keeping that time — which is the one thing a card
+ * cannot show you and the map can.
+ *
+ * Hover is a pointer's gesture, so the caller decides whether this device has
+ * one. Nothing here is reachable on a phone.
+ */
+export function hoverSelected(on: boolean): void {
+    hoverBand(on ? state.selectedPlace?.tzid ?? state.selectedTzid : null);
+}
+
+/** The same, for the anchor: where you are, or the ship you are on. */
+export function hoverAnchor(on: boolean): void {
+    hoverBand(on ? state.gpsTzid ?? state.localTimezone : null);
+}
+
+/**
+ * Lights what a clock ROW names, without moving the map.
+ *
+ * The same gesture as the cards above it, reaching for the same highlighting,
+ * and the row kinds get what suits each. A place or a zone lights its BAND and
+ * raises no card: the row already says its name, and a second copy of it beside
+ * the map would be duplication with a layout shift attached.
+ *
+ * A ship lights her hull and does raise one, exactly as pointing at that hull
+ * on the map does. She has more to say than a row can hold — where she is
+ * headed and when she is due — and the hovered card is where that line lives.
+ */
+export function hoverClockRow(key: string | null): void {
+    if (!key) {
+        setHoveredShip(null);
+        hoverBand(null);
+        return;
+    }
+
+    // The "ship:" prefix exists only in the DOM, the same as it does on a click.
+    if (key.startsWith('ship:')) {
+        hoverBand(null);
+        setHoveredShip(key.slice('ship:'.length));
+        return;
+    }
+
+    setHoveredShip(null);
+    const zone = savedZoneByKey(key)
+        ?? (state.temporaryZone && zoneKey(state.temporaryZone) === key
+                ? state.temporaryZone : null);
+    hoverBand(zone?.tz ?? null);
+}
+
+function hoverBand(tzid: string | null): void {
+    // A nautical band is not a place, and painting the whole ocean because a
+    // pointer crossed a card is the same mistake as painting it from the map.
+    setHoveredZone(tzid && !isUnlocatedZone(tzid) ? tzid : null);
+}
+
 /** Centres on a point, coming closer if the map was further out than PLACE_ZOOM. */
 function frameAt(lat: number, lon: number): void {
     whenMapReady((map) => {

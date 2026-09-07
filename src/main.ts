@@ -5,7 +5,7 @@ import './style.css';
 import { Loader } from '@googlemaps/js-api-loader';
 import * as dom from './dom';
 import { addShipClock, loadDebugFleet, migrateStoredTimezones, persistZones, savedZoneByKey, state, syncWidget } from './state';
-import { refreshAnchorChip, refreshMapStyles, initMaps, onLocationError, onLocationSuccess, selectSavedZone, selectShip, selectPlace, setHoveredShip, setHoveredPlace, renderWorldClocks, keepZone, updateUserTimezoneDetails, showLocationUnavailable, loadTimezoneGeoJson } from './map';
+import { refreshAnchorChip, refreshMapStyles, initMaps, onLocationError, onLocationSuccess, selectSavedZone, selectShip, selectPlace, setHoveredShip, setHoveredPlace, renderWorldClocks, keepZone, updateUserTimezoneDetails, showLocationUnavailable, loadTimezoneGeoJson, revealAnchor, revealSelected, hoverAnchor, hoverSelected, hoverClockRow } from './map';
 import { updateAllClocks, syncClock, startClockWatch, getDisplayTimezoneName, startClocks, findTimezoneFromGeoJSON } from './time';
 import { Capacitor } from '@capacitor/core';
 import { getDeviceTimezone, onDeviceTimezoneChanged } from './widget';
@@ -255,6 +255,75 @@ async function startApp() {
     },
   });
 
+  /**
+   * Brings the map back into view.
+   *
+   * On a phone the World Clock list is below the fold, so picking a row framed
+   * a map that was off the bottom of the screen — the answer arrived somewhere
+   * the user could not see it.
+   *
+   * Skipped when the map is already there, which on a wide layout it always is.
+   * Scrolling a viewport that is showing the answer already is movement for its
+   * own sake. The whole CARD is what comes into view rather than the canvas
+   * alone: the cards above it name what was just picked, and a map with its
+   * labels scrolled off the top answers half the question.
+   */
+  function revealMap(): void {
+    const map = document.getElementById('timezone-map');
+    if (!map) return;
+
+    const box = map.getBoundingClientRect();
+    const onScreen = Math.min(box.bottom, window.innerHeight) - Math.max(box.top, 0);
+    if (onScreen >= Math.min(box.height, window.innerHeight) * 0.5) return;
+
+    (document.getElementById('timezone-map-card') ?? map).scrollIntoView({
+      behavior: window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+        ? 'auto' : 'smooth',
+      block: 'start',
+    });
+  }
+
+  // The cards above the map name places too, so they answer to a tap the way a
+  // row does: shown on the map, and the map brought into view. Not the hovered
+  // card — it exists only while a pointer is somewhere else, and moving to
+  // click it is what makes it go away.
+  dom.userTimezoneDetailsEl.addEventListener('click', () => {
+    revealAnchor();
+    revealMap();
+  });
+  dom.selectedTimezoneDetailsEl.addEventListener('click', () => {
+    revealSelected();
+    revealMap();
+  });
+
+  // And answering a pointer, where there is one. Asked as a capability rather
+  // than guessed from the user agent, because the question really is whether
+  // this device can hover: the native apps cannot, and on a touchscreen a
+  // mouseenter arrives with the tap and then has nothing to end it.
+  //
+  // Highlight only. A card is not a place to zoom from — the map would move
+  // under a pointer that was only passing over.
+  if (window.matchMedia?.('(hover: hover)').matches) {
+    const lightUp = (el: HTMLElement, light: (on: boolean) => void) => {
+      el.addEventListener('mouseenter', () => light(true));
+      el.addEventListener('mouseleave', () => light(false));
+    };
+    lightUp(dom.userTimezoneDetailsEl, hoverAnchor);
+    lightUp(dom.selectedTimezoneDetailsEl, hoverSelected);
+
+    // The rows below answer too. Delegated on mouseOVER rather than per-row on
+    // mouseenter, because rows come and go with every render and enter does not
+    // bubble — one listener on the container outlives them all. Moving between
+    // rows arrives as another mouseover with the new key, and the gaps between
+    // them as one with no key at all, which is the clear.
+    dom.worldClocksContainerEl.addEventListener('mouseover', (e) => {
+      const row = (e.target as HTMLElement).closest<HTMLElement>('[data-clock-key]');
+      hoverClockRow(row?.dataset.clockKey ?? null);
+    });
+    // Leaving the list entirely, which no mouseover reports.
+    dom.worldClocksContainerEl.addEventListener('mouseleave', () => hoverClockRow(null));
+  }
+
   dom.worldClocksContainerEl.addEventListener('click', (e: MouseEvent) => {
     const target = e.target as HTMLElement;
     const removeBtn = target.closest('.remove-btn');
@@ -287,17 +356,31 @@ async function startApp() {
         // A ship highlights every zone keeping its time, without any zone being
         // the ship. The "ship:" prefix exists only in the DOM, so it is stripped
         // before the key reaches anything that stores or resolves it.
-        if (key.startsWith('ship:')) { selectShip(key.slice('ship:'.length)); return; }
-        // The row's own record, so a port row selects the port and a city row
-        // does not answer with the name of its zone.
-        const zone = savedZoneByKey(key)
-          ?? (state.temporaryZone && zoneKey(state.temporaryZone) === key
-                ? state.temporaryZone : null);
-        // And shown, the way a ship's row has always shown her. Tapping a row is
-        // asking about that place; leaving the map wherever it happened to be
-        // answered half the question, and answered it differently depending on
-        // which kind of row was tapped.
-        if (zone) selectSavedZone(zone, zone.at ?? 'zone');
+        if (key.startsWith('ship:')) {
+            selectShip(key.slice('ship:'.length));
+        } else {
+            // The row's own record, so a port row selects the port and a city
+            // row does not answer with the name of its zone.
+            const zone = savedZoneByKey(key)
+              ?? (state.temporaryZone && zoneKey(state.temporaryZone) === key
+                    ? state.temporaryZone : null);
+            // And shown, the way a ship's row has always shown her. Tapping a
+            // row is asking about that place; leaving the map wherever it
+            // happened to be answered half the question, and answered it
+            // differently depending on which kind of row was tapped.
+            if (!zone) return;
+            selectSavedZone(zone, zone.at ?? 'zone');
+        }
+
+        // And the map brought up to where it can be seen — see revealMap. The
+        // row is below the fold on a phone, so framing it moved a map that was
+        // off the bottom of the screen: the answer arrived out of sight.
+        //
+        // Asked AFTER the selection, because whether to move at all depends on
+        // what the tap did. A row tapped OFF has nothing to show, and hauling
+        // the viewport somewhere is a poor answer to putting something away.
+        if (state.selectedPlace || state.selectedShipKey
+            || state.selectedTzid || state.gpsTimezoneSelected) revealMap();
     }
   });
 

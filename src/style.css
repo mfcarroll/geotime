@@ -20,6 +20,22 @@
   background-color: #1f2937; /* bg-gray-800 */
 }
 
+/*
+  Where revealMap stops. scrollIntoView honours scroll-margin, which is the only
+  way to leave room for something that is not in the flow: on a phone the status
+  bar and the Dynamic Island sit OVER the page, so a card scrolled flush to the
+  top has its title behind them. Inert in a browser window, where the inset is 0.
+*/
+#timezone-map-card {
+  scroll-margin-top: calc(env(safe-area-inset-top) + 0.75rem);
+}
+
+/* The two cards above the map answer to a click, so they say so. */
+#user-timezone-details,
+#selected-timezone-details {
+  cursor: pointer;
+}
+
 /* Add this new class for the timezone detail cards */
 .timezone-detail-card {
   @apply p-3 rounded-lg border-2 bg-gray-900/80;
