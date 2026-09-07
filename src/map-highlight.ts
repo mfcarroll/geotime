@@ -30,12 +30,12 @@ export const FILLS = {
   // carry the same weight for that reason.
   shipBand:        { fillColor: '#34C759', fillOpacity: 0.19, zIndex: 4 },
   hoverBand:       { fillColor: '#FFFFFF', fillOpacity: 0.11, zIndex: 3 },
-  gpsSegment:      { fillColor: '#3F80FF', fillOpacity: 0.36, zIndex: 5 },
+  gpsSegment:      { fillColor: '#3F80FF', fillOpacity: 0.30, zIndex: 5 },
   selectedBand:    { fillColor: '#FFD700', fillOpacity: 0.19, zIndex: 6 },
   // A wash, not a coat. At 0.8 the gold was opaque enough that the coastline,
   // the place names and the sea underneath it all went: the zone you picked was
   // the one part of the map you could no longer read.
-  selectedSegment: { fillColor: '#FFD700', fillOpacity: 0.32, zIndex: 7 },
+  selectedSegment: { fillColor: '#FFD700', fillOpacity: 0.27, zIndex: 7 },
 } as const;
 
 /**
@@ -67,13 +67,18 @@ export const CHART_FILL_SCALE = 0.8;
  * What is NOT the way to carry it is thickness. Doubling the stroke was tried
  * and looked like exactly what the original note here warned it would: a
  * heavier, brighter line that draws attention to the boundary rather than to
- * the region, and shifts it by a pixel while it is at it. Four times the
- * brightness at the same weight is plenty, and leaves the map's own structure
- * looking the way it did before any of this.
+ * the region, and shifts it by a pixel while it is at it. Brightness at a
+ * constant weight is the whole of it.
+ *
+ * A thinner line at a higher opacity, for both. Three quarters of a pixel is a
+ * finer grid than a full one and reads more sharply for being nearer its own
+ * colour, which is what lets the resting state come UP — and the resting state
+ * coming up is what takes the bang out of hover without taking the answer out
+ * of it. Roughly twice the brightness now, where it was four times.
  */
 export const OUTLINE = {
-  none:  { strokeColor: 'rgba(255,255,255,0.2)', strokeWeight: 1 },
-  hover: { strokeColor: 'rgba(255,255,255,0.82)', strokeWeight: 1 },
+  none:  { strokeColor: 'rgba(255,255,255,0.35)', strokeWeight: 0.75 },
+  hover: { strokeColor: 'rgba(255,255,255,0.8)',  strokeWeight: 0.75 },
 } as const;
 
 /**

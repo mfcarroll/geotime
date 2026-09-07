@@ -142,6 +142,7 @@ describe('hover, carried by the outline', () => {
         // In brightness, not in thickness: a heavier line draws the eye to the
         // boundary rather than to the region, and shifts it while it is at it.
         assert.equal(hovered.strokeWeight, plain.strokeWeight);
+        assert.ok(plain.strokeWeight < 1, 'a finer grid than a full pixel');
         assert.ok(hovered.fillOpacity - plain.fillOpacity <= 0.07, 'and the fill barely moves');
     });
 
@@ -164,8 +165,8 @@ describe('the fills a reader can see through', () => {
     it('keeps the picked zone readable underneath', () => {
         // At 0.8 the coastline, the place names and the sea all went: the zone
         // you picked was the one part of the map you could no longer read.
-        assert.ok(FILLS.selectedSegment.fillOpacity <= 0.35);
-        assert.ok(FILLS.gpsSegment.fillOpacity <= 0.4);
+        assert.ok(FILLS.selectedSegment.fillOpacity <= 0.3);
+        assert.ok(FILLS.gpsSegment.fillOpacity <= 0.35);
     });
 
     it('leaves a band a ship is standing in visible under a chart', () => {
