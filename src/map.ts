@@ -644,21 +644,16 @@ export function selectPlace(detail: PlaceMarkerDetail, reveal = false): void {
     if (deselecting) {
         state.selectedPlace = null;
         state.temporaryZone = null;
-        // The card goes back to whatever it was showing before the port took
-        // it, destination line and all — updateShipCard clears that line on its
-        // way past, so it has to be put back the way selectShip puts it there.
-        const ship = selectedShip();
-        updateShipCard(ship);
-        if (ship) {
-            const key = shipKey(ship);
-            void voyageForShip(key)
-                .then((resolved) => {
-                    if (state.selectedShipKey === key && !state.selectedPlace) {
-                        setShipVoyageLine(resolved, key);
-                    }
-                })
-                .catch(() => {});
-        }
+        // The cruise goes with it. A port and the itinerary it belongs to are
+        // ONE selection: picking the port is what put the route on screen, so
+        // unpicking it is what takes the route off again.
+        //
+        // Which leaves the map to the anchor's own route, where there is one —
+        // resetShipChart hands it straight back, because a ship underfoot was
+        // never a selection to begin with.
+        state.selectedShipKey = null;
+        updateShipCard(null);
+        resetShipChart();
         paintHoverCard();
         refreshMapStyles();
         // The hulls too: a ship keeping the selected time wears the band's
@@ -696,10 +691,20 @@ export function selectPlace(detail: PlaceMarkerDetail, reveal = false): void {
         ...(detail.kind === 'port' ? { kind: 'port' as const } : {}),
         at: { lat: detail.lat, lon: detail.lon },
     };
-    // A ship is NOT cleared here, unlike every other selection. A port belongs
-    // to an itinerary, so picking one is a request to see that cruise, not to
-    // dismiss it — and if none is showing, framedCruiseFor finds the one that
-    // calls here.
+    // A PORT is the one place that keeps a ship. It belongs to an itinerary, so
+    // picking one is a request to see that cruise rather than to dismiss it —
+    // and if none is showing, framedCruiseFor finds the one that calls here.
+    //
+    // A city belongs to nobody's itinerary and drops the cruise exactly as a
+    // zone does. Left standing, a ship outlived every selection that followed
+    // her: going Calgary, then Coco Cay looked like the PORT choosing a vessel,
+    // and which vessel it chose depended on what had been selected minutes
+    // before. Aboard, none of this reaches the ship underfoot — she is drawn
+    // because she is the anchor, and being aboard is its own disambiguation.
+    if (detail.kind !== 'port' && state.selectedShipKey) {
+        state.selectedShipKey = null;
+        resetShipChart();
+    }
     const framed = framedCruiseFor(detail);
 
     // Reached from the search box rather than from the map, the map is wherever
@@ -728,12 +733,6 @@ export function selectPlace(detail: PlaceMarkerDetail, reveal = false): void {
  * already standing on.
  */
 const PLACE_ZOOM = 6;
-
-/** The ship on the clock list matching the current selection, or null. */
-function selectedShip(): ShipClock | null {
-    if (!state.selectedShipKey) return null;
-    return state.shipClocks.find((s) => shipKey(s) === state.selectedShipKey) ?? null;
-}
 
 /**
  * How near a fix has to be to count as the same port. Generous, because several
