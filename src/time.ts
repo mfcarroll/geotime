@@ -443,7 +443,7 @@ export function anchorOffsetHours(): number {
  * around it.
  */
 export function mapSelection(): { tzid: string | null; offset: number | null } {
-  const port = state.selectedPort;
+  const port = state.selectedPlace;
   if (port) return { tzid: null, offset: getUtcOffset(port.tzid) };
 
   if (state.selectedShipKey) {

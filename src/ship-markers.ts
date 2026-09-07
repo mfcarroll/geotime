@@ -18,6 +18,7 @@
 // live or that it is unknown.
 
 import { state, whenMapReady } from './state';
+import type { StoredZone } from './stored-zones';
 import { shipKey, type ShipClock } from './ships';
 import { shipTimeAvailable } from './rccl';
 import { anchorOffsetHours, mapSelection, utcOffsetForCoordinates } from './time';
@@ -133,11 +134,11 @@ function nearOrigin(crumb: [number, number], origin: [number, number]): boolean 
  * Null offsets — a port we cannot place, a clock not yet resolved — read as "not
  * the same", because unknown is not a match.
  */
-function portColour(
+function placeColour(
   port: { lat: number; lon: number }, shipOffset: number | null, shipHue: string,
 ): string {
-  if (shipOffset === null) return PORT_PLAIN;
-  return utcOffsetForCoordinates(port.lat, port.lon) === shipOffset ? shipHue : PORT_PLAIN;
+  if (shipOffset === null) return PLACE_PLAIN;
+  return utcOffsetForCoordinates(port.lat, port.lon) === shipOffset ? shipHue : PLACE_PLAIN;
 }
 
 /**
@@ -466,7 +467,7 @@ const GAP = '#9AA4B2';
  * Near-white rather than pure white: #FFFFFF is what hover paints, and a port
  * ring that exactly matched it would blur two different statements together.
  */
-const PORT_PLAIN = '#E8EEF4';
+const PLACE_PLAIN = '#E8EEF4';
 
 // One colour for the whole track, solid behind and dashed ahead. Solid for
 // travelled and dashed for planned is a convention that needs no legend, and the
@@ -594,12 +595,14 @@ function dottedGap(map: google.maps.Map, path: google.maps.LatLngLiteral[]): voi
  * boundary data in time.ts and this module has no business loading it. The
  * listener in map.ts is already holding both.
  */
-export interface PortMarkerDetail {
+export interface PlaceMarkerDetail {
   name: string;
   lat: number;
   lon: number;
   /** "day 4 · arrives Tue 8:00 AM", or empty. The subtitle, never the name. */
   detail: string;
+  /** A port of call rather than a town, which is what earns the row an anchor. */
+  kind?: 'port';
 }
 
 /**
@@ -689,7 +692,7 @@ export async function drawShipChart(key: string, voyage: Promise<ShipVoyage | nu
   if (state.selectedShipKey !== key && state.aboardShipKey !== key) return;
 
   // Her ROUTE wears the vessel's colour; her ports answer a different question
-  // entirely — see portColour.
+  // entirely — see placeColour.
   const routeColour = shipColour(key);
   const shipOffset = state.shipClocks.find((c) => shipKey(c) === key)?.offsetHours ?? null;
 
@@ -767,7 +770,7 @@ export async function drawShipChart(key: string, voyage: Promise<ShipVoyage | nu
   chartCalls = calls;
   chartColour = routeColour;
   chartShipOffset = shipOffset;
-  refreshPortMarkers();
+  refreshPlaceMarkers();
 }
 
 // ---------------------------------------------------------------------------
@@ -785,26 +788,28 @@ export async function drawShipChart(key: string, voyage: Promise<ShipVoyage | nu
 
 /** The selected ship's calls, or none. Set by drawShipChart, cleared with it. */
 let chartCalls: Call[] = [];
-let chartColour = PORT_PLAIN;
+let chartColour = PLACE_PLAIN;
 let chartShipOffset: number | null = null;
 
-const portMarkers = new Map<string, google.maps.marker.AdvancedMarkerElement>();
+const placeMarkers = new Map<string, google.maps.marker.AdvancedMarkerElement>();
 
 /** One port, wherever it came from, in the form the marker layer needs. */
-interface PortPin {
+interface PlacePin {
   key: string;
   name: string;
   lat: number;
   lon: number;
   note: string;
   colour: string;
+  /** Carried so selecting one does not turn a city into a port of call. */
+  kind?: 'port';
 }
 
 /** Ports are the same place at 11 m, which is finer than any of them is known. */
 const pinKey = (lat: number, lon: number) => `${lat.toFixed(4)},${lon.toFixed(4)}`;
 
-function portPins(): PortPin[] {
-  const pins = new Map<string, PortPin>();
+function placePins(): PlacePin[] {
+  const pins = new Map<string, PlacePin>();
 
   for (const call of chartCalls) {
     pins.set(pinKey(call.lat, call.lon), {
@@ -813,31 +818,45 @@ function portPins(): PortPin[] {
       lat: call.lat,
       lon: call.lon,
       note: call.note,
-      colour: portColour(call.port, chartShipOffset, chartColour),
+      colour: placeColour(call.port, chartShipOffset, chartColour),
+      kind: 'port',
     });
   }
 
-  // A KEPT port the chart has not already drawn. It carries no itinerary of its
-  // own — no day, no times — so it says only its name, which is the whole of
-  // what a row on the World Clock knows about it.
+  // Every PLACE on the World Clock, port or town, that the chart has not already
+  // drawn. A saved row for Tampa is a point somebody said they cared about, and
+  // it was only ever a name in a list — findable on the map, and clickable there,
+  // is the whole of what makes it a place rather than a label.
   //
-  // Kept means on the list. A port only looked at rides on state.temporaryZone
-  // and is drawn by the chart if it belongs to the cruise on screen; it does
-  // not get a pin of its own that outlives the look.
-  for (const zone of state.savedZones) {
-    const at = zone.at;
-    if (!at || zone.kind !== 'port') continue;
+  // Ports and cities look the same here on purpose. What separates them is what
+  // they KNOW: a call on the cruise being shown carries its day and its times,
+  // and everything else says only its name, which is all a row knows. Marking
+  // the difference again in the ring would be saying it twice — the row already
+  // carries the anchor.
+  //
+  // Only rows that have coordinates. A bare zone is a region, not a point: there
+  // is nowhere on the map that IS America/New_York, and dropping a pin on
+  // whichever city names it would be inventing a place the user never picked.
+  const drop = (zone: StoredZone | null) => {
+    const at = zone?.at;
+    if (!at) return;
     const key = pinKey(at.lat, at.lon);
-    if (pins.has(key)) continue;
+    if (pins.has(key)) return;
     pins.set(key, {
       key,
       name: zone.label ?? zone.tz,
       lat: at.lat,
       lon: at.lon,
       note: '',
-      colour: PORT_PLAIN,
+      colour: PLACE_PLAIN,
+      kind: zone.kind,
     });
-  }
+  };
+
+  for (const zone of state.savedZones) drop(zone);
+  // And the one being looked at but not kept, so picking a place out of the
+  // search box puts it on the map whether or not it stays there.
+  drop(state.temporaryZone);
 
   return [...pins.values()];
 }
@@ -849,36 +868,36 @@ function portPins(): PortPin[] {
  * of one SVG and rebuilding it is less code than reaching into it — and because
  * a pin's identity is its position, which never changes while it exists.
  */
-export function refreshPortMarkers(): void {
+export function refreshPlaceMarkers(): void {
   const map = state.timezoneMap;
   if (!map) return;
 
   const wanted = new Set<string>();
-  const selected = state.selectedPort;
+  const selected = state.selectedPlace;
 
-  for (const pin of portPins()) {
+  for (const pin of placePins()) {
     wanted.add(pin.key);
     // Detach the previous ring at this position before replacing it.
-    const previous = portMarkers.get(pin.key);
+    const previous = placeMarkers.get(pin.key);
     if (previous) previous.map = null;
     const isSelected = !!selected && pinKey(selected.lat, selected.lon) === pin.key;
 
     const ring = document.createElement('div');
-    ring.className = isSelected ? 'ship-port is-selected' : 'ship-port';
+    ring.className = isSelected ? 'map-place is-selected' : 'map-place';
     // Hover and selection are the same colour further up the scale, handed to
-    // CSS rather than repainted here — see .ship-port in style.css, and
+    // CSS rather than repainted here — see .map-place in style.css, and
     // brighter(). Never white: the ring's own colour is an answer, and hover
     // must not overwrite it with the question.
-    ring.style.setProperty('--port-hover', brighter(pin.colour));
+    ring.style.setProperty('--place-hover', brighter(pin.colour));
     // Three circles: the halo that says this one is picked, the ring you see,
     // and a transparent one twice its size that is what you actually hit. A 4px
     // ring is a fine thing to look at and a poor thing to aim a finger at.
     ring.innerHTML =
       `<svg viewBox="-11 -11 22 22" width="22" height="22">` +
       `<circle r="10" fill="transparent"/>` +
-      `<circle class="port-halo" r="8" fill="none" stroke="${brighter(pin.colour)}" ` +
+      `<circle class="place-halo" r="8" fill="none" stroke="${brighter(pin.colour)}" ` +
       `stroke-width="1.5"/>` +
-      `<circle class="port-ring" r="4" fill="${CASING}" fill-opacity="0.9" ` +
+      `<circle class="place-ring" r="4" fill="${CASING}" fill-opacity="0.9" ` +
       `stroke="${pin.colour}" stroke-width="2" stroke-opacity="0.95"/></svg>`;
 
     const marker = new google.maps.marker.AdvancedMarkerElement({
@@ -901,25 +920,25 @@ export function refreshPortMarkers(): void {
     // Hover rides on the content element rather than a maps event — an
     // AdvancedMarkerElement's content is ordinary DOM — and what it paints is
     // pure CSS, so pointing at a port costs no redraw.
-    const detail: PortMarkerDetail = {
-      name: pin.name, lat: pin.lat, lon: pin.lon, detail: pin.note,
+    const detail: PlaceMarkerDetail = {
+      name: pin.name, lat: pin.lat, lon: pin.lon, detail: pin.note, kind: pin.kind,
     };
     marker.addListener('gmp-click', () => {
-      document.dispatchEvent(new CustomEvent('portmarkerclick', { detail }));
+      document.dispatchEvent(new CustomEvent('placemarkerclick', { detail }));
     });
     ring.addEventListener('pointerenter', () => {
-      document.dispatchEvent(new CustomEvent('portmarkerhover', { detail }));
+      document.dispatchEvent(new CustomEvent('placemarkerhover', { detail }));
     });
     ring.addEventListener('pointerleave', () => {
-      document.dispatchEvent(new CustomEvent('portmarkerhover', { detail: null }));
+      document.dispatchEvent(new CustomEvent('placemarkerhover', { detail: null }));
     });
-    portMarkers.set(pin.key, marker);
+    placeMarkers.set(pin.key, marker);
   }
 
-  for (const [key, marker] of [...portMarkers]) {
+  for (const [key, marker] of [...placeMarkers]) {
     if (wanted.has(key)) continue;
     marker.map = null;
-    portMarkers.delete(key);
+    placeMarkers.delete(key);
   }
 }
 
@@ -927,7 +946,7 @@ export function refreshPortMarkers(): void {
 export function clearShipChart(): void {
   clearChart();
   // The saved ports outlive it and have to be put back; see the port layer.
-  refreshPortMarkers();
+  refreshPlaceMarkers();
 }
 
 /**

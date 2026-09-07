@@ -199,7 +199,7 @@
    do not. line-height:0 keeps the box the size of the glyph. */
 .gps-dot,
 .ship-hull,
-.ship-port {
+.map-place {
   line-height: 0;
   transform: translateY(50%);
 }
@@ -210,7 +210,7 @@
   Not white. The ring's colour is an ANSWER — gold says this call keeps the
   ship's time, pale says it does not — and painting hover white overwrites the
   answer with the question. A zone under the pointer keeps its band and gains an
-  outline; the same idea, one channel each. --port-hover is set per marker; see
+  outline; the same idea, one channel each. --place-hover is set per marker; see
   brighter() in utils.ts for how far up the scale it goes.
 
   A CSS rule rather than a redraw: `stroke` on the circle is a presentation
@@ -226,16 +226,16 @@
   Zones do the same thing with two channels: fill for the band, outline for the
   pointer.
 */
-.ship-port .port-halo {
+.map-place .place-halo {
   stroke-opacity: 0;
   transition: stroke-opacity 120ms ease;
 }
-.ship-port.is-selected .port-halo {
+.map-place.is-selected .place-halo {
   stroke-opacity: 0.9;
 }
 
-.ship-port:hover .port-ring {
-  stroke: var(--port-hover, #FFFFFF);
+.map-place:hover .place-ring {
+  stroke: var(--place-hover, #FFFFFF);
   stroke-width: 2.75;
   stroke-opacity: 1;
 }
@@ -256,7 +256,7 @@
 */
 .gps-dot { pointer-events: none; }
 .ship-hull svg,
-.ship-port svg,
+.map-place svg,
 .gps-dot svg {
   display: block;
   overflow: visible;

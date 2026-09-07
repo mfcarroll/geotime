@@ -119,7 +119,7 @@ export interface AppState {
      * itinerary, so picking one is a request to see that cruise rather than to
      * dismiss it.
      */
-    selectedPort: { tzid: string; name: string; lat: number; lon: number } | null;
+    selectedPlace: { tzid: string; name: string; lat: number; lon: number } | null;
     timezonesFromUrl: StoredZone[] | null;
 }
 
@@ -200,7 +200,7 @@ export const state: AppState = {
     temporaryZone: null,
     gpsTimezoneSelected: false,
     selectedShipKey: null,
-    selectedPort: null,
+    selectedPlace: null,
     timezonesFromUrl: null,
 };
 
