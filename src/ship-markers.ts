@@ -618,6 +618,17 @@ export interface PlaceMarkerDetail {
   detail: string;
   /** A port of call rather than a town, which is what earns the row an anchor. */
   kind?: 'port';
+  /**
+   * Where the town is, for one that has it.
+   *
+   * A ring is often the only handle a saved city has, and selecting one rebuilds
+   * the transient row from this detail alone — so anything the row should still
+   * say afterwards has to travel with it. Without these, tapping Vancouver's own
+   * ring turned "Vancouver, BC" back into "Vancouver" and put it right back
+   * where it could not be told from the timezone.
+   */
+  region?: string;
+  country?: string;
 }
 
 /**
@@ -818,6 +829,9 @@ interface PlacePin {
   colour: string;
   /** Carried so selecting one does not turn a city into a port of call. */
   kind?: 'port';
+  /** Likewise, so tapping a saved city's ring does not lose its region. */
+  region?: string;
+  country?: string;
 }
 
 /** Ports are the same place at 11 m, which is finer than any of them is known. */
@@ -865,6 +879,8 @@ function placePins(): PlacePin[] {
       note: '',
       colour: placeColour(at, chartShipOffset, chartColour),
       kind: zone.kind,
+      region: zone.region,
+      country: zone.country,
     });
   };
 
@@ -937,6 +953,7 @@ export function refreshPlaceMarkers(): void {
     // pure CSS, so pointing at a port costs no redraw.
     const detail: PlaceMarkerDetail = {
       name: pin.name, lat: pin.lat, lon: pin.lon, detail: pin.note, kind: pin.kind,
+      region: pin.region, country: pin.country,
     };
     marker.addListener('gmp-click', () => {
       document.dispatchEvent(new CustomEvent('placemarkerclick', { detail }));

@@ -16,6 +16,7 @@
 // initialisation, so both are fully evaluated before either is called — but keep
 // it that way: a top-level call across this boundary would break at load.
 import { state } from './state';
+import { placeLabel } from './stored-zones';
 import { correctedNow, getUtcOffset } from './time';
 import { getDisplayTimezoneName, fold } from './utils';
 import { shipKey, type ShipClock } from './ships';
@@ -64,7 +65,7 @@ export function clockOffset(entry: ClockEntry): number {
  */
 export function clockLabel(entry: ClockEntry): string {
   if (entry.kind === 'ship') return entry.ship.name;
-  return entry.zone.label ?? getDisplayTimezoneName(entry.zone.tz);
+  return placeLabel(entry.zone) ?? getDisplayTimezoneName(entry.zone.tz);
 }
 
 
@@ -99,9 +100,14 @@ export function clockSubLabel(entry: ClockEntry, word: ZoneLabelWord = 'Timezone
     return fold(entry.ship.name).startsWith(fold(line)) ? '' : line;
   }
   const zoneName = getDisplayTimezoneName(entry.zone.tz);
-  // Accents aside, "Reykjavík" and the zone "Reykjavik" are the same place —
-  // naming it twice would just look like a mistake.
-  return fold(zoneName) === fold(clockLabel(entry)) ? '' : `${word}: ${zoneName}`;
+  // A row with no name of its own IS the zone, and says so. It used to say
+  // nothing, which left it indistinguishable from a city that happened to share
+  // the zone's name — the difficulty the whole place model exists to settle.
+  if (!entry.zone.label) return `(${word})`;
+  // And a place always names the zone it keeps, even when the two read alike.
+  // "Reykjavík / Timezone: Reykjavik" looks like a mistake until you know the
+  // city and the zone are two rows you can hold at once, which they now are.
+  return `${word}: ${zoneName}`;
 }
 
 /** True when this row is a ship whose offset we have never resolved. */

@@ -239,6 +239,8 @@ export function persistZones(zones: StoredZone[]): void {
         const out: StoredZone = { tz: zone.tz };
         if (zone.label) out.label = zone.label;
         if (zone.kind) out.kind = zone.kind;
+        if (zone.region) out.region = zone.region;
+        if (zone.country) out.country = zone.country;
         if (zone.at) out.at = zone.at;
         return out;
     })));

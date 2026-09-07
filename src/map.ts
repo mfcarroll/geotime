@@ -376,6 +376,8 @@ export function selectSavedZone(zone: StoredZone, frame?: Frame) {
                 lon: zone.at.lon,
                 detail: '',
                 kind: zone.kind,
+                region: zone.region,
+                country: zone.country,
             },
             frame !== undefined);
         return;
@@ -801,6 +803,8 @@ export function selectPlace(detail: PlaceMarkerDetail, reveal = false): void {
         // while ports were the only thing on the map you could point at; it
         // would now put an anchor beside Tampa.
         ...(detail.kind === 'port' ? { kind: 'port' as const } : {}),
+        ...(detail.region ? { region: detail.region } : {}),
+        ...(detail.country ? { country: detail.country } : {}),
         at: { lat: detail.lat, lon: detail.lon },
     };
     // A PORT is the one place that keeps a ship. It belongs to an itinerary, so

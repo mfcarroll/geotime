@@ -32,6 +32,17 @@ export interface CityPlace extends PlaceBase {
   /** IANA zone this place resolves to. */
   tzid: string;
   /**
+   * "BC", and "Canada".
+   *
+   * Kept apart because the two lines want different amounts of it: a dropdown
+   * says "Vancouver, BC, Canada" because it is disambiguating between five
+   * Vancouvers, and a clock row says "Vancouver, BC" because it only has to
+   * distinguish the city from the timezone of the same name. Empty where the
+   * place has no region above the country.
+   */
+  region: string;
+  country: string;
+  /**
    * Where the town is.
    *
    * So picking one out of the search box can show it. Framing the whole zone
@@ -79,7 +90,10 @@ export type PlaceResult = ZonePlace | CityPlace | ShipPlace | PortPlace;
 
 export interface CityIndex {
   zones: string[];
+  /** Region alone: "BC", or "" where the country is the whole answer. */
   regions: string[];
+  /** Country, parallel to `regions` — one region code means one country. */
+  countries: string[];
   names: string[];
   /** Lowercased, diacritics stripped — what queries are matched against. */
   folded: string[];
@@ -146,7 +160,25 @@ export function loadCityIndex(): Promise<CityIndex | null> {
         zoneAt[z + 1] = regionAt[regionOf[i] * 2 + 1];
       }
 
-      return { zones: raw.z, regions: raw.r, names, folded, regionOf, zoneOf, regionAt, cityAt, zoneAt };
+      // The index stores one string per region because that is what a dropdown
+      // line wants — "BC, Canada". A clock row wants less than that, so the two
+      // are parted again here, on the FIRST comma.
+      //
+      // Exact rather than approximate: build-city-index joins them with exactly
+      // this comma, no region name in the file contains one, and the 246
+      // distinct tails are all country names. Splitting on the LAST comma would
+      // be wrong for the single country whose own name has one — Bonaire, Saint
+      // Eustatius and Saba — and the 49 entries with no comma at all are places
+      // where the country IS the region, which keep it as the country.
+      const regions: string[] = [];
+      const countries: string[] = [];
+      for (const entry of raw.r as string[]) {
+        const comma = entry.indexOf(',');
+        regions.push(comma === -1 ? '' : entry.slice(0, comma).trim());
+        countries.push((comma === -1 ? entry : entry.slice(comma + 1)).trim());
+      }
+
+      return { zones: raw.z, regions, countries, names, folded, regionOf, zoneOf, regionAt, cityAt, zoneAt };
     } catch (error) {
       // Zone-id search still works without this, so degrade rather than fail.
       console.warn('Could not load the city index:', error);
@@ -177,12 +209,17 @@ function portResult(port: PortRef): PortPlace {
 
 function cityResult(index: CityIndex, i: number): CityPlace {
   const name = index.names[i];
+  const region = index.regions[index.regionOf[i]];
+  const country = index.countries[index.regionOf[i]];
   return {
     tzid: index.zones[index.zoneOf[i]],
     at: { lat: index.cityAt[i * 2], lon: index.cityAt[i * 2 + 1] },
     label: name,
-    primary: `${name}, ${index.regions[index.regionOf[i]]}`,
+    // Everything, which is what tells five Vancouvers apart.
+    primary: [name, region, country].filter(Boolean).join(', '),
     secondary: index.zones[index.zoneOf[i]],
+    region,
+    country,
     kind: 'city',
   };
 }

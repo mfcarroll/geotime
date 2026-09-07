@@ -32,6 +32,21 @@ export interface StoredZone {
      */
     kind?: 'port';
     /**
+     * "BC", and "Canada", for a place that came from the city index.
+     *
+     * Stored rather than looked up because the index is a 1.8 MB asset fetched
+     * on first search, and a row has to be able to say what it is at launch —
+     * on the widget too, which has no index to consult at all.
+     *
+     * Kept apart for the same reason cities.ts keeps them apart: the row says
+     * "Vancouver, BC" and only needs to be told from the timezone, while the
+     * dropdown says "Vancouver, BC, Canada" and is telling five Vancouvers
+     * apart. Additive like the rest — a row without them is simply a row whose
+     * region nobody recorded.
+     */
+    region?: string;
+    country?: string;
+    /**
      * Where the place actually is, for a port.
      *
      * A zone id names a region; a port is a point inside one, and the map has
@@ -98,6 +113,16 @@ export function migrateStoredTimezones(raw: unknown): StoredZone[] {
         // carry one, or a demoted row would keep an anchor and claim to be
         // somewhere a ship calls.
         if (zone.label && source.kind === 'port') zone.kind = 'port';
+        // And nor can a zone stand in a region: America/Vancouver is not in
+        // British Columbia, it CONTAINS British Columbia.
+        if (zone.label) {
+            if (typeof source.region === 'string' && source.region.trim()) {
+                zone.region = source.region;
+            }
+            if (typeof source.country === 'string' && source.country.trim()) {
+                zone.country = source.country;
+            }
+        }
         if (out.some((z) => zoneKey(z) === zoneKey(zone))) continue;
         out.push(zone);
     }
@@ -124,6 +149,31 @@ export function migrateStoredTimezones(raw: unknown): StoredZone[] {
 export function zoneKey(zone: StoredZone): string {
     const label = zone.label?.trim();
     return label ? `${zone.tz}|${foldName(label)}` : zone.tz;
+}
+
+/**
+ * What a row calls this place.
+ *
+ * The name with just enough after it to say which thing it is: "Vancouver, BC"
+ * is not the timezone of the same name, and that was the whole difficulty —
+ * the two were indistinguishable on a row, so the search box used to drop one
+ * of them rather than show both. The country is left for the dropdown, which
+ * has five Vancouvers to separate and the width to do it in.
+ *
+ * The country stands in where there is no region, which is how the 49 places
+ * whose country IS their region read: "Oranjestad, Aruba".
+ *
+ * Null where the row IS a zone, rather than a name for one. A zone is not in a
+ * region, and what it should be CALLED is a question for whoever knows how to
+ * pretty-print an IANA id — which this module deliberately does not, being the
+ * one thing the saved list is read through and free of everything else. Getting
+ * that wrong is how a row briefly announced itself as "America/Vancouver".
+ */
+export function placeLabel(zone: StoredZone): string | null {
+    const name = zone.label?.trim();
+    if (!name) return null;
+    const where = zone.region?.trim() || zone.country?.trim();
+    return where ? `${name}, ${where}` : name;
 }
 
 /**

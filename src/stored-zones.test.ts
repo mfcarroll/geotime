@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { migrateStoredTimezones, zoneKey } from './stored-zones';
+import { migrateStoredTimezones, placeLabel, zoneKey } from './stored-zones';
 
 test('the stored clock list survives a round trip', async (t) => {
   await t.test('a bare id from an old build still loads', () => {
@@ -100,6 +100,39 @@ test('the stored clock list survives a round trip', async (t) => {
       [{ tz: 'America/Nassau' }]);
   });
 
+  await t.test('a place keeps the region and country it was found in', () => {
+    const city = {
+      tz: 'America/Vancouver', label: 'Vancouver',
+      region: 'BC', country: 'Canada',
+      at: { lat: 49.28, lon: -123.12 },
+    };
+    assert.deepEqual(migrateStoredTimezones([city]), [city]);
+  });
+
+  await t.test('a zone stands in no region', () => {
+    // America/Vancouver is not IN British Columbia; it contains it. A store
+    // claiming otherwise is a store to be tidied on the way in.
+    assert.deepEqual(
+      migrateStoredTimezones([{ tz: 'America/Vancouver', region: 'BC', country: 'Canada' }]),
+      [{ tz: 'America/Vancouver' }]);
+  });
+
+  await t.test('a demoted row loses its region with its name', () => {
+    const [row] = migrateStoredTimezones([
+      { tz: 'America/Vancouver', label: 'Vancouver', region: 'BC', country: 'Canada' },
+    ]);
+    assert.deepEqual(row, { tz: 'America/Vancouver' });
+  });
+
+  await t.test('blank region strings are not carried as fields', () => {
+    const [row] = migrateStoredTimezones([{
+      tz: 'America/Vancouver', label: 'Vancouver', region: '  ', country: '',
+      at: { lat: 49.28, lon: -123.12 },
+    }]);
+    assert.equal(row.region, undefined);
+    assert.equal(row.country, undefined);
+  });
+
   await t.test('junk is not an error', () => {
     assert.deepEqual(migrateStoredTimezones(null), []);
     assert.deepEqual(migrateStoredTimezones([null, 42, '']), []);
@@ -128,4 +161,34 @@ test('a saved place is identified by the place', async (t) => {
       zoneKey({ tz: 'America/Nassau', label: 'Nassau', kind: 'port' }),
       zoneKey({ tz: 'America/Nassau', label: 'Nassau' }));
   });
+});
+
+test('what a row calls a place', async (t) => {
+    await t.test('a city is named with its region, which is what parts it from the zone', () => {
+        assert.equal(
+            placeLabel({ tz: 'America/Vancouver', label: 'Vancouver', region: 'BC', country: 'Canada' }),
+            'Vancouver, BC');
+    });
+
+    await t.test('the country stands in where there is no region', () => {
+        // Forty-nine of the index's regions are countries outright.
+        assert.equal(
+            placeLabel({ tz: 'America/Aruba', label: 'Oranjestad', country: 'Aruba' }),
+            'Oranjestad, Aruba');
+    });
+
+    await t.test('a place recorded before regions were is still just its name', () => {
+        assert.equal(placeLabel({ tz: 'America/Nassau', label: 'Coco Cay', kind: 'port' }), 'Coco Cay');
+    });
+
+    await t.test('a zone has no place name to give, and says so', () => {
+        // Not the raw id, which is what it answered with for one build and is
+        // how a row came to read "America/Vancouver". Naming a zone prettily is
+        // the caller's job; this module does not know how.
+        assert.equal(placeLabel({ tz: 'America/New_York' }), null);
+    });
+
+    await t.test('a blank name is no name', () => {
+        assert.equal(placeLabel({ tz: 'America/New_York', label: '   ' }), null);
+    });
 });

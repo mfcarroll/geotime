@@ -243,7 +243,13 @@ async function startApp() {
       const zone: StoredZone = { tz: place.tzid };
       if (place.kind === 'city' || place.kind === 'port') zone.label = place.label;
       if (place.kind === 'port') { zone.kind = 'port'; zone.at = place.at; }
-      if (place.kind === 'city') zone.at = place.at;
+      if (place.kind === 'city') {
+        zone.at = place.at;
+        // So the row can say "Vancouver, BC" and be told from the timezone of
+        // the same name without the city index having to be loaded to ask.
+        if (place.region) zone.region = place.region;
+        if (place.country) zone.country = place.country;
+      }
 
       keepZone(zone);
       // Shown as well as selected. The map is wherever it was left — usually
