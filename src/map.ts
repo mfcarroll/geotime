@@ -415,18 +415,51 @@ export function clearSelection(): void {
     if (state.temporaryZone) selectZone(state.temporaryZone);
 }
 
-/** Puts the anchor — where you are, or the ship you are on — back on the map. */
-export function revealAnchor(): void {
-    // One answer for both, because aboard the device IS the ship: a phone's own
-    // fix is where you are either way, and it is fresher than an AIS position
-    // relayed through a Worker.
-    const at = state.deviceFix ?? state.lastFetchedCoords;
-    if (at) { frameAt(at.lat, at.lon); return; }
+/**
+ * Picks whatever the anchor card names.
+ *
+ * A card that names a place should hand you that place, not merely fly the map
+ * at it. This used to frame the device's fix and change nothing else, which
+ * left the town it named unmarked on the map, absent from the card below, and
+ * whatever had been picked before still sitting there picked — three ways of
+ * saying it had not really answered.
+ *
+ * So it selects, through the same door a search result or a ring goes through:
+ * a row appears with a pin to keep it, the ring lands on the map, and the
+ * previous selection is dropped the way every other selection drops it.
+ *
+ * The TOWN's position, not the phone's. The card says "Nelson" and Nelson is
+ * where the ring belongs, rather than whichever field outside it the GPS
+ * settled in.
+ */
+export async function selectAnchor(): Promise<void> {
+    // Aboard, the card names the vessel, so that is what it hands over.
+    const aboard = state.aboardShipKey;
+    if (aboard) { selectShip(aboard); return; }
 
-    // No fix at all, so the card is naming a ZONE rather than a point — the
-    // device's own, which is what it falls back to displaying.
-    const zone = state.gpsTzid ?? state.localTimezone;
-    if (zone && !isUnlocatedZone(zone)) frameZone(zone);
+    const at = state.deviceFix ?? state.lastFetchedCoords;
+    const tzid = state.gpsTzid ?? state.localTimezone;
+
+    if (at && tzid) {
+        // The index is memoised and long since loaded by the time a card can be
+        // tapped, so this is a lookup rather than a download.
+        const place = nearestPlace(await loadCityIndex(), at, tzid);
+        if (place) {
+            selectPlace({
+                name: place.name,
+                lat: place.at.lat,
+                lon: place.at.lon,
+                detail: '',
+                region: place.region,
+                country: place.country,
+            }, true);
+            return;
+        }
+    }
+
+    // No town near enough to name — which is also when the card falls back to
+    // showing the zone, so the zone is the honest thing to hand over.
+    if (tzid && !isUnlocatedZone(tzid)) selectZone({ tz: tzid });
 }
 
 /**

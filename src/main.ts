@@ -5,7 +5,7 @@ import './style.css';
 import { Loader } from '@googlemaps/js-api-loader';
 import * as dom from './dom';
 import { addShipClock, loadDebugFleet, migrateStoredTimezones, persistZones, savedZoneByKey, state, syncWidget } from './state';
-import { refreshAnchorChip, refreshMapStyles, initMaps, onLocationError, onLocationSuccess, selectSavedZone, selectShip, selectPlace, setHoveredShip, setHoveredPlace, renderWorldClocks, keepZone, updateUserTimezoneDetails, showLocationUnavailable, loadTimezoneGeoJson, revealAnchor, clearSelection, hoverAnchor, hoverSelected, hoverClockRow } from './map';
+import { refreshAnchorChip, refreshMapStyles, initMaps, onLocationError, onLocationSuccess, selectSavedZone, selectShip, selectPlace, setHoveredShip, setHoveredPlace, renderWorldClocks, keepZone, updateUserTimezoneDetails, showLocationUnavailable, loadTimezoneGeoJson, selectAnchor, clearSelection, hoverAnchor, hoverSelected, hoverClockRow } from './map';
 import { updateAllClocks, syncClock, startClockWatch, getDisplayTimezoneName, startClocks, findTimezoneFromGeoJSON } from './time';
 import { Capacitor } from '@capacitor/core';
 import { getDeviceTimezone, onDeviceTimezoneChanged } from './widget';
@@ -293,7 +293,7 @@ async function startApp() {
   // card — it exists only while a pointer is somewhere else, and moving to
   // click it is what makes it go away.
   dom.userTimezoneDetailsEl.addEventListener('click', () => {
-    revealAnchor();
+    void selectAnchor();
     revealMap();
   });
   // The gold card puts the selection DOWN rather than going to it — see

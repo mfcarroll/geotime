@@ -500,8 +500,17 @@ export function searchPlaces(
 export interface NearbyPlace {
   /** "Nelson" */
   name: string;
-  /** "BC, Canada" */
+  /** "BC", and "Canada" — parted, the same as everywhere else. */
   region: string;
+  country: string;
+  /**
+   * Where the town is, which is not quite where the device is.
+   *
+   * Carried because the anchor card can be PICKED, and picking it selects the
+   * town it names rather than the phone's own fix — a ring on Nelson, not on
+   * whichever field outside it the GPS settled in.
+   */
+  at: { lat: number; lon: number };
   km: number;
 }
 
@@ -558,6 +567,8 @@ export function nearestPlace(
   return {
     name: index.names[bestIdx],
     region: index.regions[index.regionOf[bestIdx]],
+    country: index.countries[index.regionOf[bestIdx]],
+    at: { lat: index.cityAt[bestIdx * 2], lon: index.cityAt[bestIdx * 2 + 1] },
     km: bestKm,
   };
 }
