@@ -262,21 +262,21 @@ async function startApp() {
    * a map that was off the bottom of the screen — the answer arrived somewhere
    * the user could not see it.
    *
-   * Skipped when the map is already there, which on a wide layout it always is.
-   * Scrolling a viewport that is showing the answer already is movement for its
-   * own sake. The whole CARD is what comes into view rather than the canvas
-   * alone: the cards above it name what was just picked, and a map with its
-   * labels scrolled off the top answers half the question.
+   * Unconditional, on purpose. This used to skip when enough of the map was
+   * already showing, and the threshold turned out to be the wrong idea rather
+   * than the wrong number: a map half on screen is still a map you have to go
+   * looking at, and a rule about how much counts is a rule the user has to
+   * learn. Going every time is the predictable thing, and where the map has
+   * not moved this costs a scroll of nothing.
+   *
+   * The whole CARD comes into view rather than the canvas alone: the cards
+   * above it name what was just picked, and a map with those scrolled off the
+   * top answers half the question.
    */
   function revealMap(): void {
-    const map = document.getElementById('timezone-map');
-    if (!map) return;
-
-    const box = map.getBoundingClientRect();
-    const onScreen = Math.min(box.bottom, window.innerHeight) - Math.max(box.top, 0);
-    if (onScreen >= Math.min(box.height, window.innerHeight) * 0.5) return;
-
-    (document.getElementById('timezone-map-card') ?? map).scrollIntoView({
+    const card = document.getElementById('timezone-map-card')
+      ?? document.getElementById('timezone-map');
+    card?.scrollIntoView({
       behavior: window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
         ? 'auto' : 'smooth',
       block: 'start',
@@ -376,11 +376,10 @@ async function startApp() {
         // row is below the fold on a phone, so framing it moved a map that was
         // off the bottom of the screen: the answer arrived out of sight.
         //
-        // Asked AFTER the selection, because whether to move at all depends on
-        // what the tap did. A row tapped OFF has nothing to show, and hauling
-        // the viewport somewhere is a poor answer to putting something away.
-        if (state.selectedPlace || state.selectedShipKey
-            || state.selectedTzid || state.gpsTimezoneSelected) revealMap();
+        // Every tap, including the one that turns a row OFF. Deselecting still
+        // changes the map, and a rule about which taps travel is more to know
+        // than it is worth.
+        revealMap();
     }
   });
 

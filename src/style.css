@@ -36,6 +36,36 @@
   cursor: pointer;
 }
 
+/*
+  And a card lifts under the pointer, so the hover has something to show for
+  itself HERE and not only out on the map.
+
+  Behind (hover: hover) because a fill is sticky where there is no pointer to
+  leave with: tapping a row on a phone would light it and leave it lit until
+  something else was tapped. The same reason the JS asks.
+
+  A lift rather than a colour, and a small one — the same idea as the map's own
+  hover, which answers a pointer by getting slightly brighter rather than by
+  becoming something else. The border is left alone: on a row it carries the
+  SELECTION, and hover has no business competing with that.
+*/
+@media (hover: hover) {
+  #user-timezone-details:hover,
+  #selected-timezone-details:hover {
+    background-color: rgb(31 41 55 / 0.9);   /* gray-800, up from gray-900/80 */
+  }
+
+  .clock-row:hover {
+    background-color: rgb(55 65 81 / 0.8);   /* gray-700, up from /50 */
+  }
+
+  #user-timezone-details,
+  #selected-timezone-details,
+  .clock-row {
+    transition: background-color 120ms ease-out;
+  }
+}
+
 /* Add this new class for the timezone detail cards */
 .timezone-detail-card {
   @apply p-3 rounded-lg border-2 bg-gray-900/80;
