@@ -26,7 +26,7 @@
   bar and the Dynamic Island sit OVER the page, so a card scrolled flush to the
   top has its title behind them. Inert in a browser window, where the inset is 0.
 */
-#timezone-map-card {
+#timezone-map {
   scroll-margin-top: calc(env(safe-area-inset-top) + 0.75rem);
 }
 

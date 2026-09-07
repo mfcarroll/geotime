@@ -240,8 +240,18 @@ export function updateUserTimezoneDetails(tzid: string) {
 
         setAnchorVoyageLine(null);
 
-        // The map card names the zone; the Local Time card names the town you're in.
-        dom.userTimezoneNameEl.textContent = getDisplayTimezoneName(tzid);
+        // The TOWN, the same as the Local Time card above says.
+        //
+        // This slot used to name the zone while that one named the town, on the
+        // reasoning that the map card is about the map. But the two then
+        // disagreed about where you are — "Vancouver" here, "Nelson" there —
+        // and the disagreement had teeth: tapping this card goes to where the
+        // device is standing, which is a strange answer from a card labelled
+        // with a region that reaches to Alaska. Named for the town, going to
+        // the town is the obvious thing rather than a surprise. The zone still
+        // gets said whenever it is picked as a zone.
+        dom.userTimezoneNameEl.textContent =
+            state.localPlaceName ?? getDisplayTimezoneName(tzid);
         dom.userTimezoneTimeEl.textContent = getFormattedTime(tzid, {
             hour: 'numeric',
             minute: '2-digit',
@@ -376,25 +386,31 @@ export function selectSavedZone(zone: StoredZone, frame?: Frame) {
 }
 
 /**
- * Puts what a card names back on the map, without changing what is selected.
+ * Puts the current selection down, whatever kind it is.
  *
- * The cards above the map name things — the place you are standing, the ship
- * underfoot, whatever is picked — so they are worth being able to point at. What
- * they are NOT is a second way to choose: tapping the gold card to be shown the
- * port it names should not toggle that port off, and tapping the blue one should
- * not quietly take the selection away from the card beside it. So these frame
- * and nothing else.
+ * What the gold card is FOR. It only exists while something is picked, so the
+ * one thing it can offer that nothing else does is a way to unpick it — which
+ * is also what a user reaches for it expecting. It used to fly the map back to
+ * whatever it named instead, and that answered a question nobody asked: having
+ * panned away from a zone deliberately, dismissing its card dragged the view
+ * back to the empty water it had been left behind at.
+ *
+ * Done by re-picking each thing rather than by clearing the fields, so the
+ * toggle-off path is the same one tapping it a second time on the map takes —
+ * cards to restore, charts to drop, events to fire and all.
  */
-export function revealSelected(): void {
-    // The same order of precedence mapSelection reads, because that order is
-    // what decided which of the three the card is currently showing.
+export function clearSelection(): void {
+    // The order mapSelection reads, which is the order that decided what the
+    // card is showing.
     const place = state.selectedPlace;
-    if (place) { frameAt(place.lat, place.lon); return; }
-
-    const ship = state.selectedShipKey;
-    if (ship) { void fitToShip(ship, voyageForShip(ship)); return; }
-
-    if (state.selectedTzid) frameZone(state.selectedTzid);
+    if (place) {
+        selectPlace({ name: place.name, lat: place.lat, lon: place.lon, detail: '' });
+        return;
+    }
+    if (state.selectedShipKey) { selectShip(state.selectedShipKey); return; }
+    // Every zone selection records itself here, saved row or transient pick, so
+    // handing it straight back is what reads as a second tap.
+    if (state.temporaryZone) selectZone(state.temporaryZone);
 }
 
 /** Puts the anchor — where you are, or the ship you are on — back on the map. */

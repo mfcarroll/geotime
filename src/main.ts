@@ -5,7 +5,7 @@ import './style.css';
 import { Loader } from '@googlemaps/js-api-loader';
 import * as dom from './dom';
 import { addShipClock, loadDebugFleet, migrateStoredTimezones, persistZones, savedZoneByKey, state, syncWidget } from './state';
-import { refreshAnchorChip, refreshMapStyles, initMaps, onLocationError, onLocationSuccess, selectSavedZone, selectShip, selectPlace, setHoveredShip, setHoveredPlace, renderWorldClocks, keepZone, updateUserTimezoneDetails, showLocationUnavailable, loadTimezoneGeoJson, revealAnchor, revealSelected, hoverAnchor, hoverSelected, hoverClockRow } from './map';
+import { refreshAnchorChip, refreshMapStyles, initMaps, onLocationError, onLocationSuccess, selectSavedZone, selectShip, selectPlace, setHoveredShip, setHoveredPlace, renderWorldClocks, keepZone, updateUserTimezoneDetails, showLocationUnavailable, loadTimezoneGeoJson, revealAnchor, clearSelection, hoverAnchor, hoverSelected, hoverClockRow } from './map';
 import { updateAllClocks, syncClock, startClockWatch, getDisplayTimezoneName, startClocks, findTimezoneFromGeoJSON } from './time';
 import { Capacitor } from '@capacitor/core';
 import { getDeviceTimezone, onDeviceTimezoneChanged } from './widget';
@@ -269,14 +269,13 @@ async function startApp() {
    * learn. Going every time is the predictable thing, and where the map has
    * not moved this costs a scroll of nothing.
    *
-   * The whole CARD comes into view rather than the canvas alone: the cards
-   * above it name what was just picked, and a map with those scrolled off the
-   * top answers half the question.
+   * The MAP's own top edge, not the card's. Taking the card in meant taking
+   * its header too, which is further than the ask: the map is the thing being
+   * looked at, and the cards above it stay a scroll away rather than costing
+   * every trip a header's worth of overshoot.
    */
   function revealMap(): void {
-    const card = document.getElementById('timezone-map-card')
-      ?? document.getElementById('timezone-map');
-    card?.scrollIntoView({
+    document.getElementById('timezone-map')?.scrollIntoView({
       behavior: window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
         ? 'auto' : 'smooth',
       block: 'start',
@@ -291,10 +290,9 @@ async function startApp() {
     revealAnchor();
     revealMap();
   });
-  dom.selectedTimezoneDetailsEl.addEventListener('click', () => {
-    revealSelected();
-    revealMap();
-  });
+  // The gold card puts the selection DOWN rather than going to it — see
+  // clearSelection. No trip to the map either: there is nothing left to look at.
+  dom.selectedTimezoneDetailsEl.addEventListener('click', () => clearSelection());
 
   // And answering a pointer, where there is one. Asked as a capability rather
   // than guessed from the user agent, because the question really is whether
