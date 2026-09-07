@@ -256,8 +256,18 @@ export function updateUserTimezoneDetails(tzid: string) {
  * clears it. That is the behaviour the offset-keyed version had, generalised
  * from "one zone per band" to "any zone".
  */
-function selectZone(newTzid: string | null) {
-    if (!newTzid) return;
+/**
+ * Selects one place: its zone on the map, and the place itself in the card.
+ *
+ * Takes the whole record rather than a zone id, and that is not tidiness. The
+ * transient row and the card are both written here, and the re-render is
+ * dispatched from the bottom of this function — so a caller that set the record
+ * AFTERWARDS had its correction land after the list had already been drawn.
+ * Picking Tampa lit the New York row, on a device, exactly once.
+ */
+function selectZone(picked: StoredZone | null) {
+    if (!picked) return;
+    const newTzid = picked.tz;
 
     // One gold band, one "selected" card: picking a zone drops any ship, and
     // any port — a port is a point inside a zone, so a zone selection is a
@@ -266,8 +276,10 @@ function selectZone(newTzid: string | null) {
     state.selectedPort = null;
 
     const isGpsTz = newTzid === state.gpsTzid;
-    // Deselecting only the bare zone: a place inside it is a different row.
-    const isDeselecting = state.temporaryZone?.tz === newTzid && !state.temporaryZone.label;
+    // By PLACE: clicking the zone under Tampa is not clicking Tampa, so it does
+    // not toggle her off.
+    const isDeselecting = !!state.temporaryZone
+        && zoneKey(state.temporaryZone) === zoneKey(picked);
 
     const nextGpsSelectedState = !isDeselecting && isGpsTz;
     if (state.gpsTimezoneSelected !== nextGpsSelectedState) {
@@ -280,7 +292,7 @@ function selectZone(newTzid: string | null) {
         state.temporaryZone = null;
     } else {
         state.selectedTzid = newTzid;
-        state.temporaryZone = { tz: newTzid };
+        state.temporaryZone = picked;
     }
 
     // Only a deselection empties this slot.
@@ -296,7 +308,10 @@ function selectZone(newTzid: string | null) {
     updateCard(
         dom.selectedTimezoneDetailsEl, dom.selectedTimezoneNameEl, dom.selectedTimezoneOffsetEl,
         isDeselecting ? null : newTzid,
-        'offset'
+        'offset',
+        'selected',
+        // The row's own name, so picking Tampa does not answer "New York".
+        picked.label,
     );
 
     if (isTouchDevice) setHoveredZone(null);
@@ -340,13 +355,7 @@ export function selectSavedZone(zone: StoredZone, frame?: Frame) {
             frame !== undefined);
         return;
     }
-    selectZone(zone.tz);
-    // The row's own name, so picking Tampa does not put "New York" in the card.
-    if (zone.label) {
-        state.temporaryZone = zone;
-        updateCard(dom.selectedTimezoneDetailsEl, dom.selectedTimezoneNameEl,
-                   dom.selectedTimezoneOffsetEl, zone.tz, 'offset', 'selected', zone.label);
-    }
+    selectZone(zone);
     if (frame === 'zone') frameZone(zone.tz);
     else if (frame) frameAt(frame.lat, frame.lon);
 }
@@ -1241,7 +1250,9 @@ async function setupTimezoneMapListeners() {
   state.timezoneMap.data.addListener('click', (event: google.maps.Data.MouseEvent) => {
     hoveredZoneTzid = null;
     paintHoverCard();
-    selectZone(event.feature.getProperty('tzid') as string);
+    // The bare zone: clicking the map is clicking the region, not any place
+    // inside it.
+    selectZone({ tz: event.feature.getProperty('tzid') as string });
   });
 }
 
