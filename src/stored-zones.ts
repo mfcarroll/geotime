@@ -77,12 +77,27 @@ export function migrateStoredTimezones(raw: unknown): StoredZone[] {
         // deliberately. `kind` was added later and forgetting it here cost an
         // anchor that appeared when the port was added and vanished on restart.
         const zone: StoredZone = { tz: id };
-        if (typeof source.label === 'string' && source.label.trim()) zone.label = source.label;
-        if (source.kind === 'port') zone.kind = 'port';
         const at = source.at;
         if (at && Number.isFinite(Number(at.lat)) && Number.isFinite(Number(at.lon))) {
             zone.at = { lat: Number(at.lat), lon: Number(at.lon) };
         }
+        // A row names a place if and only if it knows where that place is, and
+        // the row it cannot name is the zone it stands in.
+        //
+        // Builds before 1.7.0 had nowhere to record a berth, so they saved the
+        // NAME alone: a row that said "Coco Cay" and behaved like the whole of
+        // America/Nassau, because a place with no point can only be answered
+        // with a region. Dropping the name here is what makes the two agree —
+        // the row reads "Nassau", selects Nassau, and is Nassau. Every path
+        // that writes a label writes a position with it, so nothing current can
+        // arrive in this state and no repair has to exist for one that did.
+        if (typeof source.label === 'string' && source.label.trim() && zone.at) {
+            zone.label = source.label;
+        }
+        // An anchor belongs to a port, and a port is a place. A zone cannot
+        // carry one, or a demoted row would keep an anchor and claim to be
+        // somewhere a ship calls.
+        if (zone.label && source.kind === 'port') zone.kind = 'port';
         if (out.some((z) => zoneKey(z) === zoneKey(zone))) continue;
         out.push(zone);
     }

@@ -14,7 +14,7 @@ import { shipKey, type ShipClock } from './ships';
 import { cachedVoyageFor, voyageForShip, type ShipPort, type ShipVoyage } from './shiptrack';
 import { clearShipChart, drawShipChart, fitToShip, refreshPlaceMarkers, refreshShipMarkers, type PlaceMarkerDetail } from './ship-markers';
 import { voyageLine } from './voyage-line';
-import { isUnlocatedZone, portPositionFor, portRefsFrom } from './ports';
+import { isUnlocatedZone } from './ports';
 import { zoneKey, type StoredZone } from './stored-zones';
 import { fontOf, widthOf } from './second-line';
 
@@ -354,74 +354,25 @@ export function selectTimezone(tzid: string, frame?: Frame) {
  * did not record where it was.
  */
 export function selectSavedZone(zone: StoredZone, frame?: Frame) {
-    // A port kept before positions were recorded has a name but nowhere to be,
-    // so it would fall through to the region below and answer "Coco Cay" with
-    // the whole of America/Nassau. Repaired here rather than left to do that:
-    // by the time a row is tapped the itinerary that named the port is usually
-    // back from cache, even when it was not at launch.
-    const record = zone.at ? zone : repaired(zone);
-
     // Any row we hold a POINT for selects that point, port or town — the same
     // thing its marker does. A row with no coordinates is a region and can only
-    // be answered with one.
-    if (record.at) {
+    // be answered with one — and, since migrateStoredTimezones drops a name it
+    // has no position for, it is one: the row reads as the zone it selects.
+    if (zone.at) {
         selectPlace(
             {
-                name: record.label ?? record.tz,
-                lat: record.at.lat,
-                lon: record.at.lon,
+                name: zone.label ?? zone.tz,
+                lat: zone.at.lat,
+                lon: zone.at.lon,
                 detail: '',
-                kind: record.kind,
+                kind: zone.kind,
             },
             frame !== undefined);
         return;
     }
-    selectZone(record);
-    if (frame === 'zone') frameZone(record.tz);
+    selectZone(zone);
+    if (frame === 'zone') frameZone(zone.tz);
     else if (frame) frameAt(frame.lat, frame.lon);
-}
-
-/** This row again, with a position on it where one could be found. */
-function repaired(zone: StoredZone): StoredZone {
-    repairPlacePositions();
-    return savedZoneByKey(zoneKey(zone)) ?? zone;
-}
-
-/**
- * Puts positions back on saved ports that were kept without one.
- *
- * Sweeps the whole list rather than the one row asked about, so a single tap
- * also gives every other stale port its marker back — they are all missing for
- * the same reason and all repairable from the same itineraries.
- *
- * Written back, so the ring appears on the map and no later launch has to work
- * it out again. Silent when the itineraries are not loaded yet: the row keeps
- * behaving as it did, and the next tap tries again.
- */
-export function repairPlacePositions(): void {
-    const stale = (zone: StoredZone) => zone.kind === 'port' && !zone.at && !!zone.label;
-    if (!state.savedZones.some(stale)) return;
-
-    const ports = portRefsFrom(
-        state.shipClocks.map((ship) => ({
-            ship: ship.name,
-            voyage: cachedVoyageFor(shipKey(ship)),
-        })),
-        findTimezoneFromGeoJSON);
-    if (!ports.length) return;
-
-    let mended = false;
-    const zones = state.savedZones.map((zone) => {
-        if (!stale(zone)) return zone;
-        const at = portPositionFor(zone.label!, zone.tz, ports, fold);
-        if (!at) return zone;
-        mended = true;
-        return { ...zone, at };
-    });
-    if (!mended) return;
-
-    persistZones(zones);
-    refreshPlaceMarkers();
 }
 
 /** Centres on a point, coming closer if the map was further out than PLACE_ZOOM. */
