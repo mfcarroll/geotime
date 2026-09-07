@@ -16,18 +16,31 @@
 // initialisation, so both are fully evaluated before either is called — but keep
 // it that way: a top-level call across this boundary would break at load.
 import { state } from './state';
-import { correctedNow, getUtcOffset, getZoneLabel } from './time';
+import { correctedNow, getUtcOffset } from './time';
 import { getDisplayTimezoneName, fold } from './utils';
 import { shipKey, type ShipClock } from './ships';
+import { zoneKey, type StoredZone } from './stored-zones';
 import { shipTimeAvailable } from './rccl';
 
 export type ClockEntry =
-  | { kind: 'zone'; tzid: string }
+  | { kind: 'zone'; zone: StoredZone }
   | { kind: 'ship'; ship: ShipClock };
 
-/** Stable per-row identity, for `data-clock-key` and for dedupe. */
+/** The zone a row keeps time by, whichever kind of row it is. */
+export function clockZone(entry: ClockEntry): string | null {
+  return entry.kind === 'zone' ? entry.zone.tz : null;
+}
+
+/**
+ * Stable per-row identity, for `data-clock-key` and for dedupe.
+ *
+ * A zone row is keyed by its PLACE, not by its zone — see zoneKey — because two
+ * of them may share a zone and updateAllClocks finds each row's element by this
+ * string. Two rows with one key means one of them silently never has a time
+ * written into it.
+ */
 export function clockKey(entry: ClockEntry): string {
-  return entry.kind === 'ship' ? `ship:${shipKey(entry.ship)}` : entry.tzid;
+  return entry.kind === 'ship' ? `ship:${shipKey(entry.ship)}` : zoneKey(entry.zone);
 }
 
 /**
@@ -38,7 +51,7 @@ export function clockKey(entry: ClockEntry): string {
  * ship cannot be modelled as a zone.
  */
 export function clockOffset(entry: ClockEntry): number {
-  return entry.kind === 'ship' ? entry.ship.offsetHours ?? 0 : getUtcOffset(entry.tzid);
+  return entry.kind === 'ship' ? entry.ship.offsetHours ?? 0 : getUtcOffset(entry.zone.tz);
 }
 
 /**
@@ -50,7 +63,8 @@ export function clockOffset(entry: ClockEntry): number {
  * grow; it reads `ShipClock.short` directly.
  */
 export function clockLabel(entry: ClockEntry): string {
-  return entry.kind === 'ship' ? entry.ship.name : getZoneLabel(entry.tzid);
+  if (entry.kind === 'ship') return entry.ship.name;
+  return entry.zone.label ?? getDisplayTimezoneName(entry.zone.tz);
 }
 
 
@@ -84,10 +98,10 @@ export function clockSubLabel(entry: ClockEntry, word: ZoneLabelWord = 'Timezone
     // first word. Same principle as the zone case below.
     return fold(entry.ship.name).startsWith(fold(line)) ? '' : line;
   }
-  const zoneName = getDisplayTimezoneName(entry.tzid);
+  const zoneName = getDisplayTimezoneName(entry.zone.tz);
   // Accents aside, "Reykjavík" and the zone "Reykjavik" are the same place —
   // naming it twice would just look like a mistake.
-  return fold(zoneName) === fold(getZoneLabel(entry.tzid)) ? '' : `${word}: ${zoneName}`;
+  return fold(zoneName) === fold(clockLabel(entry)) ? '' : `${word}: ${zoneName}`;
 }
 
 /** True when this row is a ship whose offset we have never resolved. */
@@ -141,15 +155,19 @@ export function formatFixedOffsetDate(offsetHours: number, at: Date = correctedN
 /**
  * The rows to render, zones and ships interleaved by offset.
  *
- * `temporaryTimezone` is the map's transient selection, which appears in the
+ * `temporaryZone` is the map's transient selection, which appears in the
  * list without being saved; it only ever names a zone, since a ship has no place
  * on the map.
  */
 export function visibleClocks(): ClockEntry[] {
-  const entries: ClockEntry[] = state.addedTimezones.map((tzid) => ({ kind: 'zone', tzid }));
+  const entries: ClockEntry[] = state.savedZones.map((zone) => ({ kind: 'zone', zone }));
 
-  if (state.temporaryTimezone && !state.addedTimezones.includes(state.temporaryTimezone)) {
-    entries.push({ kind: 'zone', tzid: state.temporaryTimezone });
+  // The transient row, when what was picked is not already kept. Compared by
+  // PLACE: picking Tampa while America/New_York is already on the list is a new
+  // row, not a repeat of one.
+  const temporary = state.temporaryZone;
+  if (temporary && !state.savedZones.some((zone) => zoneKey(zone) === zoneKey(temporary))) {
+    entries.push({ kind: 'zone', zone: temporary });
   }
   // Ships are withheld entirely when the feature is disabled — no key means no
   // offset can ever be resolved or refreshed, so a stored one would be a clock

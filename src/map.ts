@@ -1,8 +1,8 @@
 // src/map.ts
 
 import * as dom from './dom';
-import { aboardShip, state, persistTimezones, setLocalPlaceName, setZoneKind, setZoneLabel, setZonePlace, syncWidget, whenMapReady } from './state';
-import { timezoneForCoordinates, findTimezoneFromGeoJSON, mapSelection, zoneForCoordinates, startClocks, relativeTextForZone, relativeTextForShip, getFormattedTime, getUtcOffset, getDisplayTimezoneName, getZoneLabel, updateAllClocks, formatOffsetDiff } from './time';
+import { aboardShip, addSavedZone, state, persistZones, savedZoneByKey, setLocalPlaceName, syncWidget, whenMapReady } from './state';
+import { timezoneForCoordinates, findTimezoneFromGeoJSON, mapSelection, zoneForCoordinates, startClocks, relativeTextForZone, relativeTextForShip, getFormattedTime, getUtcOffset, getDisplayTimezoneName, updateAllClocks, formatOffsetDiff } from './time';
 import { locationMapStyles, worldTimezoneMapStyles } from './map-styles';
 import { debugFlag, distance, formatAccuracy, fold } from './utils';
 import { loadCityIndex, nearestPlace } from './cities';
@@ -14,6 +14,7 @@ import { cachedVoyageFor, voyageForShip, type ShipPort, type ShipVoyage } from '
 import { clearShipChart, drawShipChart, fitToShip, refreshPortMarkers, refreshShipMarkers, type PortMarkerDetail } from './ship-markers';
 import { voyageLine } from './voyage-line';
 import { isUnlocatedZone } from './ports';
+import { zoneKey, type StoredZone } from './stored-zones';
 import { fontOf, widthOf } from './second-line';
 
 /**
@@ -129,13 +130,15 @@ function updateCard(
    * of this coloured every card the same way and turned hover gold.
    */
   role: 'selected' | 'hovered' = 'selected',
+  /** What the thing was called when it was picked, if it had a name of its own. */
+  name?: string,
 ) {
   if (tzid) {
     // The name the user gave it, where they gave it one. Picking "Cozumel" out
     // of the search or off the map and being answered "Cancun" is the zone
     // being pedantic at somebody who was not asking about the zone — and the
     // row below already says Cozumel, so the card was contradicting the list.
-    nameEl.textContent = getZoneLabel(tzid);
+    nameEl.textContent = name ?? getDisplayTimezoneName(tzid);
 
     if (valueType === 'offset') {
       // Measured from the anchor, like every offset in the list below it — a map
@@ -263,7 +266,8 @@ function selectZone(newTzid: string | null) {
     state.selectedPort = null;
 
     const isGpsTz = newTzid === state.gpsTzid;
-    const isDeselecting = state.temporaryTimezone === newTzid;
+    // Deselecting only the bare zone: a place inside it is a different row.
+    const isDeselecting = state.temporaryZone?.tz === newTzid && !state.temporaryZone.label;
 
     const nextGpsSelectedState = !isDeselecting && isGpsTz;
     if (state.gpsTimezoneSelected !== nextGpsSelectedState) {
@@ -273,10 +277,10 @@ function selectZone(newTzid: string | null) {
 
     if (isDeselecting) {
         state.selectedTzid = null;
-        state.temporaryTimezone = null;
+        state.temporaryZone = null;
     } else {
         state.selectedTzid = newTzid;
-        state.temporaryTimezone = newTzid;
+        state.temporaryZone = { tz: newTzid };
     }
 
     // Only a deselection empties this slot.
@@ -317,19 +321,33 @@ function selectZone(newTzid: string | null) {
 export type Frame = { lat: number; lon: number } | 'zone';
 
 export function selectTimezone(tzid: string, frame?: Frame) {
-    // A saved port's row names a POINT, not the region around it, so it selects
-    // the same way its ring on the map does — including finding the cruise that
-    // calls there. Only rows we have coordinates for: a port kept by an older
-    // build has none, and falls back to being an ordinary zone.
-    const at = state.zoneKinds[tzid] === 'port' ? state.zonePlaces[tzid] : undefined;
-    if (at) {
+    selectSavedZone({ tz: tzid }, frame);
+}
+
+/**
+ * Selects one saved place: its zone on the map, and the place itself where it
+ * is one.
+ *
+ * A port's row names a POINT, not the region around it, so it selects the same
+ * way its ring on the map does — including finding the cruise that calls there.
+ * A port kept by an older build has no coordinates and falls back to being an
+ * ordinary zone.
+ */
+export function selectSavedZone(zone: StoredZone, frame?: Frame) {
+    if (zone.kind === 'port' && zone.at) {
         selectPort(
-            { name: state.zoneLabels[tzid] ?? tzid, lat: at.lat, lon: at.lon, detail: '' },
+            { name: zone.label ?? zone.tz, lat: zone.at.lat, lon: zone.at.lon, detail: '' },
             frame !== undefined);
         return;
     }
-    selectZone(tzid);
-    if (frame === 'zone') frameZone(tzid);
+    selectZone(zone.tz);
+    // The row's own name, so picking Tampa does not put "New York" in the card.
+    if (zone.label) {
+        state.temporaryZone = zone;
+        updateCard(dom.selectedTimezoneDetailsEl, dom.selectedTimezoneNameEl,
+                   dom.selectedTimezoneOffsetEl, zone.tz, 'offset', 'selected', zone.label);
+    }
+    if (frame === 'zone') frameZone(zone.tz);
     else if (frame) frameAt(frame.lat, frame.lon);
 }
 
@@ -393,7 +411,7 @@ export function selectShip(key: string): void {
     // the transient map pick, so the list does not keep showing a stray row.
     if (!isDeselecting) {
         state.selectedTzid = null;
-        state.temporaryTimezone = null;
+        state.temporaryZone = null;
         if (state.gpsTimezoneSelected) {
             state.gpsTimezoneSelected = false;
             document.dispatchEvent(
@@ -593,7 +611,7 @@ export function selectPort(detail: PortMarkerDetail, reveal = false): void {
 
     if (deselecting) {
         state.selectedPort = null;
-        state.temporaryTimezone = null;
+        state.temporaryZone = null;
         // The card goes back to whatever it was showing before the port took
         // it, destination line and all — updateShipCard clears that line on its
         // way past, so it has to be put back the way selectShip puts it there.
@@ -620,20 +638,21 @@ export function selectPort(detail: PortMarkerDetail, reveal = false): void {
         return;
     }
 
-    // The name and the anchor travel with it, exactly as picking the port out
-    // of the search would, so a place reached two ways is stored one way. The
-    // coordinates come too: a zone id names a region, and the map has to be
-    // able to draw the point once the itinerary it came from is gone.
-    setZoneLabel(tzid, detail.name);
-    setZoneKind(tzid, 'port');
-    setZonePlace(tzid, { lat: detail.lat, lon: detail.lon });
-
     state.selectedPort = { tzid, name: detail.name, lat: detail.lat, lon: detail.lon };
-    // A row so it can be kept, and the pin beside it to keep it with. NOT
-    // `selectedTzid`, which is what paints a whole zone gold — the zone is not
-    // the place, and lighting America/Cancun because somebody tapped Cozumel
+    // A row of its own so it can be kept, and the pin beside it to keep it
+    // with. The row carries the port's name, its anchor and its position — it
+    // does not WRITE them onto the zone, which is how a look at Cabo San Lucas
+    // used to rename the timezone it stands in, on every surface, permanently.
+    //
+    // And NOT `selectedTzid`, which is what paints a whole zone gold. The zone
+    // is not the place: lighting America/Cancun because somebody tapped Cozumel
     // answers a question they did not ask.
-    state.temporaryTimezone = tzid;
+    state.temporaryZone = {
+        tz: tzid,
+        label: detail.name,
+        kind: 'port',
+        at: { lat: detail.lat, lon: detail.lon },
+    };
     // A ship is NOT cleared here, unlike every other selection. A port belongs
     // to an itinerary, so picking one is a request to see that cruise, not to
     // dismiss it — and if none is showing, showCruiseFor finds the one that
@@ -1563,22 +1582,22 @@ async function refreshLocalPlaceName(lat: number, lon: number): Promise<void> {
   syncWidget();
 }
 
-export function addUniqueTimezoneToList(tz: string) {
-    // Persist even when the zone is already on the list.
-    //
-    // The list is not the only thing being written here: persistTimezones is the
-    // single write path for labels and kinds too, and the caller sets those just
-    // before calling this. Returning early because "the list did not change"
-    // therefore dropped a rename on the floor — adding Mississauga to a list that
-    // already held America/Toronto left every surface reading Toronto, because
-    // the new label never left memory. The widget kept the old name, and so did
-    // the app after the next reload.
-    const next = state.addedTimezones.includes(tz)
-        ? state.addedTimezones
-        : [...state.addedTimezones, tz];
-
-    persistTimezones(next);
+/**
+ * Keeps a place on the World Clock, if it is not kept already.
+ *
+ * By PLACE, so Tampa and New York can both be kept and adding Tampa twice
+ * cannot. There is no longer anything to overwrite: a rename used to be a write
+ * to a shared label map, which is why this had to persist even when the list
+ * itself had not changed.
+ */
+export function keepZone(zone: StoredZone) {
+    persistZones(addSavedZone(zone));
     renderWorldClocks();
+}
+
+/** Keeps a bare zone. The old name, for callers that only have an id. */
+export function addUniqueTimezoneToList(tz: string) {
+    keepZone({ tz });
 }
 
 export function renderWorldClocks() {
@@ -1611,7 +1630,8 @@ function createClockElement(entry: ClockEntry): HTMLElement {
     clockDiv.dataset.clockKey = key;
 
     const isShip = entry.kind === 'ship';
-    const tzid = entry.kind === 'zone' ? entry.tzid : null;
+    const zone = entry.kind === 'zone' ? entry.zone : null;
+    const tzid = zone?.tz ?? null;
 
     clockDiv.classList.remove('border-transparent', 'border-blue-500', 'border-yellow-500');
 
@@ -1627,7 +1647,7 @@ function createClockElement(entry: ClockEntry): HTMLElement {
         clockDiv.classList.add('border-yellow-500');
     } else if (tzid && tzid === state.gpsTzid) {
         clockDiv.classList.add('border-blue-500');
-    } else if (tzid && tzid === state.temporaryTimezone) {
+    } else if (zone && state.temporaryZone && zoneKey(zone) === zoneKey(state.temporaryZone)) {
         clockDiv.classList.add('border-yellow-500');
     } else if (isSelectedShip) {
         // Same gold as a selected zone: the row, the band and the marker are one
@@ -1637,9 +1657,11 @@ function createClockElement(entry: ClockEntry): HTMLElement {
         clockDiv.classList.add('border-transparent');
     }
 
-    const isTransient = !!tzid
-        && tzid === state.temporaryTimezone
-        && !state.addedTimezones.includes(tzid);
+    // Transient means picked but not kept — the row with the pin beside it.
+    // Compared by PLACE: Tampa is not "already saved" because New York is.
+    const isTransient = !!zone && !!state.temporaryZone
+        && zoneKey(zone) === zoneKey(state.temporaryZone)
+        && !savedZoneByKey(zoneKey(zone));
 
     if (isTransient) {
         clockDiv.classList.add('bg-yellow-800', 'bg-opacity-50');
@@ -1663,7 +1685,7 @@ function createClockElement(entry: ClockEntry): HTMLElement {
     // An anchor says this row is a port a ship on the list calls at, not a
     // place the user chose for its own sake. Mutually exclusive with the ship
     // mark by construction: a ship row has no tzid to have been added under.
-    if (tzid && state.zoneKinds[tzid] === 'port') {
+    if (zone?.kind === 'port') {
         clone.querySelector('.port-icon')!.classList.remove('hidden');
     }
 

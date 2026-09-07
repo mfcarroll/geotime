@@ -4,8 +4,8 @@
 import './style.css';
 import { Loader } from '@googlemaps/js-api-loader';
 import * as dom from './dom';
-import { addShipClock, loadDebugFleet, migrateStoredTimezones, persistTimezones, setZoneKind, setZoneLabel, setZonePlace, state, syncWidget } from './state';
-import { refreshAnchorChip, refreshMapStyles, initMaps, onLocationError, onLocationSuccess, selectTimezone, selectShip, selectPort, setHoveredShip, setHoveredPort, renderWorldClocks, addUniqueTimezoneToList, updateUserTimezoneDetails, showLocationUnavailable, loadTimezoneGeoJson } from './map';
+import { addShipClock, loadDebugFleet, migrateStoredTimezones, persistZones, savedZoneByKey, state, syncWidget } from './state';
+import { refreshAnchorChip, refreshMapStyles, initMaps, onLocationError, onLocationSuccess, selectSavedZone, selectShip, selectPort, setHoveredShip, setHoveredPort, renderWorldClocks, keepZone, updateUserTimezoneDetails, showLocationUnavailable, loadTimezoneGeoJson } from './map';
 import { updateAllClocks, syncClock, startClockWatch, getDisplayTimezoneName, startClocks, findTimezoneFromGeoJSON } from './time';
 import { Capacitor } from '@capacitor/core';
 import { getDeviceTimezone, onDeviceTimezoneChanged } from './widget';
@@ -16,6 +16,7 @@ import { initShipTime } from './rccl';
 import { forgetShip, resolveAllShipClocks, startShipTimeWatch } from './shiptime';
 import { initShipTrack, cachedVoyageFor } from './shiptrack';
 import { portRefsFrom } from './ports';
+import { zoneKey, type StoredZone } from './stored-zones';
 import { refreshShipMarkers, startShipMarkerWatch, type PortMarkerDetail } from './ship-markers';
 import { installDiagnostics } from './diagnostics';
 import { maybeRunShipProbe } from './ship-probe';
@@ -35,13 +36,12 @@ function handleUrlParameters() {
     if (urlParams.has('timezones')) {
         const timezonesParam = urlParams.get('timezones');
         if (timezonesParam) {
+            // The shared list arrives as records already — the same shape the
+            // store holds — so names travel with it instead of being written
+            // onto their zones after the fact.
             const shared = migrateStoredTimezones(timezonesParam.split(','));
-            const timezones = shared.map((z) => z.tz);
-            for (const zone of shared) setZoneLabel(zone.tz, zone.label);
-
-            persistTimezones(timezones);
-
-            state.timezonesFromUrl = timezones;
+            persistZones(shared);
+            state.timezonesFromUrl = shared;
         }
 
         history.replaceState(null, '', window.location.pathname);
@@ -234,20 +234,22 @@ async function startApp() {
         if (state.selectedShipKey !== key) selectShip(key);
         return;
       }
-      // A port keeps its own name on the row ("Cozumel"), the same way a city
-      // does, and is marked with an anchor so it reads as somewhere the ship
-      // calls rather than somewhere the user lives.
-      setZoneLabel(place.tzid, place.kind === 'city' || place.kind === 'port' ? place.label : undefined);
-      setZoneKind(place.tzid, place.kind === 'port' ? 'port' : undefined);
-      // And where it is, so the map can draw the berth rather than the region
-      // around it — the same thing tapping its ring on the chart records.
-      setZonePlace(place.tzid, place.kind === 'port' ? place.at : undefined);
-      addUniqueTimezoneToList(place.tzid);
+      // One record for the place, rather than a zone plus three side-tables
+      // keyed by it. A port keeps its own name on the row ("Cozumel"), the same
+      // way a city does, and is marked with an anchor so it reads as somewhere
+      // the ship calls rather than somewhere the user lives — and where it is,
+      // so the map can draw the berth rather than the region around it.
+      const zone: StoredZone = { tz: place.tzid };
+      if (place.kind === 'city' || place.kind === 'port') zone.label = place.label;
+      if (place.kind === 'port') { zone.kind = 'port'; zone.at = place.at; }
+      if (place.kind === 'city') zone.at = place.at;
+
+      keepZone(zone);
       // Shown as well as selected. The map is wherever it was left — usually
       // the whole world, where a port's ring is four pixels and a city is none
       // at all — so picking a place here frames it: the point for a town or a
       // berth, the whole shape for a zone, which is what its name refers to.
-      selectTimezone(place.tzid, place.kind === 'zone' ? 'zone' : place.at);
+      selectSavedZone(zone, place.kind === 'zone' ? 'zone' : place.at);
       updateAllClocks();
     },
   });
@@ -262,15 +264,19 @@ async function startApp() {
       if (key.startsWith('ship:')) {
         forgetShip(key.slice('ship:'.length));
       } else {
-        persistTimezones(state.addedTimezones.filter((tz: string) => tz !== key));
+        // By place, so removing Tampa leaves New York alone.
+        persistZones(state.savedZones.filter((zone) => zoneKey(zone) !== key));
       }
       renderWorldClocks();
       updateAllClocks();
     } else if (pinBtn) {
       // Only zones are ever transient — the pin button promotes the map's
       // temporary selection into the saved list, and ships are saved on add.
-      const timezoneToPin = (pinBtn as HTMLElement).dataset.clockTarget!;
-      addUniqueTimezoneToList(timezoneToPin);
+      // The whole record is promoted, name and anchor and position with it.
+      const pinned = state.temporaryZone;
+      if (pinned && zoneKey(pinned) === (pinBtn as HTMLElement).dataset.clockTarget) {
+        keepZone(pinned);
+      }
       renderWorldClocks();
       updateAllClocks();
     } else {
@@ -280,8 +286,13 @@ async function startApp() {
         // A ship highlights every zone keeping its time, without any zone being
         // the ship. The "ship:" prefix exists only in the DOM, so it is stripped
         // before the key reaches anything that stores or resolves it.
-        if (key.startsWith('ship:')) selectShip(key.slice('ship:'.length));
-        else selectTimezone(key);
+        if (key.startsWith('ship:')) { selectShip(key.slice('ship:'.length)); return; }
+        // The row's own record, so a port row selects the port and a city row
+        // does not answer with the name of its zone.
+        const zone = savedZoneByKey(key)
+          ?? (state.temporaryZone && zoneKey(state.temporaryZone) === key
+                ? state.temporaryZone : null);
+        if (zone) selectSavedZone(zone);
     }
   });
 
@@ -362,13 +373,17 @@ async function startApp() {
   document.addEventListener('gpstimezonefound', (e) => {
     const { tzid } = (e as CustomEvent).detail;
     dom.localTimezoneEl.textContent = getDisplayTimezoneName(tzid);
-    addUniqueTimezoneToList(tzid);
+    // Only if nothing on the list already keeps this zone. The point is that
+    // your own zone is represented, and a row named "Nelson" represents
+    // America/Vancouver perfectly well — adding a bare "Vancouver" beside it
+    // would be the app disagreeing with the name the user chose. This is the
+    // one place that folds by ZONE rather than by place, and it is because the
+    // list is being added to on the user's behalf rather than by them.
+    if (!state.savedZones.some((zone) => zone.tz === tzid)) keepZone({ tz: tzid });
 
     if (state.timezonesFromUrl) {
-      const timezoneToSelect = state.timezonesFromUrl.find(tz => tz !== tzid);
-      if (timezoneToSelect) {
-          selectTimezone(timezoneToSelect);
-      }
+      const toSelect = state.timezonesFromUrl.find((zone) => zone.tz !== tzid);
+      if (toSelect) selectSavedZone(toSelect);
       state.timezonesFromUrl = null;
     }
 

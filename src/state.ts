@@ -1,6 +1,6 @@
 // src/state.ts
 
-import { migrateStoredTimezones, type StoredZone } from './stored-zones';
+import { migrateStoredTimezones, zoneKey, type StoredZone } from './stored-zones';
 export { migrateStoredTimezones, type StoredZone };
 import { syncWidgetTimezones } from './widget';
 import { loadShipRoster, newShipClock, shipKey, type ShipClock, type ShipRef } from './ships';
@@ -26,9 +26,23 @@ export interface AppState {
      * of blanking it until a fresh fix arrives.
      */
     localPlaceName: string | null;
-    addedTimezones: string[];
     /**
-     * Ships on the clock list. Kept apart from `addedTimezones` because a ship
+     * The World Clock list: one record per PLACE, in the order added.
+     *
+     * A LIST, not a set of zones, and that is the whole of the model. Tampa is
+     * a city in the New York timezone; it is not a name for the New York
+     * timezone. While this was `string[]` with a label map beside it, saying
+     * "Tampa" renamed America/New_York on every surface — the row, the map
+     * card, both widgets — and adding New York afterwards silently replaced it.
+     * Tapping a port on the map did the same to whatever zone it stood in,
+     * which is how "Cabo San Lucas" came to be the name of a timezone.
+     *
+     * Identity is zoneKey(): the zone where the row IS the zone, the zone plus
+     * the name where it is a place inside one.
+     */
+    savedZones: StoredZone[];
+    /**
+     * Ships on the clock list. Kept apart from `savedZones` because a ship
      * is not a zone: it carries an offset, a provenance and a freshness that no
      * id string can hold, and mixing them would mean a synthetic zone id parsed
      * by hand on three platforms — the exact thing 1.3.0 removed.
@@ -49,22 +63,6 @@ export interface AppState {
      * they need — all-aboard time.
      */
     aboardShipKey: string | null;
-    /**
-     * Zone id -> the place the user actually picked. Searching "Nelson" stores
-     * America/Vancouver but should keep saying Nelson; without this every clock
-     * is named after whichever city happens to name its zone.
-     */
-    zoneLabels: Record<string, string>;
-    /** Zones added as a ship's port of call, which the row marks with an anchor. */
-    zoneKinds: Record<string, 'port'>;
-    /**
-     * Where a saved port actually is, keyed by its zone.
-     *
-     * Beside zoneLabels and zoneKinds rather than inside them because it
-     * answers a different question — those two say how to WRITE the row, this
-     * says where to DRAW it — and because only ports have one.
-     */
-    zonePlaces: Record<string, { lat: number; lon: number }>;
     /** Handle for the self-rescheduling clock tick; see scheduleNextTick. */
     clocksInterval: number | null;
     locationMap: google.maps.Map | null;
@@ -92,7 +90,15 @@ export interface AppState {
      */
     hoveredShipKey: string | null;
     selectedTzid: string | null;
-    temporaryTimezone: string | null;
+    /**
+     * A place picked on the map but not kept, shown as one extra row with a pin.
+     *
+     * A whole record rather than a zone id, which is what stops a look costing a
+     * rename: showing "Cabo San Lucas" for a moment used to mean WRITING that
+     * name onto its zone, because the row could only be named through the label
+     * map. Now the transient row carries its own name and goes when it goes.
+     */
+    temporaryZone: StoredZone | null;
     gpsTimezoneSelected: boolean;
     /**
      * Ship whose band is highlighted, as a "R/ST" key, or null.
@@ -114,7 +120,7 @@ export interface AppState {
      * dismiss it.
      */
     selectedPort: { tzid: string; name: string; lat: number; lon: number } | null;
-    timezonesFromUrl: string[] | null;
+    timezonesFromUrl: StoredZone[] | null;
 }
 
 function loadStoredTimezones(): StoredZone[] {
@@ -173,15 +179,9 @@ export const state: AppState = {
     gpsTzid: null,
     deviceFix: null,
     localPlaceName: localStorage.getItem('localPlaceName') || null,
-    addedTimezones: stored.map((z) => z.tz),
+    savedZones: stored,
     shipClocks: loadStoredShips(),
     aboardShipKey: localStorage.getItem('aboardShipKey') || null,
-    zoneLabels: Object.fromEntries(
-        stored.flatMap((z) => (z.label ? [[z.tz, z.label]] : []))),
-    zoneKinds: Object.fromEntries(
-        stored.flatMap((z) => (z.kind ? [[z.tz, z.kind]] : []))),
-    zonePlaces: Object.fromEntries(
-        stored.flatMap((z) => (z.at ? [[z.tz, z.at]] : []))),
     clocksInterval: null,
     locationMap: null,
     timezoneMap: null,
@@ -197,7 +197,7 @@ export const state: AppState = {
     hoveredTzid: null,
     hoveredShipKey: null,
     selectedTzid: null,
-    temporaryTimezone: null,
+    temporaryZone: null,
     gpsTimezoneSelected: false,
     selectedShipKey: null,
     selectedPort: null,
@@ -214,9 +214,7 @@ export const state: AppState = {
  */
 export function syncWidget(): void {
     syncWidgetTimezones({
-        timezones: state.addedTimezones,
-        labels: state.zoneLabels,
-        kinds: state.zoneKinds,
+        zones: state.savedZones,
         localTimezone: state.localTimezone,
         localPlaceName: state.localPlaceName,
         ships: state.shipClocks,
@@ -224,34 +222,26 @@ export function syncWidget(): void {
     });
 }
 
-// Single write path for the saved timezone list: updates state, persists to
-// localStorage, and mirrors the list to the native home-screen widgets.
-export function persistTimezones(timezones: string[]): void {
-    state.addedTimezones = timezones;
-
-    // Drop labels for zones no longer on the list, so removing and re-adding a
-    // zone doesn't resurrect an old name.
-    for (const tz of Object.keys(state.zoneLabels)) {
-        if (!timezones.includes(tz)) delete state.zoneLabels[tz];
-    }
-    for (const tz of Object.keys(state.zoneKinds)) {
-        if (!timezones.includes(tz)) delete state.zoneKinds[tz];
-    }
-    for (const tz of Object.keys(state.zonePlaces)) {
-        if (!timezones.includes(tz)) delete state.zonePlaces[tz];
-    }
-
-    // Built field by field to match migrateStoredTimezones on the way back in.
-    // A zone dropped from the list loses its name and its kind with it, so
-    // removing and re-adding it does not resurrect either.
-    const payload: StoredZone[] = timezones.map((tz) => {
-        const zone: StoredZone = { tz };
-        if (state.zoneLabels[tz]) zone.label = state.zoneLabels[tz];
-        if (state.zoneKinds[tz]) zone.kind = state.zoneKinds[tz];
-        if (state.zonePlaces[tz]) zone.at = state.zonePlaces[tz];
-        return zone;
-    });
-    localStorage.setItem('worldClocks', JSON.stringify(payload));
+/**
+ * Single write path for the saved list: state, localStorage, and the widgets.
+ *
+ * Takes the whole list rather than editing one entry, because every caller
+ * already has the list in hand and the alternative — an add, a rename and a
+ * remove, each remembering to persist and to sync — is how the label map ended
+ * up being written from four places and read from six.
+ */
+export function persistZones(zones: StoredZone[]): void {
+    state.savedZones = zones;
+    // Rebuilt field by field to match migrateStoredTimezones on the way back
+    // in, so a corrupt or hostile store cannot smuggle a field through and a
+    // new field cannot be forgotten silently on one side.
+    localStorage.setItem('worldClocks', JSON.stringify(zones.map((zone) => {
+        const out: StoredZone = { tz: zone.tz };
+        if (zone.label) out.label = zone.label;
+        if (zone.kind) out.kind = zone.kind;
+        if (zone.at) out.at = zone.at;
+        return out;
+    })));
 
     syncWidget();
 }
@@ -287,7 +277,7 @@ export async function loadDebugFleet(): Promise<boolean> {
     return true;
 }
 
-/** Single write path for the ship list. Mirrors persistTimezones. */
+/** Single write path for the ship list. Mirrors persistZones. */
 export function persistShipClocks(ships: ShipClock[]): void {
     state.shipClocks = ships;
     localStorage.setItem('shipClocks', JSON.stringify(ships));
@@ -412,25 +402,19 @@ export function setLocalPlaceName(name: string | null): void {
 }
 
 /**
- * Records that a zone was added as a port of call, or that it was not.
+ * Adds a place to the list, or returns it unchanged if it is already there.
  *
- * Always called on add, including with undefined, so that adding Athens as an
- * ordinary city after adding it as a port clears the anchor rather than leaving
- * a mark the row can no longer explain.
+ * Replaces three setters — label, kind and coordinates, each keyed by zone and
+ * each able to overwrite a place the user had already saved. There is nothing
+ * to overwrite now: a place is added or it is not.
  */
-export function setZoneKind(tzid: string, kind: 'port' | undefined): void {
-    if (kind) state.zoneKinds[tzid] = kind;
-    else delete state.zoneKinds[tzid];
+export function addSavedZone(zone: StoredZone): StoredZone[] {
+    const key = zoneKey(zone);
+    if (state.savedZones.some((saved) => zoneKey(saved) === key)) return state.savedZones;
+    return [...state.savedZones, zone];
 }
 
-/** Records where a saved port stands, so the map can draw it (see zonePlaces). */
-export function setZonePlace(tzid: string, at: { lat: number; lon: number } | undefined): void {
-    if (at) state.zonePlaces[tzid] = at;
-    else delete state.zonePlaces[tzid];
-}
-
-/** Records the name the user picked for a zone (see AppState.zoneLabels). */
-export function setZoneLabel(tzid: string, label: string | undefined): void {
-    if (label && label !== tzid) state.zoneLabels[tzid] = label;
-    else delete state.zoneLabels[tzid];
+/** The saved place with this key, or undefined. */
+export function savedZoneByKey(key: string): StoredZone | undefined {
+    return state.savedZones.find((zone) => zoneKey(zone) === key);
 }

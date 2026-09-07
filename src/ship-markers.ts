@@ -821,19 +821,17 @@ function portPins(): PortPin[] {
   // own — no day, no times — so it says only its name, which is the whole of
   // what a row on the World Clock knows about it.
   //
-  // Kept means on the list, not merely visited. selectPort records a port's
-  // name, kind and position the moment it is picked, because the temporary row
-  // needs all three to render and the pin needs them to survive being pressed —
-  // so reading zonePlaces alone drew every port anyone had ever tapped, for the
-  // rest of the session, with nothing left on screen to explain them.
-  for (const tzid of state.addedTimezones) {
-    const at = state.zonePlaces[tzid];
-    if (!at || state.zoneKinds[tzid] !== 'port') continue;
+  // Kept means on the list. A port only looked at rides on state.temporaryZone
+  // and is drawn by the chart if it belongs to the cruise on screen; it does
+  // not get a pin of its own that outlives the look.
+  for (const zone of state.savedZones) {
+    const at = zone.at;
+    if (!at || zone.kind !== 'port') continue;
     const key = pinKey(at.lat, at.lon);
     if (pins.has(key)) continue;
     pins.set(key, {
       key,
-      name: state.zoneLabels[tzid] ?? tzid,
+      name: zone.label ?? zone.tz,
       lat: at.lat,
       lon: at.lon,
       note: '',

@@ -431,21 +431,33 @@ public class GeoTimeWidgetProvider extends AppWidgetProvider {
 
         // Indexed, because `labels` is parallel to `stored` — skipping an entry
         // must not shift the rest of the names by one.
-        Set<String> seenIds = new HashSet<>();
-        seenIds.add(baseId);
-        // The device zone too. The SAME zone must never appear twice, and until
+        //
+        // Deduped by PLACE, not by zone. The app's list is one record per place
+        // and two of them may share a zone: Tampa is a city in the New York
+        // timezone, not a name for it. Keyed by zone alone, the second of them
+        // was dropped here — silently, and only on Android, since iOS never
+        // deduped at all. A name is part of the identity for exactly as long as
+        // the app says it is.
+        Set<String> seenPlaces = new HashSet<>();
+        seenPlaces.add(placeKey(baseId, null));
+        // The device zone too. The same PLACE must never appear twice, and until
         // now the offset rule hid that case by accident: saving Vancouver while
         // the phone is on Vancouver was dropped for sharing an offset, not for
         // being the same place. Now that a shared offset is allowed, identity has
         // to say so itself. Two DIFFERENT zones agreeing today still both show.
         if (deviceOffset != anchorOffset && deviceOffset != geographicOffset) {
-            seenIds.add(osTz.getID());
+            seenPlaces.add(placeKey(osTz.getID(), null));
         }
         for (int i = 0; i < stored.size(); i++) {
             String id = stored.get(i);
-            if (id.isEmpty() || id.equals(baseId)) continue;
+            if (id.isEmpty()) continue;
+            String named = (i < labels.size() && !labels.get(i).isEmpty()) ? labels.get(i) : null;
+            // The unnamed row for the ground zone is the ground card's own; a
+            // NAMED place there is a different thing and keeps its row.
+            if (named == null && id.equals(baseId)) continue;
             Resolved rz = resolveTimeZone(id);
-            if (seenIds.contains(rz.tzId)) continue;
+            String place = placeKey(rz.tzId, named);
+            if (seenPlaces.contains(place)) continue;
             long off = rz.tz.getOffset(now) / 60000L;
             // Duplicates are kept and flagged rather than dropped here. Dropping
             // was unconditional, so a zone vanished from the widget even with
@@ -453,10 +465,10 @@ public class GeoTimeWidgetProvider extends AppWidgetProvider {
             // decided anything, which meant two-line rows were chosen "because
             // everything fits" only after something had already been thrown away.
             boolean dup = claimedOffsets.contains(off);
-            seenIds.add(rz.tzId);
+            seenPlaces.add(place);
             claimedOffsets.add(off);
             boolean differs = dayDiffers(rz.tz, anchorTz, now);
-            String chosen = (i < labels.size() && !labels.get(i).isEmpty()) ? labels.get(i) : null;
+            String chosen = named;
             Row row = new Row(chosen != null ? chosen : cityLabel(id), null, rz.tzId, off,
                     false, false, false, false,
                     differs ? formatDay(rz.tz, now, false) : null,
@@ -620,6 +632,22 @@ public class GeoTimeWidgetProvider extends AppWidgetProvider {
     // Only ever called for rows that are NOT the local one — the local row sets
     // its own text — so a zero difference means "a different place that happens
     // to read the same right now", not "here".
+    /**
+     * Identity for one saved row: its zone, and the name the user gave it.
+     *
+     * Mirrors zoneKey() in the app's stored-zones.ts, and has to keep mirroring
+     * it — the two are what decide whether Tampa and New York are one row or
+     * two, on two surfaces that must agree. Folded to lower case for the same
+     * reason: a name differing only in case is the same place typed twice.
+     */
+    private static String placeKey(String tzId, String label) {
+        if (label == null || label.trim().isEmpty()) return tzId;
+        String folded = java.text.Normalizer.normalize(label.trim(), java.text.Normalizer.Form.NFD)
+                .replaceAll("\\p{InCombiningDiacriticalMarks}+", "")
+                .toLowerCase(java.util.Locale.ROOT);
+        return tzId + "|" + folded;
+    }
+
     private static String relativeOffset(long zoneOffsetMin, long deviceOffsetMin) {
         long diff = zoneOffsetMin - deviceOffsetMin;
         if (diff == 0) return "+0 hrs";

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { migrateStoredTimezones } from './stored-zones';
+import { migrateStoredTimezones, zoneKey } from './stored-zones';
 
 test('the stored clock list survives a round trip', async (t) => {
   await t.test('a bare id from an old build still loads', () => {
@@ -36,14 +36,54 @@ test('the stored clock list survives a round trip', async (t) => {
       [{ tz: 'Europe/Athens' }]);
   });
 
-  await t.test('duplicates collapse, first one winning', () => {
+  await t.test('the same PLACE twice collapses, first one winning', () => {
     assert.deepEqual(
-      migrateStoredTimezones([{ tz: 'Europe/Athens', label: 'A' }, { tz: 'Europe/Athens', label: 'B' }]),
+      migrateStoredTimezones([{ tz: 'Europe/Athens', label: 'A' }, { tz: 'Europe/Athens', label: 'A' }]),
       [{ tz: 'Europe/Athens', label: 'A' }]);
+  });
+
+  await t.test('two places in one zone are two rows', () => {
+    // The whole point. Tampa is a city in the New York timezone; it is not a
+    // name for the New York timezone, and saying so used to overwrite it.
+    assert.deepEqual(
+      migrateStoredTimezones([
+        { tz: 'America/New_York', label: 'Tampa' },
+        { tz: 'America/New_York' },
+      ]),
+      [{ tz: 'America/New_York', label: 'Tampa' }, { tz: 'America/New_York' }]);
+  });
+
+  await t.test('a bare zone twice is still one row', () => {
+    assert.deepEqual(
+      migrateStoredTimezones(['Europe/Athens', 'Europe/Athens']), [{ tz: 'Europe/Athens' }]);
   });
 
   await t.test('junk is not an error', () => {
     assert.deepEqual(migrateStoredTimezones(null), []);
     assert.deepEqual(migrateStoredTimezones([null, 42, '']), []);
+  });
+});
+
+test('a saved place is identified by the place', async (t) => {
+  await t.test('a bare zone is keyed by its id alone', () => {
+    assert.equal(zoneKey({ tz: 'America/New_York' }), 'America/New_York');
+  });
+
+  await t.test('a place inside a zone carries its name', () => {
+    assert.equal(zoneKey({ tz: 'America/New_York', label: 'Tampa' }), 'America/New_York|tampa');
+  });
+
+  await t.test('the same name typed differently is the same place', () => {
+    assert.equal(
+      zoneKey({ tz: 'Atlantic/Reykjavik', label: 'Reykjavík' }),
+      zoneKey({ tz: 'Atlantic/Reykjavik', label: 'REYKJAVIK' }));
+  });
+
+  await t.test('a port and a city of one name in one zone are one row', () => {
+    // Not a case anybody has, and keying on coordinates instead would make a
+    // row's identity move if upstream nudged a berth by a metre.
+    assert.equal(
+      zoneKey({ tz: 'America/Nassau', label: 'Nassau', kind: 'port' }),
+      zoneKey({ tz: 'America/Nassau', label: 'Nassau' }));
   });
 });

@@ -444,3 +444,52 @@ final class ZoneRowResolverProperties: XCTestCase {
 // after the swap, `testTheAnchorsOwnOffsetIsTheBaseline` proves the whole list
 // re-based together, and `testTheAnchorAlwaysNamesItself` proves the label that
 // makes the re-basing legible did not go missing.
+
+/// Two places in one timezone.
+///
+/// Tampa is a city in the New York timezone; it is not a name for the New York
+/// timezone. The app's list is one record per PLACE and two of them may share a
+/// zone, so the widget has to carry both — and has to give them different
+/// identities, because `id` is what ForEach lists them by.
+final class TwoPlacesOneZoneTests: XCTestCase {
+    private func resolve(_ ids: [String], _ labels: [String]) -> [WidgetRow] {
+        ZoneRowResolver.resolve(
+            storedIds: ids,
+            local: Fixture.vancouver,
+            deviceTz: Fixture.vancouver,
+            now: Fixture.now,
+            labels: labels
+        )
+    }
+
+    func testBothPlacesKeepARow() {
+        let rows = resolve(["America/New_York", "America/New_York"], ["Tampa", ""])
+        let names = rows.map(\.name)
+        XCTAssertTrue(names.contains("Tampa"), "named place dropped: \(names)")
+        XCTAssertTrue(names.contains("New York"), "bare zone dropped: \(names)")
+    }
+
+    func testTheirIdentitiesDiffer() {
+        // Same id between them and SwiftUI drops one without saying so.
+        let rows = resolve(["America/New_York", "America/New_York"], ["Tampa", ""])
+        XCTAssertEqual(Set(rows.map(\.id)).count, rows.count, "duplicate row id")
+    }
+
+    func testTheSamePlaceTwiceIsOneRow() {
+        let rows = resolve(["America/New_York", "America/New_York"], ["Tampa", "Tampa"])
+        XCTAssertEqual(rows.filter { $0.name == "Tampa" }.count, 1)
+    }
+
+    func testANameDifferingOnlyInCaseIsTheSamePlace() {
+        let rows = resolve(["Atlantic/Reykjavik", "Atlantic/Reykjavik"], ["Reykjavík", "REYKJAVIK"])
+        XCTAssertEqual(rows.filter { $0.name.lowercased().hasPrefix("reyk") }.count, 1)
+    }
+
+    func testANamedPlaceInTheGroUndZoneSurvives() {
+        // The unnamed row for the ground zone is the ground card's own and drops
+        // out; a named place there is a different thing and keeps its row.
+        let rows = resolve(["America/Vancouver", "America/Vancouver"], ["Nelson", ""])
+        XCTAssertTrue(rows.contains { $0.name == "Nelson" && !$0.isLocal })
+        XCTAssertEqual(rows.filter { $0.isLocal }.count, 1)
+    }
+}

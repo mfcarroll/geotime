@@ -17,20 +17,6 @@ import { lookupOrder } from './zone-order';
 export { getDisplayTimezoneName, isValidTimezone } from './utils';
 
 /**
- * The name for a clock the user added: the place they picked if there is one
- * (searching "Mumbai" keeps saying Mumbai, not Kolkata), else the zone's own
- * name.
- *
- * Scope matters. Labels belong to rows in the World Clock list. Anything
- * describing *where you are* or *which zone is on the map* uses
- * getDisplayTimezoneName instead — otherwise labelling a clock "Nelson" renames
- * the Local Time card too, and the app claims you're somewhere you aren't.
- */
-export function getZoneLabel(tz: string): string {
-    return state.zoneLabels[tz] ?? getDisplayTimezoneName(tz);
-}
-
-/**
  * Current UTC offset in hours (may be fractional: +5.75 for Kathmandu).
  *
  * Asks Intl for the offset directly rather than formatting a date and re-parsing
@@ -307,10 +293,11 @@ export function updateAllClocks() {
       dayFull = fixedOffsetWeekday(offset, 'long', correctedTime);
       timeDiff = relativeTextForShip(entry.ship as { brand: string; code: string; offsetHours: number });
     } else {
-      timeString = getFormattedTime(entry.tzid, { hour: 'numeric', minute: '2-digit' }, correctedTime);
-      dayShort = correctedTime.toLocaleDateString('en-US', { timeZone: entry.tzid, weekday: 'short' });
-      dayFull = correctedTime.toLocaleDateString('en-US', { timeZone: entry.tzid, weekday: 'long' });
-      timeDiff = relativeTextForZone(entry.tzid);
+      const tz = entry.zone.tz;
+      timeString = getFormattedTime(tz, { hour: 'numeric', minute: '2-digit' }, correctedTime);
+      dayShort = correctedTime.toLocaleDateString('en-US', { timeZone: tz, weekday: 'short' });
+      dayFull = correctedTime.toLocaleDateString('en-US', { timeZone: tz, weekday: 'long' });
+      timeDiff = relativeTextForZone(tz);
     }
 
     el.querySelector('.time')!.textContent = timeString;

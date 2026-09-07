@@ -599,5 +599,19 @@ export function nearestPlace(
 /** A raw IANA id typed in full, for anything the index misses. */
 export function zoneFromRawInput(query: string): ZonePlace | null {
   const trimmed = query.trim();
-  return trimmed.includes('/') && isValidTimezone(trimmed) ? zoneResult(trimmed) : null;
+  if (!trimmed.includes('/') || !isValidTimezone(trimmed)) return null;
+  // Canonicalised, because zone ids are case-insensitive to Intl and to nobody
+  // else. Typing "america/new_york" used to store exactly that: a row reading
+  // "new york", and — now that the list is keyed by place — a second row beside
+  // the "America/New_York" the user already had.
+  return zoneResult(canonicalZone(trimmed));
+}
+
+/** "america/new_york" -> "America/New_York". The id as tzdb spells it. */
+function canonicalZone(tz: string): string {
+  try {
+    return new Intl.DateTimeFormat('en-US', { timeZone: tz }).resolvedOptions().timeZone ?? tz;
+  } catch {
+    return tz;
+  }
 }

@@ -7,6 +7,7 @@
 
 import { Capacitor, registerPlugin, type PluginListenerHandle } from '@capacitor/core';
 import type { ShipClock } from './ships';
+import type { StoredZone } from './stored-zones';
 
 /**
  * A ship as the widget needs it.
@@ -81,10 +82,14 @@ export interface WidgetBridgePlugin {
 const WidgetBridge = registerPlugin<WidgetBridgePlugin>('WidgetBridge');
 
 export interface SyncOptions {
-  timezones: string[];
-  labels: Record<string, string>;
-  /** Which saved zones were added as a ship's port of call. Keyed like `labels`. */
-  kinds: Record<string, 'port'>;
+  /**
+   * The saved list, in order, one record per PLACE.
+   *
+   * Two of them may share a zone — Tampa and New York both keep America/
+   * New_York — so this is a list rather than a set, and the three arrays sent
+   * below stay index-parallel for the same reason they always were.
+   */
+  zones: StoredZone[];
   localTimezone: string | null;
   localPlaceName: string | null;
   ships: ShipClock[];
@@ -98,25 +103,22 @@ export interface SyncOptions {
 // "Vancouver". The widget can't work this out itself: the city index is a 1.8 MB
 // JSON the app parses, so the app resolves the name and hands over the result.
 export function syncWidgetTimezones({
-  timezones,
-  labels,
-  kinds,
+  zones,
   localTimezone,
   localPlaceName,
   ships,
   aboardShipKey,
 }: SyncOptions): void {
   if (!Capacitor.isNativePlatform()) return;
-  // Sent as an array parallel to `timezones` rather than a map, because the
-  // native side stores JSON arrays already and an empty string is an easy
-  // "no label" that older stores degrade to naturally.
+  // Three arrays rather than a list of records, because the native side stores
+  // JSON arrays already and an empty string is an easy "no label" that older
+  // stores degrade to naturally. Index-parallel, which is what lets the same
+  // zone appear twice under two names — and what makes dropping an entry on
+  // either side shift every name after it by one.
   WidgetBridge.setTimezones({
-    timezones: [...timezones],
-    labels: timezones.map((tz) => labels[tz] ?? ''),
-    // Parallel to `timezones` for the same reason as `labels`: the native side
-    // stores JSON arrays, and an empty string is a "no kind" that an older store
-    // degrades to on its own.
-    kinds: timezones.map((tz) => kinds[tz] ?? ''),
+    timezones: zones.map((zone) => zone.tz),
+    labels: zones.map((zone) => zone.label ?? ''),
+    kinds: zones.map((zone) => zone.kind ?? ''),
     localTimezone,
     localPlaceName,
     aboardShipKey,

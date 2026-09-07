@@ -1,5 +1,23 @@
 import Foundation
 
+extension WidgetRow {
+    /// Identity for one saved row: its zone, and the name the user gave it.
+    ///
+    /// Mirrors `zoneKey()` in the app's stored-zones.ts and `placeKey()` in the
+    /// Android provider, and has to keep mirroring them — the three are what
+    /// decide whether Tampa and New York are one row or two, on three surfaces
+    /// that must agree. Folded, because a name differing only in case or accent
+    /// is the same place typed twice.
+    static func placeKey(_ tzId: String, _ label: String?) -> String {
+        guard let label, !label.trimmingCharacters(in: .whitespaces).isEmpty else { return tzId }
+        let folded = label
+            .trimmingCharacters(in: .whitespaces)
+            .folding(options: [.diacriticInsensitive, .caseInsensitive],
+                     locale: Locale(identifier: "en_US_POSIX"))
+        return "\(tzId)|\(folded)"
+    }
+}
+
 struct WidgetRow: Identifiable {
     let id: String
     let name: String
@@ -188,19 +206,36 @@ enum ZoneRowResolver {
         // dropped for sharing an offset, not for being the same place. Now that a
         // shared offset is allowed, identity has to say so itself. Two DIFFERENT
         // zones agreeing today still both show.
+        //
+        // A NAMED place is exempt from both skips. The app's list is one record
+        // per place and two of them may share a zone — Tampa is a city in the
+        // New York timezone, not a name for it — so an unnamed row for the
+        // ground zone is the ground card's own and drops out, while Tampa in the
+        // same zone is a different thing and keeps its row.
         let deviceShown = deviceOffset != anchorOffset && deviceOffset != geographicOffset
+        // Deduped by place, which the app already does on its own side — this is
+        // the widget refusing to render a store that has been left in a state
+        // the app would not have written, and it is what keeps the two platforms
+        // agreeing: Android has always deduped here and this never did.
+        var seenPlaces = Set<String>()
         for (index, id) in storedIds.enumerated() {
-            if id == local.identifier { continue }
-            if deviceShown && id == deviceTz.identifier { continue }
+            let chosen = index < labels.count && !labels[index].isEmpty ? labels[index] : nil
+            if chosen == nil && id == local.identifier { continue }
+            if chosen == nil && deviceShown && id == deviceTz.identifier { continue }
             guard let info = TimezoneDisplay.resolveZone(id) else { continue }
+            let place = WidgetRow.placeKey(info.timeZone.identifier, chosen)
+            if seenPlaces.contains(place) { continue }
+            seenPlaces.insert(place)
             let off = info.timeZone.secondsFromGMT(for: now)
             let dup = claimedOffsets.contains(off)
             claimedOffsets.insert(off)
-            let chosen = index < labels.count && !labels[index].isEmpty ? labels[index] : nil
             let parts = TimezoneDisplay.timeParts(info.timeZone, at: now)
             let differs = TimezoneDisplay.dayDiffers(info.timeZone, anchorTz, at: now)
             rows.append(WidgetRow(
-                id: id,
+                // The PLACE, not the zone: this is what ForEach identifies rows
+                // by, and two places sharing a zone with one id between them is
+                // a list that drops one of them without saying so.
+                id: place,
                 name: chosen ?? info.displayName,
                 shortName: nil,
                 isLocal: false,

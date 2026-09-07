@@ -3,7 +3,7 @@
 // The ship roster, and the clock records built from it.
 //
 // A ship is deliberately NOT modelled as a timezone id. The 1.3.0 restructure
-// existed to establish one invariant — every entry in `addedTimezones` is a real
+// existed to establish one invariant — every entry in `savedZones` is a real
 // IANA zone, with no hand-written offset parser between the id and the platform
 // — and a synthetic `ship:R/ST` id would walk straight back into the
 // `Etc/GMT±N.N` trap it removed (Intl throws, Swift returns nil, Java silently
