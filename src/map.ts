@@ -546,7 +546,21 @@ export function selectPort(detail: PortMarkerDetail): void {
     if (deselecting) {
         state.selectedPort = null;
         state.temporaryTimezone = null;
-        updateShipCard(selectedShip());
+        // The card goes back to whatever it was showing before the port took
+        // it, destination line and all — updateShipCard clears that line on its
+        // way past, so it has to be put back the way selectShip puts it there.
+        const ship = selectedShip();
+        updateShipCard(ship);
+        if (ship) {
+            const key = shipKey(ship);
+            void voyageForShip(key)
+                .then((resolved) => {
+                    if (state.selectedShipKey === key && !state.selectedPort) {
+                        setShipVoyageLine(resolved, key);
+                    }
+                })
+                .catch(() => {});
+        }
         paintHoverCard();
         refreshMapStyles();
         refreshPortMarkers();
@@ -1540,8 +1554,13 @@ function createClockElement(entry: ClockEntry): HTMLElement {
 
     clockDiv.classList.remove('border-transparent', 'border-blue-500', 'border-yellow-500');
 
-    const isSelectedShip =
-        entry.kind === 'ship' && shipKey(entry.ship) === state.selectedShipKey;
+    // A ship whose port is the actual selection is CONTEXT, not the pick — the
+    // same standing as a zone that merely shares the selected offset, which
+    // gets no border either. Her band and hull stay as they are on the map,
+    // where they are saying something the list has no way to say.
+    const isSelectedShip = entry.kind === 'ship'
+        && shipKey(entry.ship) === state.selectedShipKey
+        && !state.selectedPort;
 
     if (tzid && tzid === state.gpsTzid && state.gpsTimezoneSelected) {
         clockDiv.classList.add('border-yellow-500');

@@ -272,17 +272,19 @@ export function persistTimezones(timezones: string[]): void {
  * before the key lands leaves the roster permanently empty for this page —
  * which is what the first version of this did, silently.
  */
-export async function loadDebugFleet(): Promise<void> {
-    if (!debugFlag('ships')) return;
+export async function loadDebugFleet(): Promise<boolean> {
+    if (!debugFlag('ships')) return false;
     const roster = await loadShipRoster();
     const have = new Set(state.shipClocks.map(shipKey));
     const added = roster.filter((ship) => !have.has(shipKey(ship))).map((ship) => newShipClock(ship));
-    if (added.length === 0) return;
+    if (added.length === 0) return false;
 
     // One write rather than one per ship: addShipClock would persist and
     // announce forty-four times over.
     persistShipClocks([...state.shipClocks, ...added]);
     announceShipClocks();
+    // Whether the caller now has ships that have never been asked the time.
+    return true;
 }
 
 /** Single write path for the ship list. Mirrors persistTimezones. */

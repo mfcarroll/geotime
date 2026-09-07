@@ -772,11 +772,18 @@ function portPins(): PortPin[] {
     });
   }
 
-  // A saved port the chart has not already drawn. It carries no itinerary of
-  // its own — no day, no times — so it says only its name, which is the whole
-  // of what a row on the World Clock knows about it.
-  for (const [tzid, at] of Object.entries(state.zonePlaces)) {
-    if (state.zoneKinds[tzid] !== 'port') continue;
+  // A KEPT port the chart has not already drawn. It carries no itinerary of its
+  // own — no day, no times — so it says only its name, which is the whole of
+  // what a row on the World Clock knows about it.
+  //
+  // Kept means on the list, not merely visited. selectPort records a port's
+  // name, kind and position the moment it is picked, because the temporary row
+  // needs all three to render and the pin needs them to survive being pressed —
+  // so reading zonePlaces alone drew every port anyone had ever tapped, for the
+  // rest of the session, with nothing left on screen to explain them.
+  for (const tzid of state.addedTimezones) {
+    const at = state.zonePlaces[tzid];
+    if (!at || state.zoneKinds[tzid] !== 'port') continue;
     const key = pinKey(at.lat, at.lon);
     if (pins.has(key)) continue;
     pins.set(key, {

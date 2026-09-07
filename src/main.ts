@@ -108,7 +108,16 @@ async function startApp() {
     // empty until the app key resolves — loadShipRoster memoises the empty
     // answer if it is asked first, which is exactly what a call up in the
     // startup block did.
-    void loadDebugFleet();
+    //
+    // Then asked the time, because the pass above has already gone out with
+    // whatever list existed a moment ago. Every other way a ship joins the list
+    // resolves right after — the search box does it below, and boarding does it
+    // from inside the pass itself — so this was the one door with nobody behind
+    // it, and forty-four ships sat blank until the watch's next tick or a
+    // reload.
+    void loadDebugFleet().then((added) => {
+      if (added) void resolveAllShipClocks();
+    });
   });
   installDiagnostics(dom.deviceTimezoneEl);
 
