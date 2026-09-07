@@ -91,3 +91,64 @@ export function debugFlag(name: string): boolean {
     const raw = new URLSearchParams(window.location.search).get('debug') ?? '';
     return raw.split(',').some((flag) => flag.trim().toLowerCase() === name);
 }
+
+/**
+ * The same colour with the light turned up — hover, in the hue the thing
+ * already is.
+ *
+ * White was the first answer and it was wrong for half the cases. A port ring
+ * carries a MEANING in its colour: gold says this call keeps the ship's time,
+ * pale says it does not. Painting hover white overwrites the answer with the
+ * question, and the gold rings visibly changed category under the pointer
+ * rather than merely lighting up. Zones do not do this — a hovered zone keeps
+ * its band and gains an outline — so neither should these.
+ *
+ * Lightness only, in HSL, so hue and saturation survive: gold goes to a paler
+ * gold, green to a paler green, and the transition is the same size in each.
+ *
+ * The clamp is for colours that are already nearly white. #E8EEF4 is 93%
+ * light, so a proportional lift moves it three points and nothing visibly
+ * happens; white is the brighter version of near-white, and only there.
+ */
+export function brighter(hex: string, lift = 0.45): string {
+    const rgb = hexToRgb(hex);
+    if (!rgb) return '#FFFFFF';
+    const [h, s, l] = rgbToHsl(rgb);
+    const lifted = l + (100 - l) * lift;
+    if (lifted - l < 6) return '#FFFFFF';
+    return hslToHex(h, s, lifted);
+}
+
+function hexToRgb(hex: string): [number, number, number] | null {
+    const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
+    if (!m) return null;
+    const n = parseInt(m[1], 16);
+    return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+
+function rgbToHsl([r, g, b]: [number, number, number]): [number, number, number] {
+    const [rr, gg, bb] = [r / 255, g / 255, b / 255];
+    const max = Math.max(rr, gg, bb), min = Math.min(rr, gg, bb);
+    const l = (max + min) / 2;
+    if (max === min) return [0, 0, l * 100];
+    const d = max - min;
+    const s = d / (l > 0.5 ? 2 - max - min : max + min);
+    const h = max === rr ? ((gg - bb) / d + (gg < bb ? 6 : 0))
+        : max === gg ? (bb - rr) / d + 2
+        : (rr - gg) / d + 4;
+    return [h * 60, s * 100, l * 100];
+}
+
+function hslToHex(h: number, s: number, l: number): string {
+    const sat = s / 100, light = l / 100;
+    const c = (1 - Math.abs(2 * light - 1)) * sat;
+    const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+    const m = light - c / 2;
+    const sextant = Math.floor(((h % 360) + 360) % 360 / 60);
+    const [r, g, b] = [
+        [c, x, 0], [x, c, 0], [0, c, x], [0, x, c], [x, 0, c], [c, 0, x],
+    ][sextant];
+    const byte = (v: number) =>
+        Math.round((v + m) * 255).toString(16).padStart(2, '0');
+    return `#${byte(r)}${byte(g)}${byte(b)}`.toUpperCase();
+}

@@ -549,8 +549,38 @@ export function timezoneForCoordinates(lat: number, lon: number): string {
  * data has loaded — the lookup itself covers the globe.
  */
 export function utcOffsetForCoordinates(lat: number, lon: number): number | null {
-  const tz = findTimezoneFromGeoJSON(lat, lon);
+  const tz = zoneForCoordinates(lat, lon);
   return tz ? getUtcOffset(tz) : null;
+}
+
+/**
+ * findTimezoneFromGeoJSON with a memo, because the callers repeat themselves.
+ *
+ * The lookup walks polygons until one contains the point, and the chart asks it
+ * for the same handful of ports on every redraw while the card row asks it for
+ * every ship on the list on every tick. Same question, same answer, several
+ * hundred polygon tests each time.
+ *
+ * Keyed on the dataset object as well as the point, so a reload replaces the
+ * memo along with the data and nothing has to remember to clear it — the same
+ * trick the feature ordering above uses.
+ */
+let zoneMemoFrom: unknown = null;
+let zoneMemo = new Map<string, string | null>();
+
+export function zoneForCoordinates(lat: number, lon: number): string | null {
+  if (zoneMemoFrom !== state.geoJsonData) {
+    zoneMemoFrom = state.geoJsonData;
+    zoneMemo = new Map();
+  }
+  // Four decimals is about 11 m, which is finer than any coordinate we are
+  // given and far finer than any zone boundary.
+  const key = `${lat.toFixed(4)},${lon.toFixed(4)}`;
+  const hit = zoneMemo.get(key);
+  if (hit !== undefined) return hit;
+  const tz = findTimezoneFromGeoJSON(lat, lon);
+  zoneMemo.set(key, tz);
+  return tz;
 }
 
 /** Nautical time: 15° bands, POSIX-inverted (Etc/GMT-1 is UTC+1). */

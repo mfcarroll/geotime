@@ -250,16 +250,110 @@ function decodeEntities(text: string): string {
  */
 function portNamesByPoi(itinerary: unknown): Map<string, string> {
   const names = new Map<string, string>();
-  if (!itinerary || typeof itinerary !== 'object') return names;
-
-  for (const stop of Object.values(itinerary as Record<string, any>)) {
-    const html = typeof stop?.port === 'string' ? stop.port : '';
-    const match = html.match(/<a[^>]*href="[^"]*?-(\d+)\/?"[^>]*>([^<]+)<\/a>/);
-    if (!match) continue;
-    const name = decodeEntities(match[2]);
-    if (name) names.set(match[1], name);
+  for (const stop of itineraryStops(itinerary)) {
+    if (stop.name) names.set(stop.poi, stop.name);
   }
   return names;
+}
+
+/** One row of the itinerary block, parsed out of its markup. */
+interface ItineraryStop {
+  poi: string;
+  name: string | null;
+  /** "08 Sep" — day and month, never a year. */
+  date: string | null;
+  /** "08:00", or null where the row states only a departure. */
+  arrive: string | null;
+  /** "18:00", or null on the final call, where nobody leaves again. */
+  depart: string | null;
+}
+
+const MONTHS3 = [
+  'jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec',
+];
+
+/**
+ * The itinerary block, row by row.
+ *
+ * ARRIVAL TIMES LIVE ONLY HERE. `path.ports` carries `dep_datetime` and nothing
+ * else, so for as long as this block went unread past the names, the app could
+ * say when a ship leaves a port and never when she gets there — which is the
+ * half a passenger looking at a future call actually wants.
+ *
+ * The date cell is one of three shapes, and which one it is says what the time
+ * means:
+ *
+ *   "05 Sep 16:00"           first row: embarkation. A departure.
+ *   "08 Sep 08:00 - 18:00"   a call. Arrival, then departure, same calendar day.
+ *   "13 Sep 06:00"           last row: disembarkation. An arrival.
+ *
+ * Checked against every vessel in the fleet: the range form never spans
+ * midnight and never carries a second date, so the two times share the row's
+ * date. A shape not listed above yields nulls rather than a guess — the same
+ * way an unparsed name yields null and lets the client name the port itself.
+ */
+function itineraryStops(itinerary: unknown): ItineraryStop[] {
+  if (!itinerary || typeof itinerary !== 'object') return [];
+
+  const rows = Object.entries(itinerary as Record<string, any>)
+    .sort((a, b) => Number(a[0]) - Number(b[0]))
+    .map(([, stop]) => stop);
+
+  const stops: ItineraryStop[] = [];
+  rows.forEach((stop, index) => {
+    const portHtml = typeof stop?.port === 'string' ? stop.port : '';
+    const match = portHtml.match(/<a[^>]*href="[^"]*?-(\d+)\/?"[^>]*>([^<]+)<\/a>/);
+    if (!match) return;
+
+    const text = typeof stop?.date === 'string'
+      ? stop.date.replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim()
+      : '';
+    const range = text.match(/^(\d{1,2} [A-Za-z]{3}) (\d{1,2}:\d{2})\s*[-\u2013]\s*(\d{1,2}:\d{2})$/);
+    const single = text.match(/^(\d{1,2} [A-Za-z]{3}) (\d{1,2}:\d{2})$/);
+
+    // A single time is a departure on the first row and an arrival on the last.
+    // Anywhere else it is a shape we have not seen, and the departure reading is
+    // the one that agrees with dep_datetime.
+    const arrivalOnly = !!single && index === rows.length - 1;
+
+    stops.push({
+      poi: match[1],
+      name: decodeEntities(match[2]) || null,
+      date: range?.[1] ?? single?.[1] ?? null,
+      arrive: range?.[2] ?? (arrivalOnly ? single![2] : null),
+      depart: range?.[3] ?? (single && !arrivalOnly ? single[2] : null),
+    });
+  });
+  return stops;
+}
+
+/** "08 Sep" plus a year and "08:00" -> "2026-09-08 08:00:00", or null. */
+function stampOf(date: string | null, clock: string | null, year: number | null): string | null {
+  if (!date || !clock || year === null) return null;
+  const parts = date.split(' ');
+  const month = MONTHS3.indexOf((parts[1] ?? '').slice(0, 3).toLowerCase()) + 1;
+  const day = Number(parts[0]);
+  if (month === 0 || !Number.isFinite(day)) return null;
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${year}-${pad(month)}-${pad(day)} ${clock.padStart(5, '0')}:00`;
+}
+
+/**
+ * The itinerary row a port belongs to.
+ *
+ * By `poi`, which is the only key the two structures share — but a round trip
+ * lists its home port twice under one poi, so the departure breaks the tie: the
+ * row whose stated departure matches `dep_datetime` is that call. A port with no
+ * departure is the final one, and takes the row that states no departure either.
+ */
+function stopForPort(stops: ItineraryStop[], poi: string, depart: string | null): ItineraryStop | null {
+  const candidates = stops.filter((s) => s.poi === poi);
+  if (candidates.length === 0) return null;
+  if (candidates.length === 1) return candidates[0];
+
+  if (!depart) return candidates.find((s) => !s.depart) ?? candidates[candidates.length - 1];
+  const clock = depart.slice(11, 16);
+  return candidates.find((s) => s.depart === clock) ?? candidates[0];
 }
 
 /**
@@ -407,7 +501,11 @@ interface ShapedVoyage {
 
 function shapeDetail(imo: string, payload: any): ShapedVoyage {
   const path = payload?.cruise?.path ?? {};
-  const names = portNamesByPoi(payload?.cruise?.itinerary);
+  const stops = itineraryStops(payload?.cruise?.itinerary);
+  // The year for a call that states none. Every arrival but the last shares a
+  // date with its own departure, which carries one; the last has no departure,
+  // so the voyage's end date supplies it.
+  const endYear = Number(String(payload?.cruise?.end_date ?? '').match(/(\d{4})/)?.[1]);
 
   // `track` arrives as {lat, lon} objects while `cruise.path.points` arrives as
   // [lon, lat] arrays. Normalising both to [lon, lat] here removes a footgun
@@ -436,7 +534,13 @@ function shapeDetail(imo: string, payload: any): ShapedVoyage {
         const at = coord(port?.lon, port?.lat);
         if (!at) return [];
         const poi = String(port?.poi ?? '');
-        const name = names.get(poi) ?? null;
+        const depart = typeof port?.dep_datetime === 'string' ? port.dep_datetime : null;
+        const stop = stopForPort(stops, poi, depart);
+        const name = stop?.name ?? null;
+        // Same calendar day as the departure wherever there is one, so no year
+        // has to be inferred for any call but the last.
+        const year = depart ? Number(depart.slice(0, 4))
+          : (Number.isFinite(endYear) ? endYear : null);
         return [{
           lon: at[0],
           lat: at[1],
@@ -445,8 +549,14 @@ function shapeDetail(imo: string, payload: any): ShapedVoyage {
           nameSource: name ? 'itinerary' : null,
           /** Voyage day, 1-based. Skips days at sea. */
           day: Number.isFinite(Number(port?.day)) ? Number(port.day) : null,
+          /**
+           * Local arrival time as upstream states it, or null where the row it
+           * came from did not state one — the embarkation call, or markup we
+           * could not read. Same shape and same clock as `depart`.
+           */
+          arrive: stop ? stampOf(stop.date, stop.arrive, year) : null,
           /** Local departure time as upstream states it; null on the final call. */
-          depart: typeof port?.dep_datetime === 'string' ? port.dep_datetime : null,
+          depart,
         }];
       })
     : [];

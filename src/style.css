@@ -205,19 +205,22 @@
 }
 
 /*
-  Pointing at a port turns its ring white, the same statement the hull makes and
-  the same white the map's zone outline uses: "the pointer is here", never "this
-  is what the thing is". Which is why it is the RING that changes and not the
-  fill — the ring's colour is already saying whether the port keeps the ship's
-  time, and hover must not overwrite that answer.
+  Pointing at a port brightens its ring in the colour the ring already is.
+
+  Not white. The ring's colour is an ANSWER — gold says this call keeps the
+  ship's time, pale says it does not — and painting hover white overwrites the
+  answer with the question. A zone under the pointer keeps its band and gains an
+  outline; the same idea, one channel each. --port-hover is set per marker; see
+  brighter() in utils.ts for how far up the scale it goes.
 
   A CSS rule rather than a redraw: `stroke` on the circle is a presentation
   attribute, so a stylesheet outranks it without !important, and the chart does
   not have to be rebuilt to show that a pointer moved.
 */
 .ship-port:hover .port-ring {
-  stroke: #FFFFFF;
-  stroke-width: 2.5;
+  stroke: var(--port-hover, #FFFFFF);
+  stroke-width: 2.75;
+  stroke-opacity: 1;
 }
 
 /*

@@ -20,7 +20,7 @@
 import { state } from './state';
 import { shipKey, type ShipClock } from './ships';
 import { shipTimeAvailable } from './rccl';
-import { utcOffsetForCoordinates } from './time';
+import { anchorOffsetHours, utcOffsetForCoordinates } from './time';
 import {
   fleetFixes,
   fixForShip,
@@ -35,9 +35,9 @@ import {
   type ShipVoyage,
   voyageForShip,
 } from './shiptrack';
-import { distance } from './utils';
+import { brighter, distance } from './utils';
 import { routeAhead, wakeGaps, wakeRuns, type WakePort } from './wake';
-import { departsAt, voyageYear } from './port-clock';
+import { callNote, departsAt, localDate, voyageYear, type PortCall } from './port-clock';
 
 /**
  * A hull seen from above: pointed bow, flared sides, square stern.
@@ -136,32 +136,6 @@ function portColour(
 ): string {
   if (shipOffset === null) return PORT_PLAIN;
   return utcOffsetForCoordinates(port.lat, port.lon) === shipOffset ? shipHue : PORT_PLAIN;
-}
-
-/**
- * Her ports of call with their departures resolved to instants.
- *
- * Done once per redraw and handed to both layers, because the wake and the route
- * ahead are answering the same question — which calls are behind her — and had
- * better answer it identically.
- *
- * The zone is the PORT's, from its own coordinates, and getting that wrong is
- * not cosmetic: read in the device's zone instead, every Caribbean call sat
- * three hours in the future for a reader in Vancouver, and the route ahead ran
- * backwards to the port she had just left. Her own clock stands in where the
- * boundary data has not loaded — she is alongside the place, so it is the
- * closest thing to hand — and UTC where even that is unknown.
- */
-function portCalls(voyage: ShipVoyage, shipOffset: number | null): WakePort[] {
-  const year = voyageYear(voyage.voyage.startDate, voyage.voyage.endDate);
-  return voyage.ports.map((port) => ({
-    lon: port.lon,
-    lat: port.lat,
-    departsAt: departsAt(
-      port.depart,
-      utcOffsetForCoordinates(port.lat, port.lon) ?? shipOffset ?? 0,
-      year),
-  }));
 }
 
 /**
@@ -397,24 +371,34 @@ const CASING = '#0B1219';
 const CASING_WIDTH = 2;
 
 /**
- * The dash geometry, and why the gaps are as wide as they are.
+ * The dot geometry, and why the spacing is what it is.
  *
  * These itineraries are round trips: the route out and the route home are the
  * same polyline through the same water, so at most zooms it is drawn over
  * itself. Symbol spacing is measured along the PATH, which means the homeward
  * pass lands at whatever phase its own accumulated length happens to give it —
- * and where that phase is half a period, the two dash trains interleave and the
- * gaps fill in. The line reads solid, and appears to change spacing with zoom,
+ * and where that phase is half a period, the two trains interleave and the gaps
+ * fill in. The line reads solid, and appears to change spacing with zoom,
  * because the pixel length of the outbound leg changes and with it the phase.
  *
  * The pattern therefore has to survive being drawn twice at the worst possible
- * offset. Interleaved, a dash of L every R leaves gaps of R/2 - L, so the rule
- * is R >= 4L: at 4 and 16 the doubled line still reads 4 on, 4 off. It was 5 and
- * 13, which leaves 1.5 — indistinguishable from solid, which is what was
- * reported.
+ * offset. Interleaved, a mark of L every R leaves gaps of R/2 - L, which is
+ * why R stays near 4L. It was 5 and 13, leaving 1.5 — indistinguishable from
+ * solid, which is what was reported.
+ *
+ * Dots rather than dashes because a dash long enough to read as a dash is
+ * expensive under that rule: it buys its own length back four times over in
+ * empty space, and the line went sparse. A 3px dot needs a quarter of the
+ * period a 4px dash does, so the marks come twice as often for the same ink.
+ *
+ * The dot carries its own dark rim instead of a casing polyline underneath.
+ * Casing a dotted line would be worse than not casing it: the halo is wider
+ * than the mark, so the halos merge at spacings where the dots do not, and the
+ * result is a dark line with beads on it.
  */
-const DASH_PX = 4;
-const DASH_REPEAT_PX = 16;
+const DOT_RADIUS = 1.5;
+const DOT_RIM = 1;
+const DOT_REPEAT_PX = 12;
 
 /**
  * The dotted stretch across a gap in the wake.
@@ -462,47 +446,59 @@ function clearChart(): void {
   chart = [];
 }
 
-/** The same symbol, wider and dark, to sit under its own dash. */
-function casedIcon(sequence: google.maps.IconSequence): google.maps.IconSequence {
-  const icon = sequence.icon;
-  if (!icon) return sequence;
-  return {
-    ...sequence,
-    icon: {
-      ...icon,
-      strokeColor: CASING,
-      strokeOpacity: 0.55,
-      strokeWeight: (icon.strokeWeight ?? 2) + CASING_WIDTH,
-    },
-  };
-}
-
+/** A solid line, cased. Dotted lines case themselves — see dottedRoute. */
 function polyline(
   map: google.maps.Map,
   path: google.maps.LatLngLiteral[],
   options: google.maps.PolylineOptions
 ): void {
-  // A dashed line's casing has to be dashed too.
-  //
-  // This used to inherit the icons and keep a solid stroke, which put an
-  // unbroken dark line the full length of the route underneath the dashes. On
-  // open ocean it passed for shadow; where the route doubled back on itself it
-  // was the thing making the line read solid, and it was doing that at every
-  // zoom rather than only at the ones where the dashes interleaved.
-  const dashed = options.strokeOpacity === 0;
-
   // Casing first, so it sits under its own line.
   chart.push(new google.maps.Polyline({
     map,
     path,
     clickable: false,
     strokeColor: CASING,
-    strokeOpacity: dashed ? 0 : 0.55,
+    strokeOpacity: 0.55,
     strokeWeight: (options.strokeWeight ?? 2) + CASING_WIDTH,
     zIndex: (options.zIndex ?? 10) - 1,
-    icons: options.icons?.map(casedIcon),
   }));
   chart.push(new google.maps.Polyline({ map, path, clickable: false, ...options }));
+}
+
+/**
+ * The route still to come: her own colour, dotted, rimmed rather than cased.
+ *
+ * `strokeOpacity: 0` with a repeating symbol is how the Maps API draws anything
+ * but a solid line — the stroke itself is invisible and the symbols are the
+ * whole of what is seen. `repeat` in px is screen distance, so the spacing is
+ * the same at every zoom; see DOT_REPEAT_PX for the part that only looked as
+ * though it were not.
+ */
+function dottedRoute(
+  map: google.maps.Map, path: google.maps.LatLngLiteral[], colour: string
+): void {
+  chart.push(new google.maps.Polyline({
+    map,
+    path,
+    clickable: false,
+    strokeOpacity: 0,
+    zIndex: 15,
+    icons: [{
+      icon: {
+        path: google.maps.SymbolPath.CIRCLE,
+        scale: DOT_RADIUS,
+        fillColor: colour,
+        fillOpacity: 0.9,
+        // The rim is the casing: dark, tight to the dot, and 1px of it is
+        // enough to hold a gold dot off the gold band it is standing on.
+        strokeColor: CASING,
+        strokeOpacity: 0.75,
+        strokeWeight: DOT_RIM,
+      },
+      offset: '0',
+      repeat: `${DOT_REPEAT_PX}px`,
+    }],
+  }));
 }
 
 /**
@@ -528,16 +524,17 @@ function dottedGap(map: google.maps.Map, path: google.maps.LatLngLiteral[]): voi
     zIndex: 19,   // under the wake, so a real track always wins an overlap
     icons: [{
       icon: {
-        path: 'M 0,-0.6 0,0.6',
-        strokeColor: GAP,
-        strokeOpacity: 0.75,
-        strokeWeight: 1.75,
-        scale: 1.6,
+        path: google.maps.SymbolPath.CIRCLE,
+        scale: 1,
+        fillColor: GAP,
+        fillOpacity: 0.8,
+        strokeOpacity: 0,
+        strokeWeight: 0,
       },
       offset: '0',
-      // Nearly round at this length, so it stays a dot rather than becoming a
-      // short dash: 1.9 on, 8 off, and 1.9 on 3.1 off if it ever doubles back.
-      repeat: '10px',
+      // Smaller and unrimmed, so a guess never reads as heavily as the route it
+      // sits beside even where the two run parallel.
+      repeat: '9px',
     }],
   }));
 }
@@ -553,36 +550,84 @@ export interface PortMarkerDetail {
   name: string;
   lat: number;
   lon: number;
-  /** "day 2 · departs 17:00", or empty. The subtitle, never the name. */
+  /** "day 4 · arrives Tue 8:00 AM", or empty. The subtitle, never the name. */
   detail: string;
 }
 
-function portDetail(port: ShipPort, fallbackName: string | null): PortMarkerDetail {
-  const full = portTitle(port, fallbackName);
-  const name = port.name ?? fallbackName ?? 'Port of call';
-  return {
-    name,
-    lat: port.lat,
-    lon: port.lon,
-    // portTitle already joins the parts; the name is the first of them.
-    detail: full.startsWith(`${name} · `) ? full.slice(name.length + 3) : '',
-  };
+/**
+ * Her ports of call, each resolved to instants and to the line it should say.
+ *
+ * Done once per redraw and handed to every layer, because the wake, the route
+ * ahead, the rings and their tooltips are all answering the same question —
+ * where is she in this itinerary — and had better answer it identically.
+ *
+ * The zone a time is stated in is the PORT's, from its own coordinates, and
+ * getting that wrong is not cosmetic: read in the device's zone instead, every
+ * Caribbean call sat three hours in the future for a reader in Vancouver, and
+ * the route ahead ran backwards to the port she had just left. Her own clock
+ * stands in where the boundary data has not loaded — she is alongside the
+ * place, so it is the closest thing to hand — and UTC where even that is
+ * unknown.
+ *
+ * "Today", by contrast, is the ANCHOR's day: the clock the reader is living by,
+ * which aboard is the ship's and ashore is the ground's.
+ */
+interface Call extends WakePort {
+  port: ShipPort;
+  name: string;
+  /** "day 4 · arrives Tue 8:00 AM". */
+  note: string;
 }
 
-/** "Coco Cay · day 2 · departs 17:00", as much of it as we actually know. */
-function portTitle(port: ShipPort, fallbackName: string | null): string {
-  const parts = [port.name ?? fallbackName ?? 'Port of call'];
-  if (port.day !== null) parts.push(`day ${port.day}`);
-  if (port.depart) {
-    // The upstream string is "2026-08-31 17:00:00" in the port's own local time.
-    // Only the clock part is shown, and deliberately without a zone: this is a
-    // scheduled departure as the itinerary states it, not a moment converted
-    // into anybody's timezone. Naming a zone we have not established would be
-    // the one mistake this app exists to avoid.
-    const clock = port.depart.slice(11, 16);
-    if (clock) parts.push(`departs ${clock}`);
+function portCalls(voyage: ShipVoyage, shipOffset: number | null): Call[] {
+  const year = voyageYear(voyage.voyage.startDate, voyage.voyage.endDate);
+  const now = Date.now() + state.timeOffset;
+  const todayDate = localDate(now, anchorOffsetHours());
+
+  const resolved = voyage.ports.map((port) => {
+    const offset = utcOffsetForCoordinates(port.lat, port.lon) ?? shipOffset ?? 0;
+    return {
+      port,
+      call: {
+        day: port.day,
+        arrive: port.arrive ?? null,
+        depart: port.depart,
+        arrivesAt: departsAt(port.arrive ?? null, offset, year),
+        departsAt: departsAt(port.depart, offset, year),
+      } satisfies PortCall,
+    };
+  });
+
+  // Only the call she has most recently left keeps its departure time; see
+  // callNote. Latest by the clock rather than by itinerary order, so a voyage
+  // whose ports arrive out of order cannot pick the wrong one.
+  let latest = -Infinity;
+  for (const { call } of resolved) {
+    if (call.departsAt !== null && call.departsAt <= now) latest = Math.max(latest, call.departsAt);
   }
-  return parts.join(' · ');
+
+  return resolved.map(({ port, call }) => ({
+    port,
+    lon: port.lon,
+    lat: port.lat,
+    departsAt: call.departsAt,
+    name: port.name ?? voyage.destination ?? 'Port of call',
+    note: callNote(call, {
+      now,
+      todayDate,
+      latestDeparture: call.departsAt !== null && call.departsAt === latest,
+      year,
+    }),
+  }));
+}
+
+/** "Coco Cay · day 2 · arrives 7:00 AM", as much of it as we actually know. */
+function portTitle(call: Call): string {
+  return call.note ? `${call.name} · ${call.note}` : call.name;
+}
+
+function portDetail(call: Call): PortMarkerDetail {
+  return { name: call.name, lat: call.lat, lon: call.lon, detail: call.note };
 }
 
 /**
@@ -624,28 +669,7 @@ export async function drawShipChart(key: string, voyage: Promise<ShipVoyage | nu
     resolved.route, calls, resolved.voyage.endDate,
     fix ? [fix.lon, fix.lat] : null,
     fix && makingWay(fix) ? markerBearing(fix) : null, now);
-  if (ahead.length >= 2) {
-    polyline(map, ahead.map(toLatLng), {
-      // strokeOpacity 0 with a repeating icon is how the Maps API draws a dashed
-      // line — the stroke itself is invisible and the dashes are the symbols.
-      // `repeat` in px is screen distance, so the pattern is the same at every
-      // zoom; see DASH_REPEAT_PX for the part that was not.
-      strokeOpacity: 0,
-      strokeWeight: 1.75,
-      zIndex: 15,
-      icons: [{
-        icon: {
-          path: 'M 0,-1 0,1',
-          strokeColor: routeColour,
-          strokeOpacity: 0.85,
-          strokeWeight: 1.75,
-          scale: DASH_PX / 2,
-        },
-        offset: '0',
-        repeat: `${DASH_REPEAT_PX}px`,
-      }],
-    });
-  }
+  if (ahead.length >= 2) dottedRoute(map, ahead.map(toLatLng), routeColour);
 
   // The wake is the least reliable of the three layers, and silently so: the
   // upstream `track` array can come back EMPTY for a ship that had 720 points a
@@ -694,23 +718,28 @@ export async function drawShipChart(key: string, voyage: Promise<ShipVoyage | nu
     dottedGap(map, [before, after].map(toLatLng));
   }
 
-  for (const port of resolved.ports) {
+  for (const call of calls) {
+    const port = call.port;
     const ring = document.createElement('div');
     ring.className = 'ship-port';
     // Two circles: the ring you see, and a transparent one twice its size that
     // is what you actually hit. A 4px ring is a fine thing to look at and a poor
     // thing to aim a finger at, and the tap below is the whole point of it now.
+    const colour = portColour(port, shipOffset, routeColour);
+    // Hover is the same colour further up the scale, handed to CSS rather than
+    // repainted here — see .ship-port:hover in style.css, and brighter().
+    ring.style.setProperty('--port-hover', brighter(colour));
     ring.innerHTML =
       `<svg viewBox="-11 -11 22 22" width="22" height="22">` +
       `<circle r="10" fill="transparent"/>` +
       `<circle class="port-ring" r="4" fill="${CASING}" fill-opacity="0.9" ` +
-      `stroke="${portColour(port, shipOffset, routeColour)}" stroke-width="2" ` +
+      `stroke="${colour}" stroke-width="2" ` +
       `stroke-opacity="0.95"/></svg>`;
 
     const marker = new google.maps.marker.AdvancedMarkerElement({
       map,
       position: { lat: port.lat, lng: port.lon },
-      title: portTitle(port, resolved.destination),
+      title: portTitle(call),
       content: ring,
       // Under the ship itself, over the lines.
       zIndex: 40,
@@ -726,7 +755,7 @@ export async function drawShipChart(key: string, voyage: Promise<ShipVoyage | nu
     // Hover rides on the content element rather than a maps event — an
     // AdvancedMarkerElement's content is ordinary DOM — and the white ring it
     // paints is pure CSS, so pointing at a port costs no redraw.
-    const detail = portDetail(port, resolved.destination);
+    const detail = portDetail(call);
     marker.addListener('gmp-click', () => {
       document.dispatchEvent(new CustomEvent('portmarkerclick', { detail }));
     });

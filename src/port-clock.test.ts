@@ -1,6 +1,7 @@
 import { strict as assert } from 'node:assert';
 import { describe, it } from 'node:test';
-import { clock12, departsAt, instantOf, parseWall, voyageYear } from './port-clock';
+import { callNote, callPhase, clock12, departsAt, instantOf, localDate, parseWall,
+         timeWithDay, voyageYear, type PortCall } from './port-clock';
 
 // These run in whatever zone the machine is set to, and that is the point: the
 // bug being guarded against was invisible on a machine in the same zone as the
@@ -86,5 +87,102 @@ describe('twelve-hour display', () => {
 
     it('pads the minutes', () => {
         assert.equal(clock12({ year: null, month: 9, day: 6, hour: 17, minute: 0 }), '5:00 PM');
+    });
+});
+
+describe('what a call says about itself', () => {
+    // Coco Cay on Harmony's 5-night: arrive 07:00, sail 17:00, Bahamas time.
+    const AT_SEA = (arrive: string | null, depart: string | null): PortCall => ({
+        day: 2,
+        arrive,
+        depart,
+        arrivesAt: arrive ? Date.parse(arrive.replace(' ', 'T') + '-04:00') : null,
+        departsAt: depart ? Date.parse(depart.replace(' ', 'T') + '-04:00') : null,
+    });
+    const COCO_CAY = AT_SEA('2026-09-06 07:00:00', '2026-09-06 17:00:00');
+    // The reader is in Vancouver, so "today" is UTC-7's day, not the port's.
+    const VANCOUVER = -7;
+    const note = (call: PortCall, at: string, latestDeparture = false) => {
+        const now = Date.parse(at);
+        return callNote(call, {
+            now,
+            todayDate: localDate(now, VANCOUVER),
+            latestDeparture,
+            year: 2026,
+        });
+    };
+
+    it('says when she gets there while the call is ahead', () => {
+        // The half a reader looking at a future call actually wants, and the
+        // half we could not say until the itinerary's arrivals were read.
+        // 09:00 UTC is 02:00 in Vancouver on the 6th, two hours before the
+        // 07:00 Bahamas arrival — the same day for the reader, so no weekday.
+        assert.equal(note(COCO_CAY, '2026-09-06T09:00:00Z'), 'day 2 · arrives 7:00 AM');
+    });
+
+    it('names the day when the call is not today', () => {
+        assert.equal(note(COCO_CAY, '2026-09-04T20:00:00Z'), 'day 2 · arrives Sun 7:00 AM');
+    });
+
+    it('switches to the departure once she is there', () => {
+        // 12:00 local at the port: arrived, not yet sailed.
+        assert.equal(note(COCO_CAY, '2026-09-06T16:00:00Z'), 'day 2 · departs 5:00 PM');
+    });
+
+    it('keeps the departure on the call she has just left, that day', () => {
+        // 22:46 UTC is 15:46 in Vancouver on the 6th — the same day the 17:00
+        // Bahamas departure falls on, and the sentence that explains the wake
+        // leading away from that port.
+        assert.equal(note(COCO_CAY, '2026-09-06T22:46:00Z', true), 'day 2 · departed 5:00 PM');
+    });
+
+    it('drops it again once that day is over', () => {
+        assert.equal(note(COCO_CAY, '2026-09-08T20:00:00Z', true), 'day 2');
+    });
+
+    it('says nothing of the time about any earlier call', () => {
+        // Reciting a departure three days astern is telling somebody what they
+        // watched happen. The day number is the whole of what still matters.
+        assert.equal(note(COCO_CAY, '2026-09-06T22:46:00Z'), 'day 2');
+    });
+
+    it('falls back to the departure when no arrival was stated', () => {
+        // An older Worker, or the embarkation call.
+        const noArrival = AT_SEA(null, '2026-09-06 17:00:00');
+        assert.equal(note(noArrival, '2026-09-06T09:00:00Z'), 'day 2 · departs 5:00 PM');
+    });
+
+    it('never reads as alongside without an arrival to say so', () => {
+        const noArrival = AT_SEA(null, '2026-09-06 17:00:00');
+        assert.equal(callPhase(noArrival, Date.parse('2026-09-06T16:00:00Z')), 'ahead');
+        assert.equal(callPhase(COCO_CAY, Date.parse('2026-09-06T16:00:00Z')), 'alongside');
+    });
+
+    it('has the final call, which nobody leaves, still say when she is due', () => {
+        const home: PortCall = {
+            day: 6, arrive: '2026-09-10 06:00:00', depart: null,
+            arrivesAt: Date.parse('2026-09-10T06:00:00-04:00'), departsAt: null,
+        };
+        assert.equal(note(home, '2026-09-06T22:46:00Z'), 'day 6 · arrives Thu 6:00 AM');
+    });
+
+    it('says only the day when it knows only the day', () => {
+        assert.equal(note({ day: 3, arrive: null, depart: null, arrivesAt: null, departsAt: null },
+            '2026-09-06T22:46:00Z'), 'day 3');
+    });
+});
+
+describe('the anchor day', () => {
+    it('is the reader\'s day, not the port\'s', () => {
+        // 23:30 UTC on the 6th is still the 6th in Vancouver and already the
+        // 7th in London. Which one "today" means decides whether a card says
+        // "7:00 AM" or "Sun 7:00 AM".
+        const at = Date.parse('2026-09-06T23:30:00Z');
+        assert.equal(localDate(at, -7), '2026-09-06');
+        assert.equal(localDate(at, 1), '2026-09-07');
+    });
+
+    it('handles a fractional offset', () => {
+        assert.equal(localDate(Date.parse('2026-09-06T18:30:00Z'), 5.75), '2026-09-07');
     });
 });

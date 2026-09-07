@@ -28,10 +28,10 @@
 
 import { state } from './state';
 import { shipKey } from './ships';
-import { utcOffsetForCoordinates } from './time';
+import { anchorOffsetHours, utcOffsetForCoordinates } from './time';
 import { distance } from './utils';
 import { ALONGSIDE_KNOTS, fixForShip, type ShipFix, type ShipPort, type ShipVoyage } from './shiptrack';
-import { clock12, instantOf, parseWall, voyageYear } from './port-clock';
+import { instantOf, localDate, parseWall, timeWithDay, voyageYear } from './port-clock';
 
 /**
  * How near a port still counts as being at it.
@@ -90,6 +90,14 @@ export function voyageLine(voyage: ShipVoyage | null, key: string | null): strin
   const shipOffset = shipOffsetHours(key);
   const year = voyageYear(voyage.voyage.startDate, voyage.voyage.endDate);
   const now = Date.now() + state.timeOffset;
+  // The day these times fall on, when it is not the reader's own day.
+  //
+  // A bare clock reads as today, and on a cruise it very often is not: an ETA
+  // two nights away said "11:00 AM" and looked like this morning. "Thu 11:00
+  // AM" costs four characters on a line that had room for them. Today is the
+  // ANCHOR's day throughout — the ship's while aboard, the ground's ashore —
+  // because that is the clock the reader is living by.
+  const today = localDate(now, anchorOffsetHours());
 
   const port = portCall(voyage, fix);
   if (port) {
@@ -106,7 +114,7 @@ export function voyageLine(voyage: ShipVoyage | null, key: string | null): strin
     const departsAt = instantOf(wall, portOffset ?? shipOffset ?? 0, year);
     if (departsAt < now) return `In ${name}`;
 
-    return `${name} · Dep. ${clock12(wall)}${basisSuffix(portOffset, shipOffset)}`;
+    return `${name} · Dep. ${timeWithDay(wall, today, year)}${basisSuffix(portOffset, shipOffset)}`;
   }
 
   // Under way. The destination and its ETA, as the operator states them.
@@ -120,5 +128,5 @@ export function voyageLine(voyage: ShipVoyage | null, key: string | null): strin
   const target = voyage.ports.find((p) => p.name && p.name === voyage.destination) ?? null;
   const portOffset = target ? portOffsetHours(target) : null;
 
-  return `→ ${voyage.destination} · ETA ${clock12(wall)}${basisSuffix(portOffset, shipOffset)}`;
+  return `→ ${voyage.destination} · ETA ${timeWithDay(wall, today, year)}${basisSuffix(portOffset, shipOffset)}`;
 }

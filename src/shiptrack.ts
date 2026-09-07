@@ -67,6 +67,14 @@ export interface ShipPort {
   nameSource: 'itinerary' | 'geocoded' | null;
   /** Voyage day, 1-based, skipping days at sea. */
   day: number | null;
+  /**
+   * Local arrival time as the itinerary states it, "2026-09-08 08:00:00".
+   *
+   * Optional because it arrives only from a Worker that reads the itinerary
+   * block — an older one, or an entry it cached before, has none. Null on the
+   * embarkation call, where there is nothing to arrive at.
+   */
+  arrive?: string | null;
   depart: string | null;
 }
 
