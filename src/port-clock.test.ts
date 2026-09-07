@@ -1,7 +1,7 @@
 import { strict as assert } from 'node:assert';
 import { describe, it } from 'node:test';
-import { callNote, callPhase, clock12, departsAt, instantOf, localDate, parseWall,
-         timeWithDay, voyageYear, type PortCall } from './port-clock';
+import { callNote, callPhase, clock12, clockStated, departsAt, instantOf, localDate,
+         parseWall, timeWithDay, voyageYear, type PortCall } from './port-clock';
 
 // These run in whatever zone the machine is set to, and that is the point: the
 // bug being guarded against was invisible on a machine in the same zone as the
@@ -184,5 +184,51 @@ describe('the anchor day', () => {
 
     it('handles a fractional offset', () => {
         assert.equal(localDate(Date.parse('2026-09-06T18:30:00Z'), 5.75), '2026-09-07');
+    });
+});
+
+describe('a date with no clock on it', () => {
+    // Quantum's Cabo San Lucas is stated "06 Sep - 08 Sep": two dates and no
+    // times at all. Upstream still has to emit a departure, and fills it with
+    // midnight — which read at face value is a ship sailing at twelve at night.
+    const scenic: PortCall = {
+        day: 3,
+        arrive: null,
+        depart: '2026-09-08 00:00:00',
+        arrivesAt: null,
+        departsAt: Date.parse('2026-09-08T00:00:00-06:00'),
+    };
+    const note = (call: PortCall, at: string) => {
+        const now = Date.parse(at);
+        return callNote(call, { now, todayDate: localDate(now, -7), latestDeparture: false, year: 2026 });
+    };
+
+    it('says the day and refuses to invent the time', () => {
+        assert.equal(note(scenic, '2026-09-06T20:00:00Z'), 'day 3');
+    });
+
+    it('keeps a real midnight sailing, which arrived somewhere first', () => {
+        const berthed: PortCall = {
+            ...scenic,
+            arrive: '2026-09-07 08:00:00',
+            arrivesAt: Date.parse('2026-09-07T08:00:00-06:00'),
+        };
+        assert.equal(clockStated(berthed), true);
+        // Alongside since yesterday morning, sailing at midnight tonight.
+        assert.equal(note(berthed, '2026-09-07T20:00:00Z'), 'day 3 · departs Tue 12:00 AM');
+    });
+
+    it('leaves every ordinary time alone', () => {
+        assert.equal(clockStated({
+            day: 2, arrive: null, depart: '2026-09-06 17:00:00',
+            arrivesAt: null, departsAt: 0,
+        }), true, 'an embarkation call states no arrival and a real time');
+    });
+
+    it('says nothing of a departure it was never given', () => {
+        assert.equal(clockStated({
+            day: 6, arrive: '2026-09-10 06:00:00', depart: null,
+            arrivesAt: 0, departsAt: null,
+        }), false);
     });
 });

@@ -133,6 +133,28 @@ export interface PortCall {
 }
 
 /**
+ * Whether a stated departure carries a real clock, or only a date.
+ *
+ * Upstream states a call with no times at all as a bare date range — Quantum's
+ * Cabo San Lucas is "06 Sep - 08 Sep" — and then fills the departure it has to
+ * emit with midnight. Read at face value that is a ship sailing at twelve
+ * o'clock at night, which is not what anybody said: it is the day, and no time.
+ *
+ * Exactly midnight AND no arrival beside it, because the conjunction is what
+ * makes this a reading rather than a guess. A real midnight sailing is from a
+ * berth she arrived at, and keeps its clock. Across the fleet — 234 calls —
+ * every departure stated as exactly midnight also stated no arrival, and three
+ * of the four were scenic cruising: Hubbard Glacier twice and Tracy Arm Fjord,
+ * where the ship never berths at all and there is nothing to state.
+ */
+export function clockStated(call: PortCall): boolean {
+    const depart = parseWall(call.depart);
+    if (!depart) return false;
+    if (depart.hour !== 0 || depart.minute !== 0) return true;
+    return call.arrive !== null;
+}
+
+/**
  * Ahead of her, under her, or behind her.
  *
  * By the schedule rather than by the hull's position, and that is deliberate:
@@ -224,18 +246,23 @@ export function callNote(call: PortCall, opts: {
     const arrive = parseWall(call.arrive);
     const depart = parseWall(call.depart);
 
+    // A departure upstream stated only to the day says nothing about a clock,
+    // and printing the midnight it filled in would be inventing one.
+    const sayDeparture = depart && clockStated(call);
+
     if (phase === 'departed') {
-        if (opts.latestDeparture && depart && wallDate(depart, opts.year) === opts.todayDate) {
-            parts.push(`departed ${clock12(depart)}`);
+        if (opts.latestDeparture && sayDeparture
+            && wallDate(depart!, opts.year) === opts.todayDate) {
+            parts.push(`departed ${clock12(depart!)}`);
         }
     } else if (phase === 'alongside') {
-        if (depart) parts.push(`departs ${timeWithDay(depart, opts.todayDate, opts.year)}`);
+        if (sayDeparture) parts.push(`departs ${timeWithDay(depart!, opts.todayDate, opts.year)}`);
     } else if (arrive) {
         parts.push(`arrives ${timeWithDay(arrive, opts.todayDate, opts.year)}`);
-    } else if (depart) {
+    } else if (sayDeparture) {
         // No arrival to state — an older Worker, or the embarkation call. The
         // departure is still worth having, and still worth dating.
-        parts.push(`departs ${timeWithDay(depart, opts.todayDate, opts.year)}`);
+        parts.push(`departs ${timeWithDay(depart!, opts.todayDate, opts.year)}`);
     }
 
     return parts.join(' · ');

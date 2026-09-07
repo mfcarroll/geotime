@@ -53,7 +53,7 @@ describe('the chart wash', () => {
         const washed = style(NASSAU, {
             selectedTzid: NEW_YORK, selectedOffset: -4, hoveredTzid: NASSAU, chartShown: true,
         });
-        assert.equal(washed.strokeColor, '#FFFFFF');
+        assert.equal(washed.strokeColor, OUTLINE.hover.strokeColor);
         assert.ok(washed.fillOpacity > FILLS.selectedBand.fillOpacity * CHART_FILL_SCALE,
             'lifted above its own washed band');
     });
@@ -75,8 +75,11 @@ describe('hover, carried by the outline', () => {
         const hovered = style(NASSAU, { selectedOffset: -4, hoveredTzid: NASSAU });
 
         assert.equal(hovered.strokeColor, OUTLINE.hover.strokeColor);
-        assert.ok(hovered.strokeWeight > plain.strokeWeight, 'the outline does the work');
-        assert.ok(hovered.fillOpacity - plain.fillOpacity <= 0.05, 'and the fill barely moves');
+        assert.notEqual(hovered.strokeColor, plain.strokeColor, 'the outline does the work');
+        // In brightness, not in thickness: a heavier line draws the eye to the
+        // boundary rather than to the region, and shifts it while it is at it.
+        assert.equal(hovered.strokeWeight, plain.strokeWeight);
+        assert.ok(hovered.fillOpacity - plain.fillOpacity <= 0.07, 'and the fill barely moves');
     });
 
     it('keeps a little fill lift for a zone whose outline you cannot see', () => {

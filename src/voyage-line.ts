@@ -31,7 +31,7 @@ import { shipKey } from './ships';
 import { anchorOffsetHours, utcOffsetForCoordinates } from './time';
 import { distance, fold } from './utils';
 import { ALONGSIDE_KNOTS, fixForShip, type ShipFix, type ShipPort, type ShipVoyage } from './shiptrack';
-import { instantOf, localDate, parseWall, timeWithDay, voyageYear } from './port-clock';
+import { clockStated, instantOf, localDate, parseWall, timeWithDay, voyageYear } from './port-clock';
 
 /**
  * How near a port still counts as being at it.
@@ -109,8 +109,13 @@ export function voyageLine(voyage: ShipVoyage | null, key: string | null): strin
 
     // The final call has no departure — nobody leaves again — and a call whose
     // departure has already passed is a ship running late or a stale itinerary.
-    // Both get the place without a time, which is still the useful half.
-    if (!wall) return `In ${name}`;
+    // Both get the place without a time, which is still the useful half. So does
+    // a call upstream dated but never clocked; see clockStated.
+    const stated = clockStated({
+      day: port.day, arrive: port.arrive ?? null, depart: port.depart,
+      arrivesAt: null, departsAt: null,
+    });
+    if (!wall || !stated) return `In ${name}`;
     const departsAt = instantOf(wall, portOffset ?? shipOffset ?? 0, year);
     if (departsAt < now) return `In ${name}`;
 

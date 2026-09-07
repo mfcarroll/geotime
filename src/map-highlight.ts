@@ -57,23 +57,23 @@ export const FILLS = {
 export const CHART_FILL_SCALE = 0.8;
 
 /**
- * Hover, almost entirely.
+ * Hover, almost entirely — in brightness, at a constant weight.
  *
- * This used to be brightness alone at a constant weight, on the reasoning that
- * a weight change nudges the boundary and looks like the shape moved. It was
- * true and it was the wrong trade: carrying hover on brightness alone meant the
- * FILL had to carry it too, and a fill big enough to be noticed is a fill that
- * hides the coastline, the place names and the sea under every highlighted
- * zone on the map.
+ * The outline carries hover because the alternative was making the FILL carry
+ * it, and a fill big enough to be noticed is a fill that hides the coastline,
+ * the place names and the sea under every highlighted zone on the map. That
+ * much is settled and the fills below are lighter for it.
  *
- * So the outline does the work and the fill barely moves. The stroke is centred
- * on the boundary and grows symmetrically, which is what keeps it from reading
- * as movement — the earlier objection was to the pixel, not to the principle,
- * and a pixel is a price worth paying to get the map back.
+ * What is NOT the way to carry it is thickness. Doubling the stroke was tried
+ * and looked like exactly what the original note here warned it would: a
+ * heavier, brighter line that draws attention to the boundary rather than to
+ * the region, and shifts it by a pixel while it is at it. Four times the
+ * brightness at the same weight is plenty, and leaves the map's own structure
+ * looking the way it did before any of this.
  */
 export const OUTLINE = {
   none:  { strokeColor: 'rgba(255,255,255,0.2)', strokeWeight: 1 },
-  hover: { strokeColor: '#FFFFFF', strokeWeight: 2 },
+  hover: { strokeColor: 'rgba(255,255,255,0.82)', strokeWeight: 1 },
 } as const;
 
 /**
@@ -83,7 +83,7 @@ export const OUTLINE = {
  * running off the edge of the map still answers a pointer, and not enough to
  * put the fill back in charge.
  */
-export const HOVER_FILL_LIFT = 0.04;
+export const HOVER_FILL_LIFT = 0.06;
 
 export interface ZoneStyleInput {
   tzid: string;
