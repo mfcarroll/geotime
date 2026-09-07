@@ -8,6 +8,7 @@ import { debugFlag, distance, formatAccuracy, fold } from './utils';
 import { loadCityIndex, nearestPlace } from './cities';
 import { feature as topoFeature } from 'topojson-client';
 import { resolveZoneStyle } from './map-highlight';
+import { flyTo, flyToBox } from './map-fly';
 import { clockKey, clockLabel, clockSubLabel, formatFixedOffsetTime, visibleClocks, type ClockEntry } from './clocks';
 import { shipKey, type ShipClock } from './ships';
 import { cachedVoyageFor, voyageForShip, type ShipPort, type ShipVoyage } from './shiptrack';
@@ -78,7 +79,10 @@ function renderingOptions(
   mapId: string,
   fallbackStyles: google.maps.MapTypeStyle[]
 ): google.maps.MapOptions {
-  if (!mapId) return { styles: fallbackStyles };
+  // Fractional zoom is native to vector and off by default on raster, where
+  // without it a flight would climb in whole zoom levels — a staircase where
+  // the vector map has a curve.
+  if (!mapId) return { styles: fallbackStyles, isFractionalZoomEnabled: true };
   return { mapId, renderingType: google.maps.RenderingType.VECTOR };
 }
 
@@ -373,8 +377,7 @@ export function selectSavedZone(zone: StoredZone, frame?: Frame) {
 /** Centres on a point, coming closer if the map was further out than PLACE_ZOOM. */
 function frameAt(lat: number, lon: number): void {
     whenMapReady((map) => {
-        map.setCenter({ lat, lng: lon });
-        map.setZoom(Math.max(map.getZoom() ?? 0, PLACE_ZOOM));
+        flyTo(map, { lat, lng: lon, zoom: Math.max(map.getZoom() ?? 0, PLACE_ZOOM) });
     });
 }
 
@@ -401,7 +404,7 @@ function frameZone(tzid: string): void {
                 framed = true;
             });
         });
-        if (framed) map.fitBounds(bounds, 48);
+        if (framed) flyToBox(map, bounds, 48);
     });
 }
 

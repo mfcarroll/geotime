@@ -18,6 +18,7 @@
 // live or that it is unknown.
 
 import { state, whenMapReady } from './state';
+import { flyTo, flyToBox } from './map-fly';
 import type { StoredZone } from './stored-zones';
 import { shipKey, type ShipClock } from './ships';
 import { shipTimeAvailable } from './rccl';
@@ -1028,13 +1029,12 @@ export async function fitToShip(key: string, voyage: Promise<ShipVoyage | null>)
     // at each end of it would be half off the map. Deferred if the map cannot
     // yet work a zoom out of a box — see whenMapReady, and the cold load that
     // found it.
-    whenMapReady((ready) => ready.fitBounds(bounds, 48));
+    whenMapReady((ready) => flyToBox(ready, bounds, 48));
     return;
   }
 
   if (!fix) return;
-  map.setCenter({ lat: fix.lat, lng: fix.lon });
-  map.setZoom(Math.max(map.getZoom() ?? 2, 4));
+  flyTo(map, { lat: fix.lat, lng: fix.lon, zoom: Math.max(map.getZoom() ?? 2, 4) });
 }
 
 /** Drops every marker. For when ship features go away entirely. */
