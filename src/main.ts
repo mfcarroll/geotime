@@ -289,13 +289,26 @@ async function startApp() {
    * learn. Going every time is the predictable thing, and where the map has
    * not moved this costs a scroll of nothing.
    *
-   * The MAP's own top edge, not the card's. Taking the card in meant taking
-   * its header too, which is further than the ask: the map is the thing being
-   * looked at, and the cards above it stay a scroll away rather than costing
-   * every trip a header's worth of overshoot.
+   * The CARD's top edge, not the map's own.
+   *
+   * It was the map's, on the argument that the map is the thing being looked at
+   * and its header is overshoot. The header is not the problem with that; the
+   * detail cards are. They sit between the header and the map, and stopping at
+   * the map put them ABOVE the viewport by exactly their own height — so the
+   * status bar landed across the middle of them, the anchor card's clock digits
+   * rendering behind the system clock. A thing sliced horizontally reads as
+   * broken in a way a thing merely scrolled past does not.
+   *
+   * Taking the whole card fixes it by having nothing left half-shown, and costs
+   * a header's worth of scroll — which turns out to be worth paying, because
+   * those detail cards name what was just picked and are the second thing you
+   * look at after the map itself.
+   *
+   * Landing it clear of the notch is scroll-margin-top's job, in style.css,
+   * where env(safe-area-inset-top) can be read.
    */
   function revealMap(): void {
-    document.getElementById('timezone-map')?.scrollIntoView({
+    document.getElementById('timezone-map-card')?.scrollIntoView({
       behavior: window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
         ? 'auto' : 'smooth',
       block: 'start',

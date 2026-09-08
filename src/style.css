@@ -86,6 +86,56 @@
   margin-top: env(safe-area-inset-top);
 }
 
+/*
+  An opaque strip exactly the height of the notch, pinned to the top.
+
+  The div for this has been in index.html since the safe-area work and had no
+  styles at all — which is why the app looked right at rest and wrong the moment
+  you scrolled. #app-container's margin clears the Dynamic Island only while you
+  are AT the top; scroll down and the page slides underneath the status bar, so
+  whatever card happens to be passing gets sliced horizontally with the system
+  clock sitting across it. The map card was where that was most obvious, and
+  parking the scroll better only moved which card it happened to.
+
+  Same colour as the page, so at rest it is invisible and on a browser it is
+  zero pixels tall. pointer-events: none because tapping the iOS status bar
+  scrolls to the top and this must not swallow that. Below the diagnostics
+  overlay (60) and above everything else, the search dropdown included — a
+  listbox long enough to reach up here should be clipped by it too.
+*/
+#safe-area-spacer {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: env(safe-area-inset-top);
+  background: #111827;   /* gray-900, matching #app-container */
+  z-index: 50;
+  pointer-events: none;
+}
+
+/*
+  Where a tap on a clock row parks the map card.
+
+  That margin above is at the TOP OF THE DOCUMENT, so it scrolls away with
+  everything else — which is right, since the notch only needs clearing when
+  you are at the top. Anything scrolled to afterwards has to keep itself clear,
+  and scroll-margin-top is the one property that says so to scrollIntoView
+  rather than to a layout.
+
+  Without it the card landed flush with the viewport top and the status bar sat
+  straight on top of it: the anchor card's clock digits rendered behind the
+  system clock, half a card visible under the Dynamic Island. The half-card was
+  the tell — a thing sliced horizontally rather than merely covered.
+
+  The half rem is breathing room, not a fudge factor. At exactly the inset the
+  card's rounded corner touches the status bar, which reads as a mistake even
+  though nothing overlaps.
+*/
+#timezone-map-card {
+  scroll-margin-top: calc(env(safe-area-inset-top) + 0.5rem);
+}
+
 /* --- city / timezone search combobox ---------------------------------- */
 /* A real listbox rather than a native <datalist>: on iOS the datalist renders
    as a suggestion strip above the keyboard that people miss entirely. */
