@@ -1,0 +1,306 @@
+// src/anchor-share.ts
+//
+// Talking to the relay.
+//
+// The transport, and nothing else: no state, no rendering, no decisions about
+// when to call any of it. What it owes its callers is the house rule every
+// other network module here follows — never throw, and answer null when the
+// answer is unknown, so that "offline" and "nobody is sharing with you" can
+// never be confused for one another. The app's job on a null is to keep showing
+// what it last knew.
+//
+// The one place that rule is not enough is redeeming a code, where the person
+// is standing there having just typed something and deserves to know whether it
+// was wrong, expired, or simply unreachable. That one returns a reason.
+
+import { Capacitor, CapacitorHttp } from '@capacitor/core';
+
+import { forgetAccountId, rememberAccountId, storedAccountId } from './account';
+import { validateAnchor, type Anchor } from './anchor';
+
+/**
+ * Must match the default in vite.config.js, which builds the CSP from it — a
+ * client that calls somewhere the page is not allowed to reach fails only in a
+ * browser, which is the one place this is quickest to test.
+ */
+const BASE =
+    // Optional-chained so this module can be imported outside Vite, where
+    // `import.meta.env` does not exist at all. That is not a nicety: it is the
+    // difference between this being testable against a real relay and being
+    // testable only through a browser.
+    import.meta.env?.VITE_ANCHOR_SHARE
+    ?? 'https://geotime-anchor-share.matthew-carroll.workers.dev';
+
+/** One person you follow, as the relay describes them. */
+export interface Followed {
+    shareId: string;
+    /** Null when the pairing worked but they have not pushed an anchor yet. */
+    anchor: Anchor | null;
+    /** Epoch ms, stamped by the relay. Null alongside a null anchor. */
+    updatedAt: number | null;
+}
+
+/** One code you have handed out, or are about to. */
+export interface Invitation {
+    shareId: string;
+    /** Null once somebody has redeemed it, or once it has expired. */
+    code: string | null;
+    createdAt: number;
+    redeemedAt: number | null;
+}
+
+/** Why a code did not work, for a person who is standing there waiting. */
+export type RedeemResult =
+    | { ok: true; shareId: string }
+    | { ok: false; reason: 'invalid' | 'yourself' | 'full' | 'unreachable' };
+
+interface Sent {
+    status: number;
+    body: unknown;
+}
+
+/**
+ * One request, never throwing.
+ *
+ * CapacitorHttp on native for the reason src/rccl.ts and src/shiptrack.ts use
+ * it — it bypasses the WebView's CORS enforcement, which the app's origin gives
+ * it no way to satisfy. On the web the Worker's own headers make fetch work.
+ *
+ * A status of 0 is this module's own "never arrived", which is distinct from
+ * every status the relay can return.
+ */
+async function send(
+    method: 'GET' | 'POST' | 'PUT' | 'DELETE',
+    path: string,
+    token: string | null,
+    body?: unknown,
+): Promise<Sent> {
+    const url = `${BASE}${path}`;
+    const headers: Record<string, string> = { accept: 'application/json' };
+    if (token) headers.Authorization = `Bearer ${token}`;
+    if (body !== undefined) headers['Content-Type'] = 'application/json';
+
+    try {
+        if (Capacitor.isNativePlatform()) {
+            const response = await CapacitorHttp.request({
+                url, method, headers,
+                data: body === undefined ? undefined : body,
+            });
+            // CapacitorHttp parses JSON itself, and hands back a string when the
+            // content type surprises it.
+            const parsed = typeof response.data === 'string'
+                ? safeParse(response.data)
+                : response.data;
+            return { status: response.status, body: parsed };
+        }
+
+        const response = await fetch(url, {
+            method, headers,
+            body: body === undefined ? undefined : JSON.stringify(body),
+        });
+        return { status: response.status, body: safeParse(await response.text()) };
+    } catch {
+        return { status: 0, body: null };
+    }
+}
+
+function safeParse(text: string): unknown {
+    try {
+        return JSON.parse(text) as unknown;
+    } catch {
+        return null;
+    }
+}
+
+const field = (body: unknown, name: string): unknown =>
+    body && typeof body === 'object' ? (body as Record<string, unknown>)[name] : undefined;
+
+const stringField = (body: unknown, name: string): string | null => {
+    const value = field(body, name);
+    return typeof value === 'string' && value ? value : null;
+};
+
+/**
+ * This install's id, minting one if it has never needed one before.
+ *
+ * Minting is deliberately lazy. An app that has never shared and never followed
+ * has no business having an identity on a server, and the overwhelming majority
+ * of installs never will — so nothing is created until the first moment
+ * somebody actually asks to pair.
+ *
+ * Null means the relay could not be reached, which callers must not read as
+ * "no account": minting again later is fine, minting twice is not.
+ */
+export async function ensureAccount(): Promise<string | null> {
+    const existing = storedAccountId();
+    if (existing) return existing;
+
+    const { status, body } = await send('POST', '/v1/account', null);
+    if (status !== 201) return null;
+
+    const id = stringField(body, 'accountId');
+    if (!id) return null;
+
+    rememberAccountId(id);
+    return id;
+}
+
+/**
+ * Tells the relay what time it is here now.
+ *
+ * Does NOT mint an account: somebody who has never paired has nothing to push
+ * and nobody to push it to, and creating an identity for them would be creating
+ * a server-side record of a person who never asked for one. Silent no-op until
+ * an account exists.
+ */
+export async function pushAnchor(anchor: Anchor): Promise<boolean> {
+    const token = storedAccountId();
+    if (!token) return false;
+
+    const { status } = await send('PUT', '/v1/anchor', token, anchor);
+    return status === 200;
+}
+
+/** Mints a code to read out. Null when the relay is unreachable or full. */
+export async function createInvitation(): Promise<Invitation | null> {
+    const token = await ensureAccount();
+    if (!token) return null;
+
+    const { status, body } = await send('POST', '/v1/shares', token);
+    if (status !== 201) return null;
+
+    const shareId = stringField(body, 'shareId');
+    const code = stringField(body, 'code');
+    if (!shareId || !code) return null;
+
+    return { shareId, code, createdAt: Date.now(), redeemedAt: null };
+}
+
+/**
+ * Redeems what somebody typed.
+ *
+ * The relay is the one that normalises the code — it has to, since it is the
+ * one matching against what it stored — so whatever was typed goes as typed.
+ */
+export async function redeemInvitation(typed: string): Promise<RedeemResult> {
+    const token = await ensureAccount();
+    if (!token) return { ok: false, reason: 'unreachable' };
+
+    const { status, body } = await send('POST', '/v1/shares/redeem', token, { code: typed });
+    if (status === 201) {
+        const shareId = stringField(body, 'shareId');
+        return shareId ? { ok: true, shareId } : { ok: false, reason: 'unreachable' };
+    }
+
+    // 400 covers both a code that is not a code and one that is your own, and
+    // the two want different words on screen.
+    if (stringField(body, 'error') === 'cannot_follow_yourself') {
+        return { ok: false, reason: 'yourself' };
+    }
+    if (status === 409) return { ok: false, reason: 'full' };
+    if (status === 400 || status === 404) return { ok: false, reason: 'invalid' };
+    return { ok: false, reason: 'unreachable' };
+}
+
+/**
+ * Everybody you follow, or null if the relay could not be reached.
+ *
+ * Null is emphatically not an empty list. A follower who loses signal keeps the
+ * rows they had, aged — the app's standing rule for anything with a timestamp,
+ * and the difference between "they have stopped sharing" and "I cannot ask".
+ */
+export async function fetchFollowing(): Promise<Followed[] | null> {
+    const token = storedAccountId();
+    if (!token) return [];
+
+    const { status, body } = await send('GET', '/v1/following', token);
+    if (status === 401) {
+        // The account is gone from the relay — deleted from another device, or
+        // swept. Holding a token it will never honour again helps nobody.
+        forgetAccountId();
+        return [];
+    }
+    if (status !== 200) return null;
+
+    const people = field(body, 'people');
+    if (!Array.isArray(people)) return null;
+
+    const followed: Followed[] = [];
+    for (const row of people) {
+        const shareId = stringField(row, 'shareId');
+        if (!shareId) continue;
+
+        // Validated here as well as at the relay. It was checked on the way in,
+        // and has since crossed a database, a JSON encoding and a network; this
+        // is the last place that can decline to put a malformed row on a widget.
+        const anchor = validateAnchor(field(row, 'anchor'));
+        const updatedAt = Number(field(row, 'updatedAt'));
+
+        followed.push({
+            shareId,
+            anchor,
+            updatedAt: anchor && Number.isFinite(updatedAt) ? updatedAt : null,
+        });
+    }
+    return followed;
+}
+
+/** Every code you have handed out, so they can be shown or withdrawn. */
+export async function fetchInvitations(): Promise<Invitation[] | null> {
+    const token = storedAccountId();
+    if (!token) return [];
+
+    const { status, body } = await send('GET', '/v1/followers', token);
+    if (status !== 200) return null;
+
+    const followers = field(body, 'followers');
+    if (!Array.isArray(followers)) return null;
+
+    const out: Invitation[] = [];
+    for (const row of followers) {
+        const shareId = stringField(row, 'shareId');
+        if (!shareId) continue;
+        const redeemedAt = Number(field(row, 'redeemedAt'));
+        out.push({
+            shareId,
+            code: stringField(row, 'code'),
+            createdAt: Number(field(row, 'createdAt')) || Date.now(),
+            redeemedAt: Number.isFinite(redeemedAt) ? redeemedAt : null,
+        });
+    }
+    return out;
+}
+
+/**
+ * Ends one share, from either end.
+ *
+ * The same call whether you are the one being read or the one reading: nobody
+ * should have to ask permission to stop being followed, and nobody should have
+ * to keep a row they no longer want.
+ */
+export async function revokeShare(shareId: string): Promise<boolean> {
+    const token = storedAccountId();
+    if (!token) return false;
+
+    const { status } = await send('DELETE', `/v1/shares/${encodeURIComponent(shareId)}`, token);
+    // Already gone counts as done. The caller wanted it not to exist.
+    return status === 200 || status === 404;
+}
+
+/**
+ * Deletes everything the relay holds about this install, then forgets the id.
+ *
+ * In that order, and only forgetting locally if the relay agreed — dropping the
+ * token first would leave rows on a server with nothing left that could ever
+ * ask for them again.
+ */
+export async function deleteAccount(): Promise<boolean> {
+    const token = storedAccountId();
+    if (!token) return true;
+
+    const { status } = await send('DELETE', '/v1/me', token);
+    if (status !== 200 && status !== 401) return false;
+
+    forgetAccountId();
+    return true;
+}
