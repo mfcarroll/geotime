@@ -140,18 +140,22 @@ export function clockSubLabel(entry: ClockEntry, word: ZoneLabelWord = 'Timezone
     return fold(entry.ship.name).startsWith(fold(line)) ? '' : line;
   }
   if (entry.kind === 'person') {
-    // Where they are, and how old that is when it is old. The name above is
-    // yours; this line is the only thing on the row that they control.
+    // What is known about where their clock comes from, and how old the answer
+    // is when it is old. The name above is yours; this line is the only thing
+    // on the row that they control.
     //
-    // A zone anchor is named the way any place row is — the town if the device
-    // knew one, else the zone — so "Dad / Vancouver" reads like "Tampa /
-    // Timezone: New York" rather than like a fourth kind of thing.
+    // Ashore that is the ZONE, phrased the way this app has always phrased a
+    // zone — "Mum / Timezone: London", exactly as a saved zone row reads. Not
+    // "London", which would be a claim about a city she may well not be in:
+    // Birmingham keeps London's clock, and the difference between naming a
+    // zone and naming a place is the whole reason `word` exists.
+    //
+    // Aboard it is the ship, because a crew-set clock cannot be described any
+    // other way and naming her is what they chose to share.
     const anchor = entry.person.anchor;
-    const where = anchor
-      ? (anchor.kind === 'zone' && !anchor.place
-          ? getDisplayTimezoneName(anchor.tz)
-          : anchorSubLabel(anchor))
-      : null;
+    const where = !anchor ? null
+      : anchor.kind === 'zone' ? `${word}: ${getDisplayTimezoneName(anchor.tz)}`
+      : anchorSubLabel(anchor);
     return personSubLabel(entry.person, where, correctedNow().getTime());
   }
 

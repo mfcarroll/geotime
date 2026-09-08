@@ -50,7 +50,10 @@ const REVOKED_KEY = 'anchorRevoked';
 
 /** This device's anchor right now. */
 export function myAnchor(): Anchor | null {
-    return anchorFrom(aboardShip(), state.localTimezone, state.localPlaceName);
+    // localPlaceName is deliberately NOT passed, and anchorFrom has nowhere to
+    // put it. This device knows its nearest town and its own widget draws it;
+    // that is where the knowledge stops. See ZoneAnchor.
+    return anchorFrom(aboardShip(), state.localTimezone);
 }
 
 /** What was last accepted by the relay, as this device remembers it. */

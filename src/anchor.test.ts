@@ -14,15 +14,23 @@ import {
 } from './anchor';
 
 test('an anchor ashore', async (t) => {
-    await t.test('is a zone id and the town, if the device knows one', () => {
-        assert.deepEqual(
-            validateAnchor({ kind: 'zone', tz: 'America/Vancouver', place: 'Nelson' }),
-            { kind: 'zone', tz: 'America/Vancouver', place: 'Nelson' });
-    });
-
-    await t.test('is a zone id alone where it does not', () => {
+    await t.test('is a zone id and nothing else', () => {
         assert.deepEqual(validateAnchor({ kind: 'zone', tz: 'Europe/London' }),
                          { kind: 'zone', tz: 'Europe/London' });
+    });
+
+    await t.test('drops a town, wherever one came from', () => {
+        // THE safeguard, and the reason validateAnchor rebuilds rather than
+        // spreads. 2.0.0-alpha sent a `place` for a while; a build still doing
+        // it, or anything else pointed at the relay, gets it dropped here — on
+        // the way in at the server AND on the way out at every reader, because
+        // both ends run this same function on this same file.
+        //
+        // A zone is thousands of kilometres wide and that width is the whole
+        // privacy story. A town is not, so a town does not travel.
+        const anchor = validateAnchor({ kind: 'zone', tz: 'Europe/London', place: 'Birmingham' });
+        assert.deepEqual(Object.keys(anchor!), ['kind', 'tz']);
+        assert.equal((anchor as unknown as Record<string, unknown>).place, undefined);
     });
 
     await t.test('is refused when the zone is one nobody can resolve', () => {
@@ -71,7 +79,7 @@ test('what a hostile sender cannot smuggle through', async (t) => {
             kind: 'zone', tz: 'America/Vancouver', place: 'Nelson',
             lat: 49.49, lon: -117.29, evil: '<script>', __proto__: { polluted: true },
         });
-        assert.deepEqual(anchor, { kind: 'zone', tz: 'America/Vancouver', place: 'Nelson' });
+        assert.deepEqual(anchor, { kind: 'zone', tz: 'America/Vancouver' });
         // Through `unknown`, because the point is that the property is not on
         // the type — which is the type system agreeing with the test.
         assert.equal((anchor as unknown as Record<string, unknown>).lat, undefined);
@@ -84,15 +92,35 @@ test('what a hostile sender cannot smuggle through', async (t) => {
         assert.deepEqual(Object.keys(anchor!), ['kind', 'tz']);
     });
 
+    await t.test('no anchor of any kind carries anything that narrows a zone', () => {
+        // Belt and braces over the case above, and deliberately a rule about
+        // the SHAPE rather than about known field names: a future field that
+        // says where somebody is has to fail this without anybody remembering
+        // to come back and add a case for it.
+        const built = [
+            validateAnchor({ kind: 'zone', tz: 'Europe/London', place: 'Birmingham',
+                             city: 'Birmingham', town: 'Birmingham', region: 'West Midlands',
+                             country: 'UK', postcode: 'B1', lat: 52.5, lon: -1.9 }),
+            validateAnchor({ kind: 'ship', offsetMinutes: 60, name: 'Anthem of the Seas',
+                             port: 'Southampton', lat: 50.9, lon: -1.4 }),
+        ];
+        const allowed = new Set(['kind', 'tz', 'offsetMinutes', 'name', 'short']);
+        for (const anchor of built) {
+            for (const key of Object.keys(anchor!)) {
+                assert.ok(allowed.has(key), `an anchor came back carrying "${key}"`);
+            }
+        }
+    });
+
     await t.test('a name long enough to break a row is refused, not truncated', () => {
         const long = 'x'.repeat(61);
         assert.equal(validateAnchor({ kind: 'ship', offsetMinutes: 0, name: long }), null);
 
-        // A name IS the ship, so an unusable one sinks the anchor. A place is a
-        // nicety on top of a zone, so the anchor stands and the place is left off.
+        // A name IS the ship, so an unusable one sinks her anchor. A zone
+        // anchor has nothing but its zone, so nothing about a long string
+        // attached to it can sink anything.
         const ashore = validateAnchor({ kind: 'zone', tz: 'Europe/London', place: long });
-        assert.ok(ashore && ashore.kind === 'zone');
-        assert.equal(ashore.place, undefined);
+        assert.deepEqual(ashore, { kind: 'zone', tz: 'Europe/London' });
     });
 
     await t.test('junk of every shape is simply not an anchor', () => {
@@ -123,9 +151,7 @@ test('how old an answer is', async (t) => {
 test('the line underneath the name', async (t) => {
     // The person's own name belongs to whoever follows them; this is the line
     // that says where they are.
-    await t.test('ashore, the town — or the zone where there is no town', () => {
-        assert.equal(anchorSubLabel({ kind: 'zone', tz: 'America/Vancouver', place: 'Nelson' }),
-                     'Nelson');
+    await t.test('ashore, the zone, because the zone is all there is', () => {
         assert.equal(anchorSubLabel({ kind: 'zone', tz: 'America/Vancouver' }),
                      'America/Vancouver');
     });
@@ -142,11 +168,11 @@ test('the line underneath the name', async (t) => {
 
 const NOW = 1_788_800_000_000;
 const wonder = { name: 'Wonder of the Seas', short: 'Wonder', offsetHours: -4 };
-const ashore: Anchor = { kind: 'zone', tz: 'America/Vancouver', place: 'Nelson' };
+const ashore: Anchor = { kind: 'zone', tz: 'America/Vancouver' };
 
 test('what this device says its anchor is', async (t) => {
     await t.test('the ship, when aboard one whose clock is known', () => {
-        assert.deepEqual(anchorFrom(wonder, 'America/New_York', 'Miami'), {
+        assert.deepEqual(anchorFrom(wonder, 'America/New_York'), {
             kind: 'ship',
             offsetMinutes: -240,
             name: 'Wonder of the Seas',
@@ -157,31 +183,34 @@ test('what this device says its anchor is', async (t) => {
     await t.test('the ground, when the ship has no clock yet', () => {
         // Aboard is not a fact you can send; an offset is. Until one resolves
         // there is nothing to say about the ship, so the ground is the answer.
-        assert.deepEqual(anchorFrom({ ...wonder, offsetHours: null }, 'America/Vancouver', 'Nelson'),
+        assert.deepEqual(anchorFrom({ ...wonder, offsetHours: null }, 'America/Vancouver'),
                          ashore);
     });
 
     await t.test('the ground, when not aboard anything', () => {
-        assert.deepEqual(anchorFrom(null, 'America/Vancouver', 'Nelson'), ashore);
+        assert.deepEqual(anchorFrom(null, 'America/Vancouver'), ashore);
     });
 
     await t.test('nothing, when the device does not know its own zone', () => {
         // Sending UTC and letting somebody read it would be worse than silence.
-        assert.equal(anchorFrom(null, null, 'Nelson'), null);
+        assert.equal(anchorFrom(null, null), null);
     });
 
-    await t.test('carries no place when there is no place to carry', () => {
-        assert.deepEqual(anchorFrom(null, 'America/Vancouver', null),
+    await t.test('ashore, carries the zone and nothing else, ever', () => {
+        // There is no third argument. The device knows its nearest town and
+        // this function has nowhere to put it, which is the compile-time half
+        // of the safeguard validateAnchor is the runtime half of.
+        assert.deepEqual(anchorFrom(null, 'America/Vancouver'),
                          { kind: 'zone', tz: 'America/Vancouver' });
     });
 
     await t.test('omits a short name that is the name', () => {
-        const anchor = anchorFrom({ name: 'Icon', short: 'Icon', offsetHours: 0 }, null, null);
+        const anchor = anchorFrom({ name: 'Icon', short: 'Icon', offsetHours: 0 }, null);
         assert.equal('short' in anchor!, false);
     });
 
     await t.test('rounds a half-hour ship clock to whole minutes', () => {
-        const anchor = anchorFrom({ ...wonder, offsetHours: 5.75 }, null, null);
+        const anchor = anchorFrom({ ...wonder, offsetHours: 5.75 }, null);
         assert.deepEqual((anchor as { offsetMinutes: number }).offsetMinutes, 345);
     });
 });
@@ -191,18 +220,12 @@ test('whether two anchors read the same', async (t) => {
         assert.equal(sameAnchor(ashore, { ...ashore }), true);
     });
 
-    await t.test('a different town in the same zone is a change', () => {
-        // It is what the far end's row says underneath, so it is a change.
-        assert.equal(sameAnchor(ashore, { ...ashore, place: 'Vancouver' }), false);
-    });
-
-    await t.test('an absent place and an empty one are the same nothing', () => {
-        assert.equal(sameAnchor({ kind: 'zone', tz: 'UTC' },
-                                { kind: 'zone', tz: 'UTC', place: '' }), true);
+    await t.test('a different zone is a change', () => {
+        assert.equal(sameAnchor(ashore, { kind: 'zone', tz: 'America/Toronto' }), false);
     });
 
     await t.test('kinds never match across', () => {
-        assert.equal(sameAnchor(ashore, anchorFrom(wonder, null, null)), false);
+        assert.equal(sameAnchor(ashore, anchorFrom(wonder, null)), false);
     });
 
     await t.test('null equals only null', () => {
@@ -213,7 +236,10 @@ test('whether two anchors read the same', async (t) => {
 
 test('whether it is due', async (t) => {
     await t.test('a change is always due', () => {
-        assert.equal(shouldPush({ ...ashore, place: 'Victoria' }, ashore, NOW, NOW), true);
+        // Crossing a border, which for this feature is the only kind of change
+        // there is ashore: moving town within a zone changes nothing anybody
+        // can see, because nothing about the town is sent.
+        assert.equal(shouldPush({ kind: 'zone', tz: 'America/Toronto' }, ashore, NOW, NOW), true);
     });
 
     await t.test('unchanged and recent is not', () => {

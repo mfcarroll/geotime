@@ -25,13 +25,26 @@
 // id to send: a ship's clock is set by her crew and belongs to no region, so
 // the offset goes instead — the same split the app already lives with everywhere else.
 
-/** Ashore: the region whose time you are keeping. */
+/**
+ * Ashore: the region whose time you are keeping.
+ *
+ * A zone id and NOTHING ELSE. There is no field for a town here and there must
+ * never be one: a zone is thousands of kilometres wide, and that width is the
+ * entire privacy story of this feature. The map refuses to paint even the
+ * single ZONE within a band for the same reason — Vancouver and Seattle keep
+ * one clock and the app declines to say which of them somebody is in — and a
+ * town name in the payload would have made that refusal theatre.
+ *
+ * 2.0.0-alpha carried a `place` for a while, on the argument that "Birmingham"
+ * makes a better row than "Europe/London". It does. It also makes the row a
+ * location, which this is not, so it is gone: see validateAnchor, which drops
+ * it on the way in at BOTH ends, and anchor.test.ts, which fails if it ever
+ * comes back.
+ */
 export interface ZoneAnchor {
     kind: 'zone';
     /** IANA id, e.g. "America/Vancouver". */
     tz: string;
-    /** The town, where the device knows one. "Nelson". */
-    place?: string;
 }
 
 /** Aboard: a clock the crew set, belonging to no region. */
@@ -105,7 +118,6 @@ export const HEARTBEAT_MS = 6 * 60 * 60 * 1000;
 export function anchorFrom(
     ship: { name: string; short: string; offsetHours: number | null } | null,
     tz: string | null,
-    place: string | null,
 ): Anchor | null {
     if (ship && ship.offsetHours !== null) {
         return {
@@ -119,7 +131,10 @@ export function anchorFrom(
         };
     }
     if (!tz) return null;
-    return { kind: 'zone', tz, ...(place ? { place } : {}) };
+    // No town, and no parameter to pass one in. The device knows its nearest
+    // town — state.localPlaceName, which its own widget uses — and that is
+    // where that knowledge stops. See ZoneAnchor.
+    return { kind: 'zone', tz };
 }
 
 /**
@@ -132,7 +147,7 @@ export function anchorFrom(
 export function sameAnchor(a: Anchor | null, b: Anchor | null): boolean {
     if (!a || !b) return a === b;
     if (a.kind === 'zone' && b.kind === 'zone') {
-        return a.tz === b.tz && (a.place ?? '') === (b.place ?? '');
+        return a.tz === b.tz;
     }
     if (a.kind === 'ship' && b.kind === 'ship') {
         return a.offsetMinutes === b.offsetMinutes
@@ -213,10 +228,11 @@ export function validateAnchor(raw: unknown): Anchor | null {
         const tz = typeof source.tz === 'string' ? source.tz.trim() : '';
         if (!tz || tz.length > MAX_NAME || !isResolvableZone(tz)) return null;
 
-        const anchor: ZoneAnchor = { kind: 'zone', tz };
-        const place = cleanName(source.place);
-        if (place) anchor.place = place;
-        return anchor;
+        // Two fields out, whatever came in. A payload carrying a `place` — an
+        // older build of ours, or anything else — loses it here rather than
+        // reaching a database or a home screen. That is the safeguard, and it
+        // is one line only because the function rebuilds rather than spreads.
+        return { kind: 'zone', tz };
     }
 
     if (source.kind === 'ship') {
@@ -246,5 +262,5 @@ export function validateAnchor(raw: unknown): Anchor | null {
  * line UNDERNEATH: where they are, or which ship they are on.
  */
 export function anchorSubLabel(anchor: Anchor): string {
-    return anchor.kind === 'ship' ? (anchor.short ?? anchor.name) : (anchor.place ?? anchor.tz);
+    return anchor.kind === 'ship' ? (anchor.short ?? anchor.name) : anchor.tz;
 }

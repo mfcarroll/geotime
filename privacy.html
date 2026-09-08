@@ -25,7 +25,7 @@
                     GeoTime collects nothing about you by default, and there is no account to create in order to use it.
                     The app requests access to your device's location for the sole purpose of displaying the current time and timezone at your location.
                     Your coordinates are used only while the app is running, and are never transmitted to our servers or to any third party.
-                    The app stores the name of the city or town closest to your last known position on your device, so the home-screen widget can label your local time while the app is closed.
+                    The app stores the name of the city or town closest to your last known position on your device, so the home-screen widget can label your local time while the app is closed. That name is never transmitted anywhere, including to the people you share your time with.
                 </p>
                 <p>
                     One optional feature does send something, and only if you turn it on. It is described in &ldquo;Sharing your time&rdquo; below.
@@ -45,16 +45,15 @@
                 </p>
                 <p>
                     While sharing is on, the app sends the server <em>what time it is where you are</em>, and nothing more. In practice that is a timezone name such as
-                    <span class="font-mono text-gray-200">America/Vancouver</span>,
-                    together with the nearest town's name if your device has worked one out; or, aboard a ship, that ship's name and how many hours its clock is from UTC.
+                    <span class="font-mono text-gray-200">America/Vancouver</span> &mdash; or, aboard a ship, that ship's name and how many hours its clock is from UTC.
                 </p>
                 <p>
-                    <strong class="text-white">Your coordinates are never sent.</strong> There is nowhere in the record to put them, and the app does not ask the server to hold them.
-                    The most precise thing about you that ever leaves your device is the name of your nearest town, and only while sharing is on. That is deliberate: &ldquo;Birmingham&rdquo; is what makes the row worth reading, where a timezone name on its own is not.
-                    It is a town and not a street or a position. The app includes it whenever it has worked one out, and there is no separate switch for it &mdash; turning sharing off, or ending a share, is how you stop sending it.
+                    <strong class="text-white">Nothing narrower than a timezone is ever sent.</strong> Not your coordinates, and not the name of your town either.
+                    A timezone is thousands of kilometres wide and shared by millions of people: everyone from Vancouver to Nelson to Los Angeles keeps the same one, and nothing in what we send distinguishes them.
+                    The people you share with see what time it is for you. They do not see where you are, and there is nothing in the record for them to see it from.
                 </p>
                 <p>
-                    No history is kept either way. Each update replaces the last, so there is no record of where you have been or when. The only date stored is when your current time was last updated, which is what lets the other person see that an answer has gone stale.
+                    No history is kept either. Each update replaces the last, so there is no record of where you have been or when. The only date stored is when your current time was last updated, which is what lets the other person see that an answer has gone stale.
                 </p>
                 <p>
                     The name you give somebody you follow &mdash; &ldquo;Mum&rdquo;, &ldquo;Dad&rdquo; &mdash; is stored only on your own device and is never sent anywhere. The server does not know it and cannot be asked for it.

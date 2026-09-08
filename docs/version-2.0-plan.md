@@ -314,6 +314,11 @@ Compliance and hygiene
 13. **Privacy policy.** `privacy.html` needs a section: what is shared (a
     timezone and a place name, never coordinates), with whom (people you gave
     a code to), for how long, and how to delete it.
+    *Settled differently: the place name is not shared either.* A town is a
+    location and a zone is not, and a payload that narrowed to a town while the
+    map refused to narrow below an offset band would have made that refusal
+    theatre. See `ZoneAnchor`, and `docs/store-privacy-declarations.md` for
+    what that means on both store forms.
 14. **Deletion.** `DELETE /v1/me` and a button for it. Not strictly required
     by the App Store without accounts, but it is the right thing and it is
     cheap.

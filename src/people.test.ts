@@ -17,7 +17,7 @@ const NOW = 1_788_800_000_000;
 const dad = (over: Partial<FollowedPerson> = {}): FollowedPerson => ({
     shareId: 'share-1',
     name: 'Dad',
-    anchor: { kind: 'zone', tz: 'America/Vancouver', place: 'Nelson' },
+    anchor: { kind: 'zone', tz: 'America/Vancouver' },
     updatedAt: NOW - HOUR,
     ...over,
 });
@@ -56,13 +56,14 @@ test('the followed list, coming back off disk', async (t) => {
 });
 
 test('what the row says underneath', async (t) => {
-    await t.test('where they are, while the answer is fresh', () => {
-        assert.equal(personSubLabel(dad(), 'Nelson', NOW), 'Nelson');
+    await t.test('what the anchor says, while the answer is fresh', () => {
+        assert.equal(personSubLabel(dad(), 'Timezone: Vancouver', NOW), 'Timezone: Vancouver');
     });
 
     await t.test('and how old it is once it is not', () => {
         const stale = dad({ updatedAt: NOW - 3 * DAY });
-        assert.equal(personSubLabel(stale, 'Nelson', NOW), 'Nelson · 3 days ago');
+        assert.equal(personSubLabel(stale, 'Timezone: Vancouver', NOW),
+                     'Timezone: Vancouver · 3 days ago');
     });
 
     await t.test('says so when they have never shared', () => {
@@ -74,7 +75,7 @@ test('what the row says underneath', async (t) => {
 
     await t.test('is never empty, however old — a row is never hidden for age', () => {
         for (const age of [0, HOUR, DAY, 30 * DAY, 400 * DAY]) {
-            const line = personSubLabel(dad({ updatedAt: NOW - age }), 'Nelson', NOW);
+            const line = personSubLabel(dad({ updatedAt: NOW - age }), 'Timezone: Vancouver', NOW);
             assert.ok(line.length > 0, `${age}ms gave an empty line`);
         }
     });

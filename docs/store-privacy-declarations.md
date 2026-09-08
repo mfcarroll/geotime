@@ -19,40 +19,47 @@ see `ensureAccount` in `src/anchor-share.ts`, which is deliberately lazy.
 |---|---|---|
 | A random account id | minted by the relay, `POST /v1/account` | first pairing, then in every request as a bearer token |
 | An IANA zone id, e.g. `America/Vancouver` | `anchorFrom` in `src/anchor.ts` | on change, and every 6h (`HEARTBEAT_MS`) |
-| The nearest town's name, e.g. `Nelson` | same, from `state.localPlaceName` | with the zone, whenever the app has one |
 | A ship's name and its offset | same, while aboard | instead of the zone |
 
-Never sent: coordinates, a device identifier, an advertising identifier, an
-email address, a name, contacts, or any history. The relay keeps one anchor per
+Never sent: **anything narrower than a zone**. Not coordinates, and not the
+town name either — the device knows its nearest town and its own widget draws
+it, and that is where the knowledge stops. `ZoneAnchor` has no field for one,
+`anchorFrom` has no parameter for one, and `validateAnchor` drops one if a
+payload arrives carrying it, at both ends, because both ends run that same
+file. `anchor.test.ts` fails if any of that stops being true.
+
+Also never sent: a device identifier, an advertising identifier, an email
+address, a name, contacts, or any history. The relay keeps one anchor per
 account and each write replaces the last (`schema.sql`).
 
 The name you give somebody you follow never leaves the device at all.
 
 ## Apple — App Privacy
 
-Two data types. Neither is used for tracking, and no third-party SDK collects
-anything, so **Data Used to Track You** stays empty.
+**One** data type. Nothing is used for tracking, and no third-party SDK
+collects anything, so **Data Used to Track You** stays empty.
 
 **Identifiers → User ID.** Purpose: App Functionality. Linked to the user: yes
 — it is the account the shares hang off, which is what "linked" means here,
 even though it is tied to no real-world identity.
 
-**Location → Coarse Location.** Purpose: App Functionality. Linked to the user:
-yes.
+**Location: none.** Neither Precise nor Coarse.
 
-Coarse Location is the one that takes a moment's thought, and the answer is
-yes. Apple defines it as location at lower resolution than three kilometres,
-and a town name is exactly that. The zone id alone would not qualify — a
-timezone is thousands of kilometres wide — but the app sends the town beside it
-whenever it has one, and a declaration that covered only the zone would be
-wrong. Precise Location stays unticked: coordinates never leave the device.
+That answer is worth its own paragraph, because it was nearly the other one. An
+earlier build of 2.0 sent the nearest town's name beside the zone, on the
+argument that "Birmingham" makes a better row than "Europe/London". It does —
+and Apple defines Coarse Location as location at lower resolution than three
+kilometres, which a town name plainly is, so that build would have had to
+declare it. Sending the town was dropped instead. What travels now is a zone
+id, which is thousands of kilometres wide and describes millions of people at
+once; that is not location under anybody's definition, and the app declines to
+narrow it anywhere else either — the map paints a whole offset band rather than
+the single zone within it.
 
 ## Google Play — Data safety
 
-**Location → Approximate location.** Collected: yes. Shared: yes — with the
-people the user gives a code to, which is the point of the feature. Processed
-ephemerally: no, it is stored until replaced or deleted. Required: no, the
-feature is optional. Purpose: App functionality.
+**Location:** nothing. Neither approximate nor precise. Same reasoning as
+above: a timezone is not an approximate location, it is a fact about a clock.
 
 **App activity / App info and performance:** nothing.
 
@@ -68,5 +75,5 @@ Sharing card, which calls `DELETE /v1/me`.
 
 ## The sentence both forms are really asking for
 
-The app sends what time it is for you and, when it knows one, the name of your
-nearest town. It never sends where you are.
+The app sends what time it is for you. It never sends where you are, and there
+is nothing in what it does send that anyone could work that out from.
