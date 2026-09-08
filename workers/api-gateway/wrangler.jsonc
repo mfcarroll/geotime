@@ -41,6 +41,42 @@
     }
   ],
 
+  // Rate limits, declared rather than provisioned: `namespace_id` is a number we
+  // choose, unique within the account, and the platform makes the counter on
+  // first use. Nothing to create, nothing to record afterwards — which is why
+  // this belongs here and not in scripts/provision.mjs.
+  //
+  // Here rather than in the relay because this is the layer that actually has
+  // the client's IP. A service binding hands the Worker behind it a request
+  // whose CF-* headers may or may not survive the hop, and a limiter keyed on
+  // something that might be absent silently degrades into one global counter
+  // for everybody — which is worse than no limiter at all.
+  //
+  // WHAT THIS DOES AND DOES NOT STOP. A minute-window limiter stops runaway
+  // loops, a script pointed at the redeem route, and casual hammering. It does
+  // not by itself protect the account's daily request budget: even 120/min is
+  // 172,800 a day from one address. A determined attacker with addresses to
+  // spare is not in scope for a free tier, and the answer to that day is
+  // Cloudflare's own WAF rules rather than another number in here.
+  "ratelimits": [
+    {
+      "name": "GENERAL",
+      "namespace_id": "1001",
+      // Comfortably above anything a real client does. The app makes a handful
+      // of requests on foreground; the widget refreshes ships on its own
+      // schedule. Anything at two a second is not a person using the app.
+      "simple": { "limit": 120, "period": 60 }
+    },
+    {
+      "name": "SENSITIVE",
+      "namespace_id": "1002",
+      // Minting an identity and spending somebody's code. Both are things a
+      // person does once and a script does forever, and five a minute is more
+      // than a human with a bad phone line will ever need.
+      "simple": { "limit": 5, "period": 60 }
+    }
+  ],
+
   // Worker-to-Worker, inside Cloudflare's network: no DNS, no TLS handshake, no
   // second trip off the edge. The names must match the `name` field in each
   // target's own wrangler.jsonc.
