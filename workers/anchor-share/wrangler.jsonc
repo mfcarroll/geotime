@@ -1,0 +1,35 @@
+// Deploy: npm run deploy:anchor-share  (from the repo root)
+//
+// Schema: npm run db:anchor-share        (local, for `wrangler dev`)
+//         npm run db:anchor-share:remote (the real database)
+//
+// The relay behind 2.0's shared anchors — see docs/version-2.0-plan.md. The
+// other three Workers in here are stateless proxies; this is the first one with
+// a database, which is the whole reason 2.0 needs a server at all.
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "geotime-anchor-share",
+  "main": "src/index.ts",
+  // Today's date at creation. Bump deliberately, not incidentally: it changes
+  // runtime behaviour.
+  "compatibility_date": "2026-09-07",
+  "observability": {
+    "enabled": true,
+    // Still low traffic — a write when somebody's zone changes, a read per app
+    // foreground — so capture everything rather than sample.
+    "head_sampling_rate": 1
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "geotime-anchor-share",
+      // Replace with the id `wrangler d1 create geotime-anchor-share` prints,
+      // before deploying. All zeroes so it cannot be mistaken for a real one:
+      // `wrangler dev` only needs the field to be non-empty and keeps its own
+      // local SQLite regardless, while a deploy against a database that does not
+      // exist fails immediately and says so. Empty would be tidier still, and
+      // does not work — `wrangler dev` refuses to start on a falsy id.
+      "database_id": "00000000-0000-0000-0000-000000000000"
+    }
+  ]
+}
