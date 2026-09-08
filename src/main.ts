@@ -292,12 +292,25 @@ async function startApp() {
    * bug — it works every time you test it and never on a phone that was closed.
    */
   function watchFollowLinks(): void {
+    // ONCE PER LINK, and this is not a nicety. A cold start from a follow link
+    // fires appUrlOpen AND resolves getLaunchUrl with the same URL, so both
+    // listeners below see it — and two redemptions of a single-use code raced
+    // each other through account creation, minted two accounts, and left the
+    // share belonging to whichever one lost the write. Unreachable afterwards,
+    // and the code spent.
+    //
+    // Both listeners still exist because either alone misses a case: the event
+    // does not fire for a cold start, and the launch URL is not re-read when a
+    // running app is handed a new one.
+    const seen = new Set<string>();
     const follow = (url: string | null | undefined) => {
       if (!url) return;
       // Only our own path, and only the last segment. A URL is attacker-supplied
       // input even when it arrives through a mechanism only we can claim.
       const code = /\/f\/([0-9A-Za-z-]{1,32})\/?$/.exec(url)?.[1];
-      if (code) void followFromLink(code);
+      if (!code || seen.has(code)) return;
+      seen.add(code);
+      void followFromLink(code);
     };
 
     App.addListener('appUrlOpen', (event) => follow(event.url))

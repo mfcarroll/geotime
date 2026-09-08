@@ -6,7 +6,7 @@
 // can't be trusted to keep fresh after an OS timezone change.
 
 import { Capacitor, registerPlugin, type PluginListenerHandle } from '@capacitor/core';
-import type { FollowedPerson } from './people';
+import { anchorForWidget, type FollowedPerson } from './people';
 import type { ShipClock } from './ships';
 import { placeRegion, type StoredZone } from './stored-zones';
 
@@ -184,15 +184,12 @@ export function syncWidgetTimezones({
     // pairing whose other end has never opened their app has no time to show,
     // and the widget has no way to say so. The app's list keeps the row and
     // says "Not shared yet"; a widget row would have to invent a clock.
-    people: people
-      .filter((person) => person.anchor !== null)
-      .map((person) => ({
-        key: person.shareId,
-        name: person.name,
-        tz: person.anchor!.kind === 'zone' ? person.anchor!.tz : '',
-        offsetMinutes: person.anchor!.kind === 'ship' ? person.anchor!.offsetMinutes : 0,
-        short: person.anchor!.kind === 'ship' ? (person.anchor!.short ?? '') : '',
-      })),
+    // flatMap rather than filter-then-map, so the null check narrows the type
+    // and the mapping cannot reach for `anchor!`. See anchorForWidget for why
+    // the clock fields are worked out by an exhaustive switch and not here.
+    people: people.flatMap((person) => person.anchor
+      ? [{ key: person.shareId, name: person.name, ...anchorForWidget(person.anchor) }]
+      : []),
   }).catch((err) => {
     console.warn('WidgetBridge.setTimezones failed:', err);
   });

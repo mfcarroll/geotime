@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+    anchorForWidget,
     describeAge,
     describeInvitation,
     mergeFollowed,
@@ -9,6 +10,7 @@ import {
     personSubLabel,
     type FollowedPerson,
 } from './people';
+import type { Anchor } from './anchor';
 
 const HOUR = 60 * 60 * 1000;
 const DAY = 24 * HOUR;
@@ -178,5 +180,44 @@ test('a code you handed out, from your side of it', async (t) => {
         const { text, code } = describeInvitation(invitation(), NOW);
         assert.equal(code, null);
         assert.match(text, /expired/i);
+    });
+});
+
+test('a followed person, on the way to a home-screen widget', async (t) => {
+    await t.test('a zone sends its id and no offset', () => {
+        // The phone works the offset out from the id, which is the whole
+        // reason an id is what travels.
+        assert.deepEqual(anchorForWidget({ kind: 'zone', tz: 'Asia/Tokyo' }),
+                         { tz: 'Asia/Tokyo', offsetMinutes: 0, short: '' });
+    });
+
+    await t.test('a ship sends her offset and her short name', () => {
+        assert.deepEqual(
+            anchorForWidget({ kind: 'ship', offsetMinutes: -240, name: 'Wonder of the Seas', short: 'Wonder' }),
+            { tz: '', offsetMinutes: -240, short: 'Wonder' });
+    });
+
+    await t.test('an OFFSET sends its offset — not zero, which is UTC', () => {
+        // The regression this test exists for. Two independent ternaries —
+        // "zone ? tz : ''" and "ship ? offset : 0" — were correct until a third
+        // kind of anchor matched neither, fell through both, and put every
+        // followed person on the widget at UTC. In the default sharing mode.
+        assert.deepEqual(anchorForWidget({ kind: 'offset', offsetMinutes: 540 }),
+                         { tz: '', offsetMinutes: 540, short: '' });
+    });
+
+    await t.test('no anchor of any kind arrives as a bare UTC clock', () => {
+        // Stated as a property rather than three cases, so a fourth kind that
+        // forgets to carry its clock fails here as well as at the compiler.
+        const anchors: Anchor[] = [
+            { kind: 'zone', tz: 'Europe/London' },
+            { kind: 'ship', offsetMinutes: 330, name: 'Anthem of the Seas' },
+            { kind: 'offset', offsetMinutes: -420 },
+        ];
+        for (const anchor of anchors) {
+            const { tz, offsetMinutes } = anchorForWidget(anchor);
+            assert.ok(tz !== '' || offsetMinutes !== 0,
+                      `${anchor.kind} would be drawn at UTC`);
+        }
     });
 });

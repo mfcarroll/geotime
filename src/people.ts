@@ -199,3 +199,37 @@ export function describeInvitation(
     // No code left and nobody took it up: it timed out. See CODE_TTL_MS.
     return { text: 'Code expired, never used', code: null };
 }
+
+/**
+ * A followed person's anchor, as the native widgets need it.
+ *
+ * A SWITCH AND NOT TERNARIES, deliberately, and the `never` at the end is the
+ * whole reason. This started life as two independent conditional expressions —
+ * "zone ? tz : ''" beside "ship ? offsetMinutes : 0" — which was correct while
+ * an anchor was one of two things. Adding OffsetAnchor made a third, which
+ * matched neither, fell through both, and arrived at the widget as an empty
+ * zone with a zero offset: every followed person drawn at UTC on somebody's
+ * home screen, in the DEFAULT sharing mode, confidently and wrongly.
+ *
+ * A fourth kind now fails to compile instead.
+ *
+ * `tz` empty means "use the offset"; the native side reads it that way. A zone
+ * sends no offset because the phone works it out from the id, which is the
+ * point of sending an id at all.
+ */
+export function anchorForWidget(
+    anchor: Anchor,
+): { tz: string; offsetMinutes: number; short: string } {
+    switch (anchor.kind) {
+        case 'zone':
+            return { tz: anchor.tz, offsetMinutes: 0, short: '' };
+        case 'ship':
+            return { tz: '', offsetMinutes: anchor.offsetMinutes, short: anchor.short ?? '' };
+        case 'offset':
+            return { tz: '', offsetMinutes: anchor.offsetMinutes, short: '' };
+        default: {
+            const unhandled: never = anchor;
+            return unhandled;
+        }
+    }
+}

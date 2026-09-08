@@ -165,10 +165,29 @@ const stringField = (body: unknown, name: string): string | null => {
  * Null means the relay could not be reached, which callers must not read as
  * "no account": minting again later is fine, minting twice is not.
  */
+let minting: Promise<string | null> | null = null;
+
 export async function ensureAccount(name?: string | null): Promise<string | null> {
     const existing = storedAccountId();
     if (existing) return existing;
 
+    // ONE mint, however many callers. Two concurrent calls used to make two
+    // accounts: both read a null id, both posted, and whichever answered last
+    // won the stored id — so a share redeemed by the first was bound to an
+    // account nothing could name any more. Unreachable, unrevokable, and the
+    // code spent. It happened on the very first thing a new install does,
+    // because a cold start from a follow link fires appUrlOpen AND resolves
+    // getLaunchUrl with the same URL.
+    //
+    // The in-flight promise is the whole fix. Cleared afterwards so a failed
+    // mint can be retried rather than remembered as a permanent null.
+    if (!minting) {
+        minting = mintAccount(name).finally(() => { minting = null; });
+    }
+    return minting;
+}
+
+async function mintAccount(name?: string | null): Promise<string | null> {
     // The name goes in at creation, because the next thing that happens is a
     // code being minted and a share with no name on it gives the other end a
     // blank row to look at.
