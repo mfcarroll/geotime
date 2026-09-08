@@ -144,14 +144,21 @@ export function clockSubLabel(entry: ClockEntry, word: ZoneLabelWord = 'Timezone
     // is when it is old. The name above is yours; this line is the only thing
     // on the row that they control.
     //
-    // Ashore that is the ZONE, phrased the way this app has always phrased a
-    // zone — "Mum / Timezone: London", exactly as a saved zone row reads. Not
-    // "London", which would be a claim about a city she may well not be in:
-    // Birmingham keeps London's clock, and the difference between naming a
-    // zone and naming a place is the whole reason `word` exists.
+    // Whether there is anything to put here at all is THEIR choice, not ours.
+    // Without "share my exact timezone" the relay hands over a bare offset, and
+    // this line is blank — the row becomes "Mum · 5:16 AM · +8 hrs", which says
+    // what time it is for her and nothing whatever about where she is.
     //
-    // Aboard it is the ship, because a crew-set clock cannot be described any
-    // other way and naming her is what they chose to share.
+    // With it on, the ZONE, phrased the way this app has always phrased a zone:
+    // "Mum / Timezone: London", exactly as a saved zone row reads. Not
+    // "London", which would be a claim about a city she may well not be in —
+    // Birmingham keeps London's clock, and the difference between naming a zone
+    // and naming a place is the whole reason `word` exists.
+    //
+    // Aboard it is the ship, since a crew-set clock cannot be described any
+    // other way and naming her is what they chose to share. Aboard WITHOUT the
+    // switch, the relay has already turned her into an offset, so there is no
+    // ship here to name.
     const anchor = entry.person.anchor;
     const where = !anchor ? null
       : anchor.kind === 'zone' ? `${word}: ${getDisplayTimezoneName(anchor.tz)}`

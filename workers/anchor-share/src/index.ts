@@ -22,7 +22,7 @@
  * payload is a timezone.
  */
 
-import { validateAnchor, type Anchor } from '../../../src/anchor';
+import { anchorAsSeen, cleanDisplayName, validateAnchor, type Anchor } from '../../../src/anchor';
 import { mintShareCode, normaliseShareCode } from '../../../src/share-code';
 
 interface Env {
@@ -123,21 +123,63 @@ async function readJson(request: Request): Promise<unknown | null> {
  * while `crypto.randomUUID()` would in practice be fine, "in practice" is not a
  * property you want load-bearing under an authorization header.
  */
-async function createAccount(env: Env): Promise<Response> {
+async function createAccount(request: Request, env: Env): Promise<Response> {
+  // The name arrives with the account rather than in a second call, because the
+  // very first thing anybody does with a new account is mint a code — and a
+  // code whose share has no name on it hands the other end a blank row.
+  const body = (await readJson(request)) as { name?: unknown } | null;
+  const name = cleanDisplayName(body?.name);
+
   const accountId = crypto.randomUUID();
   const at = now();
   await env.DB.prepare(
-    'INSERT INTO accounts (account_id, created_at, last_seen_at) VALUES (?, ?, ?)',
+    `INSERT INTO accounts (account_id, created_at, last_seen_at, display_name)
+       VALUES (?, ?, ?, ?)`,
   )
-    .bind(accountId, at, at)
+    .bind(accountId, at, at, name)
     .run();
   return json({ accountId }, 201);
+}
+
+/**
+ * The two things about an account that its owner chooses.
+ *
+ * One route rather than two because they are set together on one screen and
+ * neither means much without the other: a name is what a follower calls you,
+ * and the switch is how much they are told. Both are optional in the body, so
+ * this doubles as "just change the switch".
+ */
+async function putProfile(request: Request, env: Env, account: string): Promise<Response> {
+  const body = (await readJson(request)) as { name?: unknown; shareExact?: unknown } | null;
+  if (!body) return fail('invalid_profile', 400);
+
+  const name = 'name' in body ? cleanDisplayName(body.name) : undefined;
+  // Nothing but a real boolean flips a privacy switch. A truthy string is
+  // somebody's bug, and guessing which way they meant it is not this layer's
+  // business when one direction is the safe one.
+  const exact = typeof body.shareExact === 'boolean' ? body.shareExact : undefined;
+  if (name === undefined && exact === undefined) return fail('invalid_profile', 400);
+
+  if (name !== undefined) {
+    await env.DB.prepare('UPDATE accounts SET display_name = ? WHERE account_id = ?')
+      .bind(name, account).run();
+  }
+  if (exact !== undefined) {
+    await env.DB.prepare('UPDATE accounts SET share_exact = ? WHERE account_id = ?')
+      .bind(exact ? 1 : 0, account).run();
+  }
+  return json({ ok: true });
 }
 
 /** The sharer's side: this is what time it is for me now. */
 async function putAnchor(request: Request, env: Env, account: string): Promise<Response> {
   const anchor = validateAnchor(await readJson(request));
   if (!anchor) return fail('invalid_anchor', 400);
+  // A device says where its clock comes from; it does not get to say what a
+  // follower is shown. An OffsetAnchor is this relay's own output — accepting
+  // one back would mean storing a number with no rules attached, and losing the
+  // daylight-saving correctness that computing it here exists to provide.
+  if (anchor.kind === 'offset') return fail('invalid_anchor', 400);
 
   const at = now();
   // Replaces, never appends. See the note on `anchors` in schema.sql.
@@ -188,10 +230,12 @@ async function redeemShare(request: Request, env: Env, account: string): Promise
   if ((following?.n ?? 0) >= MAX_FOLLOWING) return fail('too_many_following', 409);
 
   const share = await env.DB.prepare(
-    'SELECT id, sharer, expires_at FROM shares WHERE code = ?',
+    `SELECT s.id, s.sharer, s.expires_at, u.display_name AS name
+       FROM shares s JOIN accounts u ON u.account_id = s.sharer
+      WHERE s.code = ?`,
   )
     .bind(code)
-    .first<{ id: string; sharer: string; expires_at: number }>();
+    .first<{ id: string; sharer: string; expires_at: number; name: string | null }>();
 
   // One answer for "no such code" and "expired", so that a wrong guess cannot
   // be told from a stale one. There is little to learn either way at forty
@@ -211,7 +255,10 @@ async function redeemShare(request: Request, env: Env, account: string): Promise
     .run();
   if (!claimed.meta.changes) return fail('invalid_code', 404);
 
-  return json({ shareId: share.id }, 201);
+  // The name comes back with the share so the new row arrives already called
+  // something. Nothing else about the sharer does, and the follower can rename
+  // it to whatever they like — locally, for good.
+  return json({ shareId: share.id, name: share.name }, 201);
 }
 
 /**
@@ -223,23 +270,39 @@ async function redeemShare(request: Request, env: Env, account: string): Promise
  */
 async function listFollowing(env: Env, account: string): Promise<Response> {
   const { results } = await env.DB.prepare(
-    `SELECT s.id AS shareId, a.payload, a.updated_at AS updatedAt
-       FROM shares s LEFT JOIN anchors a ON a.account_id = s.sharer
+    `SELECT s.id AS shareId, a.payload, a.updated_at AS updatedAt,
+            u.display_name AS name, u.share_exact AS shareExact
+       FROM shares s
+       JOIN accounts u ON u.account_id = s.sharer
+       LEFT JOIN anchors a ON a.account_id = s.sharer
       WHERE s.follower = ?
       ORDER BY s.redeemed_at`,
   )
     .bind(account)
-    .all<{ shareId: string; payload: string | null; updatedAt: number | null }>();
+    .all<{
+      shareId: string; payload: string | null; updatedAt: number | null;
+      name: string | null; shareExact: number;
+    }>();
 
-  const people = results.map((row) => ({
-    shareId: row.shareId,
+  const people = results.map((row) => {
     // Validated on the way OUT as well as in. It was checked when it was
     // written, but the check has since been through a database and a JSON
     // round trip, and this is the last place that can decline to hand a
     // malformed row to a widget.
-    anchor: row.payload ? validateAnchor(JSON.parse(row.payload) as unknown) : null,
-    updatedAt: row.updatedAt,
-  }));
+    const stored = row.payload ? validateAnchor(JSON.parse(row.payload) as unknown) : null;
+    const anchor = anchorAsSeen(stored, row.shareExact === 1);
+    return {
+      shareId: row.shareId,
+      // Their own name for themselves, offered as the label for this row. The
+      // follower may already have replaced it with "Mum", which is their
+      // business and happens entirely on their device.
+      name: row.name,
+      anchor,
+      // The stamp goes with the anchor: an anchor we declined to show has no
+      // age worth reporting either.
+      updatedAt: anchor ? row.updatedAt : null,
+    };
+  });
 
   return json({ people });
 }
@@ -247,9 +310,12 @@ async function listFollowing(env: Env, account: string): Promise<Response> {
 /** The sharer's side: who is reading me, so that it can be stopped. */
 async function listFollowers(env: Env, account: string): Promise<Response> {
   const { results } = await env.DB.prepare(
-    `SELECT id AS shareId, code, created_at AS createdAt, redeemed_at AS redeemedAt,
-            expires_at AS expiresAt
-       FROM shares WHERE sharer = ? ORDER BY created_at`,
+    `SELECT s.id AS shareId, s.code, s.created_at AS createdAt,
+            s.redeemed_at AS redeemedAt, s.expires_at AS expiresAt,
+            f.display_name AS name
+       FROM shares s
+       LEFT JOIN accounts f ON f.account_id = s.follower
+      WHERE s.sharer = ? ORDER BY s.created_at`,
   )
     .bind(account)
     .all<{
@@ -258,13 +324,21 @@ async function listFollowers(env: Env, account: string): Promise<Response> {
       createdAt: number;
       redeemedAt: number | null;
       expiresAt: number;
+      name: string | null;
     }>();
 
-  // The follower's account id is deliberately not in that SELECT. The sharer
-  // has no use for it and it is somebody else's identifier.
+  // The join reaches accounts for the NAME and stops there. The follower's
+  // account id is still deliberately absent: the sharer has no use for it, it
+  // is somebody else's bearer token, and a name is the whole of what this
+  // screen needs to say who is on the other end. LEFT, because an unredeemed
+  // code has no follower to name yet.
   return json({
     followers: results.map((row) => ({
       shareId: row.shareId,
+      // The other half of point 5: "somebody is following you" was true and
+      // useless. A share that has been taken up now says by whom, using the
+      // name they chose for themselves.
+      name: row.name,
       // A code still outstanding, so the app can show it again rather than
       // mint a second one for the same intent.
       code: row.code && row.expiresAt >= now() ? row.code : null,
@@ -321,12 +395,13 @@ export default {
 
     // The one route that cannot be authenticated, because it is what issues the
     // thing you would authenticate with.
-    if (path === '/v1/account' && method === 'POST') return createAccount(env);
+    if (path === '/v1/account' && method === 'POST') return createAccount(request, env);
 
     const account = await authenticate(request, env);
     if (!account) return fail('unauthorized', 401);
 
     if (path === '/v1/anchor' && method === 'PUT') return putAnchor(request, env, account);
+    if (path === '/v1/profile' && method === 'PUT') return putProfile(request, env, account);
     if (path === '/v1/shares' && method === 'POST') return createShare(env, account);
     if (path === '/v1/shares/redeem' && method === 'POST') {
       return redeemShare(request, env, account);

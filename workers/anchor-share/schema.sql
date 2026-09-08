@@ -21,10 +21,29 @@
 -- It also exists so that billing has something to attach to later. Apple's
 -- appAccountToken and Google's obfuscatedAccountId both want a stable opaque
 -- id at purchase time, and minting one now costs nothing and saves a migration.
+--
+-- display_name is what the person calls THEMSELVES, and the only text in this
+-- database that a human chose. It goes both ways: a follower sees it as the
+-- suggested label for their new row, and the sharer sees the follower's in
+-- "who can see your time". Nothing else about either of them crosses, and the
+-- recipient is free to overwrite the label locally — "Mum" is theirs to pick.
+--
+-- share_exact is the one privacy switch. 0, the default, means a follower is
+-- given a bare offset computed at read time; 1 means they are given the zone id
+-- itself. It lives on the ACCOUNT rather than on each share because it is a
+-- fact about the person, and a control that only applied to shares made after
+-- you flipped it would be a trap.
+--
+-- NOTE FOR AN EXISTING DATABASE: SQLite has no ADD COLUMN IF NOT EXISTS, so a
+-- 2.0.0-alpha database has to be dropped rather than migrated. That is a
+-- deliberate non-problem — nothing has shipped, and the alpha's rows were test
+-- data.
 CREATE TABLE IF NOT EXISTS accounts (
   account_id   TEXT PRIMARY KEY,
   created_at   INTEGER NOT NULL,
-  last_seen_at INTEGER NOT NULL
+  last_seen_at INTEGER NOT NULL,
+  display_name TEXT,
+  share_exact  INTEGER NOT NULL DEFAULT 0
 );
 
 -- One anchor per account: the latest, not a history.

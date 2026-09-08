@@ -58,7 +58,31 @@ export interface ShipAnchor {
     short?: string;
 }
 
-export type Anchor = ZoneAnchor | ShipAnchor;
+/**
+ * Neither: a bare number of minutes from UTC, and nothing to call it.
+ *
+ * The relay makes these; a device never sends one. It is what a follower gets
+ * when the person they follow has NOT ticked "share my exact timezone", which
+ * is the default — the offset says what time it is for them and says nothing
+ * about where on earth that is, which is the whole of what most people want to
+ * share and rather less than a zone id gives away.
+ *
+ * It swallows a ship too, on purpose. "Wonder of the Seas" is a more specific
+ * fact about somebody than a timezone is, so a person sharing only their offset
+ * should not have their vessel named either. One switch, one meaning: a number.
+ *
+ * The number is computed at the relay from the zone it holds, at the moment it
+ * is asked — see zoneOffsetMinutes. That is what keeps it right through a
+ * daylight-saving change without the sharer having to open their app: the thing
+ * doing the arithmetic is the thing that knows the rules, and it is awake.
+ */
+export interface OffsetAnchor {
+    kind: 'offset';
+    /** Minutes from UTC. There is deliberately nothing else in here. */
+    offsetMinutes: number;
+}
+
+export type Anchor = ZoneAnchor | ShipAnchor | OffsetAnchor;
 
 /** An anchor as it comes back from the relay, with the age it was stamped. */
 export interface SharedAnchor {
@@ -82,6 +106,46 @@ export const STALE_AFTER_MS = 24 * 60 * 60 * 1000;
 /** True when a row should say how old it is. It is never a reason to hide it. */
 export function anchorIsStale(updatedAt: number, now = Date.now()): boolean {
     return !Number.isFinite(updatedAt) || now - updatedAt >= STALE_AFTER_MS;
+}
+
+/**
+ * An anchor as a particular follower is allowed to see it.
+ *
+ * THE PRIVACY MODEL, in one function, and deliberately in this file rather
+ * than in the Worker: the relay calls it to decide what to send, and the
+ * sharing screen calls it to draw the preview of how they appear. A preview
+ * computed by a second implementation would eventually lie, and this is the one
+ * screen where a lie would be about somebody's privacy rather than their
+ * layout.
+ *
+ * Without "share my exact timezone" — the
+ * default — a follower gets a number of minutes and nothing else: no zone id,
+ * no ship name, nothing that narrows the world further than "it is this time
+ * for them". With it on, they get what was stored.
+ *
+ * The number is computed HERE, from the zone, at the moment of the request.
+ * That is the point of doing it at the relay rather than on the sharer's
+ * device: come November the offset changes on its own, because the thing that
+ * knows the daylight-saving rules is also the thing that is awake. A device
+ * pushing a bare number would leave the follower an hour wrong until its owner
+ * next opened the app.
+ *
+ * A ship is swallowed by the same rule. Her name is a more specific fact about
+ * somebody than a timezone is, so a person sharing only their offset does not
+ * have their vessel named either — and her clock has no zone to compute from,
+ * so the offset she was pushed with is already the right answer.
+ *
+ * Returns null where a zone cannot be resolved at all, which drops the row
+ * rather than guessing. Better a follower who sees nothing than one who is
+ * confidently shown Greenwich.
+ */
+export function anchorAsSeen(anchor: Anchor | null, exact: boolean): Anchor | null {
+  if (!anchor || exact) return anchor;
+  if (anchor.kind === 'offset') return anchor;
+  if (anchor.kind === 'ship') return { kind: 'offset', offsetMinutes: anchor.offsetMinutes };
+
+  const offsetMinutes = zoneOffsetMinutes(anchor.tz);
+  return offsetMinutes === null ? null : { kind: 'offset', offsetMinutes };
 }
 
 /**
@@ -149,6 +213,9 @@ export function sameAnchor(a: Anchor | null, b: Anchor | null): boolean {
     if (a.kind === 'zone' && b.kind === 'zone') {
         return a.tz === b.tz;
     }
+    if (a.kind === 'offset' && b.kind === 'offset') {
+        return a.offsetMinutes === b.offsetMinutes;
+    }
     if (a.kind === 'ship' && b.kind === 'ship') {
         return a.offsetMinutes === b.offsetMinutes
             && a.name === b.name
@@ -187,6 +254,18 @@ const MAX_NAME = 60;
 const MIN_OFFSET_MINUTES = -12 * 60;
 const MAX_OFFSET_MINUTES = 14 * 60;
 
+/**
+ * A human-chosen name, trimmed and bounded, or null.
+ *
+ * Exported because the relay needs the same rule for a display name that it
+ * already applies to a ship's: one definition of "a usable name" rather than
+ * two that drift. Bounded rather than truncated — a name that will not fit is
+ * a mistake worth reporting, not one worth silently editing.
+ */
+export function cleanDisplayName(value: unknown): string | null {
+    return cleanName(value);
+}
+
 function cleanName(value: unknown): string | null {
     if (typeof value !== 'string') return null;
     const trimmed = value.trim();
@@ -202,6 +281,34 @@ function cleanName(value: unknown): string | null {
  * into a time. Both ends have Intl — browsers, and the Workers runtime — so
  * both can ask.
  */
+/**
+ * A zone's current distance from UTC, in minutes.
+ *
+ * Here rather than beside the app's other time helpers because the RELAY needs
+ * it: a follower who is not being given a zone id is given this number instead,
+ * computed at the moment they ask. Doing it there rather than on the sharer's
+ * device is what keeps the answer right through a daylight-saving change
+ * without the sharer opening their app — the party that knows the rules is also
+ * the party that is awake.
+ *
+ * `shortOffset` gives "GMT-7" or "GMT+5:30" and, at UTC itself, plain "GMT".
+ * Parsed rather than trusted to a fixed shape for that last reason.
+ */
+export function zoneOffsetMinutes(tz: string, at = new Date()): number | null {
+    try {
+        const parts = new Intl.DateTimeFormat('en-US', {
+            timeZone: tz, timeZoneName: 'shortOffset',
+        }).formatToParts(at);
+        const name = parts.find((part) => part.type === 'timeZoneName')?.value ?? '';
+        const match = /^GMT([+-])(\d{1,2})(?::(\d{2}))?$/.exec(name);
+        if (!match) return name === 'GMT' ? 0 : null;
+        const minutes = Number(match[2]) * 60 + Number(match[3] ?? 0);
+        return match[1] === '-' ? -minutes : minutes;
+    } catch {
+        return null;
+    }
+}
+
 function isResolvableZone(tz: string): boolean {
     try {
         new Intl.DateTimeFormat('en-US', { timeZone: tz });
@@ -235,6 +342,16 @@ export function validateAnchor(raw: unknown): Anchor | null {
         return { kind: 'zone', tz };
     }
 
+    if (source.kind === 'offset') {
+        // Read but never written by a device: the relay is the only thing that
+        // makes one of these, and putAnchor refuses one on the way in. A
+        // follower has to be able to decode it, which is why it is here.
+        const offset = Number(source.offsetMinutes);
+        if (!Number.isInteger(offset)) return null;
+        if (offset < MIN_OFFSET_MINUTES || offset > MAX_OFFSET_MINUTES) return null;
+        return { kind: 'offset', offsetMinutes: offset };
+    }
+
     if (source.kind === 'ship') {
         const offset = Number(source.offsetMinutes);
         if (!Number.isInteger(offset)) return null;
@@ -262,5 +379,11 @@ export function validateAnchor(raw: unknown): Anchor | null {
  * line UNDERNEATH: where they are, or which ship they are on.
  */
 export function anchorSubLabel(anchor: Anchor): string {
-    return anchor.kind === 'ship' ? (anchor.short ?? anchor.name) : anchor.tz;
+    if (anchor.kind === 'ship') return anchor.short ?? anchor.name;
+    // An offset has nothing to say on this line, and saying "UTC−7" would be
+    // saying the same thing the row's own right-hand column already says. Blank
+    // is the honest answer, and it is what makes the privacy setting legible:
+    // the line is either a place or it is absent.
+    if (anchor.kind === 'offset') return '';
+    return anchor.tz;
 }

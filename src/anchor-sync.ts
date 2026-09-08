@@ -21,7 +21,7 @@ import { Capacitor } from '@capacitor/core';
 import { anchorFrom, anchorSubLabel, shouldPush, type Anchor } from './anchor';
 import { getDisplayTimezoneName } from './utils';
 import { storedAccountId } from './account';
-import { fetchFollowing, pushAnchor, revokeShare } from './anchor-share';
+import { fetchFollowing, pushAnchor, revokeShare, updateProfile } from './anchor-share';
 import { mergeFollowed } from './people';
 import { aboardShip, persistFollowedPeople, state } from './state';
 
@@ -189,7 +189,16 @@ export async function refreshFollowing(): Promise<boolean> {
     // device, and a share you cannot see is a share you cannot revoke.
     for (const shareId of unnamed) {
         const row = incoming.find((person) => person.shareId === shareId)!;
-        people.push({ shareId, name: 'Someone', anchor: row.anchor, updatedAt: row.updatedAt });
+        // Their own name for themselves, which the relay hands over with the
+        // row. "Someone" is the last resort for a share whose other end never
+        // set one — better than a row you cannot see, which is a share you
+        // cannot revoke.
+        people.push({
+            shareId,
+            name: row.name ?? 'Someone',
+            anchor: row.anchor,
+            updatedAt: row.updatedAt,
+        });
     }
 
     persistFollowedPeople(people);
@@ -200,6 +209,40 @@ export async function refreshFollowing(): Promise<boolean> {
 async function syncNow(): Promise<void> {
     await pushMyAnchor();
     await refreshFollowing();
+}
+
+/**
+ * Sends this device's anchor whether or not it is due.
+ *
+ * For the one moment when "due" is the wrong question: an account has just
+ * been created, so the relay has never heard this device's time, and somebody
+ * is about to read a code out loud. Waiting for the next tick meant the person
+ * on the other end redeemed and then watched "Not shared yet" for up to five
+ * minutes — the feature's first impression, and it looked broken.
+ */
+export async function pushMyAnchorNow(): Promise<boolean> {
+    if (!storedAccountId()) return false;
+
+    const anchor = myAnchor();
+    if (!anchor) return false;
+    if (!await pushAnchor(anchor)) return false;
+
+    rememberPushed(anchor, Date.now());
+    return true;
+}
+
+/**
+ * Puts the name and the privacy switch where the relay can see them.
+ *
+ * Kept on the device either way, so the switch works before anybody has an
+ * account and goes up with the first one. See updateProfile, which no-ops
+ * without a token rather than minting one.
+ */
+export async function pushProfile(): Promise<void> {
+    await updateProfile({
+        name: state.shareName ?? '',
+        shareExact: state.shareExact,
+    });
 }
 
 let started = false;
@@ -240,7 +283,9 @@ export function startAnchorSync(): void {
 export function myAnchorLabel(): string {
     const anchor = myAnchor();
     if (!anchor) return 'Not known yet';
-    if (anchor.kind === 'ship') return anchorSubLabel(anchor);
+    // Not a zone means aboard a ship, since anchorFrom builds nothing else —
+    // an OffsetAnchor is the relay's to make, never this device's.
+    if (anchor.kind !== 'zone') return anchorSubLabel(anchor);
 
     // "the Vancouver timezone", not "Vancouver" and not "America/Vancouver".
     //

@@ -484,10 +484,11 @@ export function hoverSelected(on: boolean): void {
     // their row and their selection draw. Pointing at the card is the cheapest
     // gesture in the app and would have been the cheapest way to find out what
     // the other two refuse to say.
-    const person = state.selectedPersonKey
-        ? state.followedPeople.find((p) => p.shareId === state.selectedPersonKey)
-        : undefined;
-    if (person?.anchor) { setHoveredBand(anchorOffset(person.anchor)); return; }
+    const anchor = state.selectedPersonKey
+        ? followedPersonBy(state.selectedPersonKey)?.anchor ?? null
+        : null;
+    if (anchor?.kind === 'zone') { hoverBand(anchor.tz); return; }
+    if (anchor) { setHoveredBand(anchorOffset(anchor)); return; }
 
     hoverBand(state.selectedPlace?.tzid ?? state.selectedTzid);
 }
@@ -529,8 +530,9 @@ export function hoverClockRow(key: string | null): void {
     // selectPerson draws, held on the cheaper path too, since a pointer resting
     // on a row would otherwise outline the zone a tap refuses to.
     if (key.startsWith('person:')) {
-        const person = state.followedPeople.find((p) => p.shareId === key.slice('person:'.length));
-        setHoveredBand(person?.anchor ? anchorOffset(person.anchor) : null);
+        const anchor = followedPersonBy(key.slice('person:'.length))?.anchor ?? null;
+        if (anchor?.kind === 'zone') hoverBand(anchor.tz);
+        else setHoveredBand(anchor ? anchorOffset(anchor) : null);
         return;
     }
 
@@ -673,8 +675,13 @@ export function selectShip(key: string): void {
  * treatment — route, ports, hull — and nothing is given away that the row was
  * not already giving.
  */
+/** The followed row a `person:` key names, if it is still on the list. */
+function followedPersonBy(shareId: string): FollowedPerson | undefined {
+    return state.followedPeople.find((person) => person.shareId === shareId);
+}
+
 export function selectPerson(shareId: string): void {
-    const person = state.followedPeople.find((p) => p.shareId === shareId);
+    const person = followedPersonBy(shareId);
     // Paired but never pushed. There is no time to show and so nothing to point
     // at; the row already says "Not shared yet" and the map should not flinch.
     if (!person?.anchor) return;
@@ -710,7 +717,15 @@ export function selectPerson(shareId: string): void {
     refreshPlaceMarkers();
     document.dispatchEvent(new CustomEvent('temporarytimezonechanged'));
 
-    if (!isDeselecting) frameBand(anchorOffset(person.anchor));
+    if (isDeselecting) return;
+
+    // How close the map is allowed to get is THEIR decision, taken once in
+    // their own app and carried by the shape of what arrives here: a zone id
+    // means they ticked "share my exact timezone", and a bare offset means they
+    // did not. The paint and the hover read the same field, so all three agree
+    // without anybody passing a flag around.
+    if (person.anchor.kind === 'zone') frameZone(person.anchor.tz);
+    else frameBand(anchorOffset(person.anchor));
 }
 
 /**

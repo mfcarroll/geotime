@@ -22,9 +22,17 @@ import {
     redeemInvitation,
     revokeShare,
 } from './anchor-share';
-import { myAnchorLabel, refreshFollowing, sharingAvailable } from './anchor-sync';
+import {
+    myAnchor,
+    pushMyAnchorNow,
+    pushProfile,
+    refreshFollowing,
+    sharingAvailable,
+} from './anchor-sync';
+import { anchorAsSeen, anchorSubLabel } from './anchor';
+import { getDisplayTimezoneName } from './utils';
 import { describeInvitation } from './people';
-import { persistFollowedPeople, state } from './state';
+import { persistFollowedPeople, setSharePrefs, state } from './state';
 
 /** What to say when a code comes back refused. */
 const REASONS: Record<string, string> = {
@@ -44,7 +52,6 @@ const INVITE_REASONS: Record<string, string> = {
 };
 
 let card: HTMLElement;
-let anchorEl: HTMLElement;
 let codePanel: HTMLElement;
 let codeEl: HTMLElement;
 let codeNote: HTMLElement;
@@ -55,6 +62,9 @@ let statusEl: HTMLElement;
 let followersEl: HTMLElement;
 let followerList: HTMLElement;
 let deleteBtn: HTMLElement;
+let myNameInput: HTMLInputElement;
+let exactBox: HTMLInputElement;
+let exactNote: HTMLElement;
 
 /**
  * One line, one colour, and never cleared by anything but the next attempt.
@@ -88,7 +98,7 @@ async function invite(): Promise<void> {
     codeEl.textContent = '·····';
     codeNote.textContent = 'Asking the server…';
 
-    const result = await createInvitation();
+    const result = await createInvitation(state.shareName);
     if (!result.ok) {
         codePanel.classList.add('hidden');
         say(INVITE_REASONS[result.reason] ?? REASONS.unreachable, 'bad');
@@ -101,6 +111,11 @@ async function invite(): Promise<void> {
     // whatever is typed, so nobody has to reproduce the punctuation.
     codeEl.textContent = formatShareCode(result.invitation.code);
     codeNote.textContent = 'Good for 24 hours, once. They type it into their app.';
+    // The account may have been created by the call above, which means the
+    // relay has never heard this device's time — and somebody is about to read
+    // a code out. Waiting for the next five-minute tick is what made the other
+    // end sit on "Not shared yet" long enough to look broken.
+    void pushMyAnchorNow();
     // The mint IS a row in the list below — an outstanding code is a door that
     // is already open, and it should be visible and closeable from the moment
     // it exists rather than only after somebody walks through it.
@@ -252,16 +267,40 @@ async function follow(): Promise<void> {
     void refreshFollowing();
 }
 
-/** Keeps the "you appear as" line honest as the device moves or boards a ship. */
+/**
+ * Says what a follower is actually shown, in the words of the row they see.
+ *
+ * Computed through anchorAsSeen — the same function the relay runs to decide
+ * what to send — so this cannot drift into reassuring somebody about a rule
+ * the server is not applying. It is the only claim in the app whose being
+ * wrong would be a privacy problem rather than a cosmetic one.
+ */
 export function refreshSharingCard(): void {
-    if (anchorEl) anchorEl.textContent = myAnchorLabel();
+    if (!exactNote) return;
+
+    const seen = anchorAsSeen(myAnchor(), state.shareExact);
+    if (!seen) {
+        exactNote.textContent = 'Waiting to work out what time it is here.';
+        return;
+    }
+    exactNote.textContent = seen.kind === 'offset'
+        ? 'They see how far your clock is from theirs, and nothing about where you are.'
+        : seen.kind === 'zone'
+            ? `They see "Timezone: ${getDisplayTimezoneName(seen.tz)}" under your name.`
+            : `They see "${anchorSubLabel(seen)}" under your name.`;
+}
+
+/** Both settings to the relay, and the anchor with them if the switch moved. */
+function saveSharePrefs(prefs: { name?: string | null; exact?: boolean }): void {
+    setSharePrefs(prefs);
+    refreshSharingCard();
+    void pushProfile();
 }
 
 export function initPairing(): void {
     card = document.getElementById('sharing-card')!;
     if (!card || !sharingAvailable()) return;
 
-    anchorEl = document.getElementById('sharing-anchor')!;
     codePanel = document.getElementById('sharing-code-panel')!;
     codeEl = document.getElementById('sharing-code')!;
     codeNote = document.getElementById('sharing-code-note')!;
@@ -272,6 +311,16 @@ export function initPairing(): void {
     followersEl = document.getElementById('sharing-followers')!;
     followerList = document.getElementById('sharing-follower-list')!;
     deleteBtn = document.getElementById('sharing-delete')!;
+    myNameInput = document.getElementById('sharing-my-name') as HTMLInputElement;
+    exactBox = document.getElementById('sharing-exact') as HTMLInputElement;
+    exactNote = document.getElementById('sharing-exact-note')!;
+
+    myNameInput.value = state.shareName ?? '';
+    exactBox.checked = state.shareExact;
+    // `change` rather than `input`: a half-typed name is not worth a request,
+    // and this fires on blur and on Enter, which is when somebody has finished.
+    myNameInput.addEventListener('change', () => saveSharePrefs({ name: myNameInput.value }));
+    exactBox.addEventListener('change', () => saveSharePrefs({ exact: exactBox.checked }));
 
     card.classList.remove('hidden');
     refreshSharingCard();

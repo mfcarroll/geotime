@@ -51,6 +51,29 @@ export interface AppState {
      */
     shipClocks: ShipClock[];
     /**
+     * What you call yourself to the people you share with.
+     *
+     * The only thing about you that this app ever sends anywhere by name, and
+     * it is sent because the alternative is worse: a row arriving on somebody's
+     * phone with nothing on it but a clock. Whatever they end up calling you is
+     * then theirs to choose.
+     *
+     * Null until asked for, which is the first time somebody shares.
+     */
+    shareName: string | null;
+    /**
+     * Whether followers are told WHICH timezone, or only how far from UTC.
+     *
+     * False by default, and the default is the point: an offset says what time
+     * it is for you and nothing about where on earth you are. True hands over
+     * the zone id, which is a region rather than a place but is still more than
+     * nothing — so it is a choice, made once, applying to everybody.
+     *
+     * Enforced at the relay rather than here; see anchorAsSeen. This copy is
+     * what the switch on screen reads and what gets pushed.
+     */
+    shareExact: boolean;
+    /**
      * People whose anchor is shared with this device.
      *
      * Held here, not fetched on demand, for the reason the fleet cache is: a
@@ -211,6 +234,8 @@ export const state: AppState = {
     savedZones: stored,
     shipClocks: loadStoredShips(),
     followedPeople: loadFollowedPeople(),
+    shareName: localStorage.getItem('shareName') || null,
+    shareExact: localStorage.getItem('shareExact') === '1',
     aboardShipKey: localStorage.getItem('aboardShipKey') || null,
     clocksInterval: null,
     locationMap: null,
@@ -336,6 +361,27 @@ export function persistFollowedPeople(people: FollowedPerson[]): void {
     // membership change nobody asked for, and every writer would otherwise have
     // to remember to say so.
     document.dispatchEvent(new CustomEvent('followedpeoplechanged'));
+}
+
+/**
+ * Single write path for the two sharing preferences.
+ *
+ * Local first and unconditionally, so the switch works before anybody has an
+ * account and the answer survives a relaunch with no signal. Getting it to the
+ * relay is pushProfile's job in anchor-sync.ts — separate because one of these
+ * is a fact about this device and the other is a request over a network, and
+ * the first must not wait on the second.
+ */
+export function setSharePrefs(prefs: { name?: string | null; exact?: boolean }): void {
+    if (prefs.name !== undefined) {
+        state.shareName = prefs.name?.trim() || null;
+        if (state.shareName) localStorage.setItem('shareName', state.shareName);
+        else localStorage.removeItem('shareName');
+    }
+    if (prefs.exact !== undefined) {
+        state.shareExact = prefs.exact;
+        localStorage.setItem('shareExact', prefs.exact ? '1' : '0');
+    }
 }
 
 /** Single write path for the ship list. Mirrors persistZones. */

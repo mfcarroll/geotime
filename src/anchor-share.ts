@@ -38,7 +38,22 @@ const BASE =
 /** One person you follow, as the relay describes them. */
 export interface Followed {
     shareId: string;
-    /** Null when the pairing worked but they have not pushed an anchor yet. */
+    /**
+     * What they call themselves, offered as the label for their row.
+     *
+     * Only ever a suggestion: the row's name is the follower's own, and
+     * replacing it with "Mum" is the expected thing to do. Null when they never
+     * set one.
+     */
+    name: string | null;
+    /**
+     * Null when the pairing worked but they have not pushed an anchor yet.
+     *
+     * A ZoneAnchor here means they have "share my exact timezone" on. An
+     * OffsetAnchor means they have not, and it is all anybody gets — see
+     * anchorAsSeen in the relay, which is where that decision is enforced
+     * rather than merely respected.
+     */
     anchor: Anchor | null;
     /** Epoch ms, stamped by the relay. Null alongside a null anchor. */
     updatedAt: number | null;
@@ -47,6 +62,8 @@ export interface Followed {
 /** One code you have handed out, or are about to. */
 export interface Invitation {
     shareId: string;
+    /** Who took it up, by the name they chose. Null while it is unredeemed. */
+    name: string | null;
     /** Null once somebody has redeemed it, or once it has expired. */
     code: string | null;
     createdAt: number;
@@ -55,7 +72,7 @@ export interface Invitation {
 
 /** Why a code did not work, for a person who is standing there waiting. */
 export type RedeemResult =
-    | { ok: true; shareId: string }
+    | { ok: true; shareId: string; name: string | null }
     | { ok: false; reason: 'invalid' | 'yourself' | 'full' | 'unreachable' };
 
 /**
@@ -148,11 +165,15 @@ const stringField = (body: unknown, name: string): string | null => {
  * Null means the relay could not be reached, which callers must not read as
  * "no account": minting again later is fine, minting twice is not.
  */
-export async function ensureAccount(): Promise<string | null> {
+export async function ensureAccount(name?: string | null): Promise<string | null> {
     const existing = storedAccountId();
     if (existing) return existing;
 
-    const { status, body } = await send('POST', '/v1/account', null);
+    // The name goes in at creation, because the next thing that happens is a
+    // code being minted and a share with no name on it gives the other end a
+    // blank row to look at.
+    const { status, body } = await send('POST', '/v1/account', null,
+                                        name ? { name } : undefined);
     if (status !== 201) return null;
 
     const id = stringField(body, 'accountId');
@@ -187,8 +208,8 @@ export async function pushAnchor(anchor: Anchor): Promise<boolean> {
  * as a network problem sends them to look at their wifi over a limit that has
  * nothing to do with it.
  */
-export async function createInvitation(): Promise<InviteResult> {
-    const token = await ensureAccount();
+export async function createInvitation(name?: string | null): Promise<InviteResult> {
+    const token = await ensureAccount(name);
     if (!token) return { ok: false, reason: 'unreachable' };
 
     const { status, body } = await send('POST', '/v1/shares', token);
@@ -199,7 +220,11 @@ export async function createInvitation(): Promise<InviteResult> {
     const code = stringField(body, 'code');
     if (!shareId || !code) return { ok: false, reason: 'unreachable' };
 
-    return { ok: true, invitation: { shareId, code, createdAt: Date.now(), redeemedAt: null } };
+    // Nobody has taken it up yet, so there is nobody to name.
+    return {
+        ok: true,
+        invitation: { shareId, name: null, code, createdAt: Date.now(), redeemedAt: null },
+    };
 }
 
 /**
@@ -215,7 +240,9 @@ export async function redeemInvitation(typed: string): Promise<RedeemResult> {
     const { status, body } = await send('POST', '/v1/shares/redeem', token, { code: typed });
     if (status === 201) {
         const shareId = stringField(body, 'shareId');
-        return shareId ? { ok: true, shareId } : { ok: false, reason: 'unreachable' };
+        return shareId
+            ? { ok: true, shareId, name: stringField(body, 'name') }
+            : { ok: false, reason: 'unreachable' };
     }
 
     // 400 covers both a code that is not a code and one that is your own, and
@@ -264,11 +291,29 @@ export async function fetchFollowing(): Promise<Followed[] | null> {
 
         followed.push({
             shareId,
+            name: stringField(row, 'name'),
             anchor,
             updatedAt: anchor && Number.isFinite(updatedAt) ? updatedAt : null,
         });
     }
     return followed;
+}
+
+/**
+ * Sets the name a follower is offered, and the one privacy switch.
+ *
+ * Does NOT mint an account, for the same reason pushAnchor does not: somebody
+ * who has never paired has nobody to be named to. The settings live on the
+ * device regardless and go up with the account when there first is one.
+ */
+export async function updateProfile(
+    profile: { name?: string; shareExact?: boolean },
+): Promise<boolean> {
+    const token = storedAccountId();
+    if (!token) return false;
+
+    const { status } = await send('PUT', '/v1/profile', token, profile);
+    return status === 200;
 }
 
 /** Every code you have handed out, so they can be shown or withdrawn. */
@@ -289,6 +334,7 @@ export async function fetchInvitations(): Promise<Invitation[] | null> {
         const redeemedAt = Number(field(row, 'redeemedAt'));
         out.push({
             shareId,
+            name: stringField(row, 'name'),
             code: stringField(row, 'code'),
             createdAt: Number(field(row, 'createdAt')) || Date.now(),
             redeemedAt: Number.isFinite(redeemedAt) ? redeemedAt : null,

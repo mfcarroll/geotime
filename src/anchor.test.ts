@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 
 import {
     HEARTBEAT_MS,
+    anchorAsSeen,
+    zoneOffsetMinutes,
     STALE_AFTER_MS,
     anchorFrom,
     anchorIsStale,
@@ -268,5 +270,82 @@ test('whether it is due', async (t) => {
     await t.test('the heartbeat is well inside the staleness window', () => {
         assert.ok(HEARTBEAT_MS * 2 < 24 * 60 * 60 * 1000,
                   'a missed heartbeat should not be able to strand a row as stale');
+    });
+});
+
+test('a zone, as far from UTC as it is right now', async (t) => {
+    await t.test('whole hours, half hours and the far edges', () => {
+        assert.equal(zoneOffsetMinutes('Europe/London', new Date('2026-09-08T12:00:00Z')), 60);
+        assert.equal(zoneOffsetMinutes('Asia/Kolkata', new Date('2026-09-08T12:00:00Z')), 330);
+        assert.equal(zoneOffsetMinutes('Pacific/Marquesas', new Date('2026-09-08T12:00:00Z')), -570);
+        assert.equal(zoneOffsetMinutes('Pacific/Kiritimati', new Date('2026-09-08T12:00:00Z')), 840);
+    });
+
+    await t.test('UTC is zero, not unparseable', () => {
+        // Intl says plain "GMT" there rather than "GMT+0", which a stricter
+        // pattern reads as a failure.
+        assert.equal(zoneOffsetMinutes('UTC', new Date('2026-09-08T12:00:00Z')), 0);
+    });
+
+    await t.test('follows daylight saving, which is the whole reason it exists', () => {
+        const summer = new Date('2026-09-08T12:00:00Z');
+        const winter = new Date('2026-11-15T12:00:00Z');
+        assert.equal(zoneOffsetMinutes('America/Vancouver', summer), -420);
+        assert.equal(zoneOffsetMinutes('America/Vancouver', winter), -480);
+    });
+
+    await t.test('a zone nobody can resolve is null, not zero', () => {
+        assert.equal(zoneOffsetMinutes('America/Atlantis'), null);
+    });
+});
+
+test('what a follower is allowed to see', async (t) => {
+    const vancouver: Anchor = { kind: 'zone', tz: 'America/Vancouver' };
+    const wonder: Anchor = {
+        kind: 'ship', offsetMinutes: -240, name: 'Wonder of the Seas', short: 'Wonder',
+    };
+
+    await t.test('with the switch on, exactly what was stored', () => {
+        assert.deepEqual(anchorAsSeen(vancouver, true), vancouver);
+        assert.deepEqual(anchorAsSeen(wonder, true), wonder);
+    });
+
+    await t.test('with it off, a zone becomes a number and loses its id', () => {
+        const seen = anchorAsSeen(vancouver, false);
+        assert.deepEqual(Object.keys(seen!), ['kind', 'offsetMinutes']);
+        assert.equal(seen!.kind, 'offset');
+    });
+
+    await t.test('with it off, a SHIP loses her name too', () => {
+        // A vessel is a more specific fact about somebody than a timezone is,
+        // so "only my offset" has to mean it. This is the case a display-only
+        // toggle would have missed entirely.
+        assert.deepEqual(anchorAsSeen(wonder, false), { kind: 'offset', offsetMinutes: -240 });
+    });
+
+    await t.test('the number it produces is the zone offset, freshly worked out', () => {
+        const seen = anchorAsSeen(vancouver, false) as { offsetMinutes: number };
+        assert.equal(seen.offsetMinutes, zoneOffsetMinutes('America/Vancouver'));
+    });
+
+    await t.test('nothing about where survives being hidden, at any depth', () => {
+        // The rule as a shape rather than a field list, so a zone id smuggled
+        // into some later field fails this without anybody remembering to add
+        // a case for it.
+        const hidden = JSON.stringify(anchorAsSeen(vancouver, false));
+        assert.doesNotMatch(hidden, /Vancouver|America/i);
+        assert.doesNotMatch(JSON.stringify(anchorAsSeen(wonder, false)), /Wonder|Seas/i);
+    });
+
+    await t.test('an unresolvable zone is dropped rather than guessed at', () => {
+        // Better a follower who sees nothing than one confidently shown
+        // Greenwich. validateAnchor would not have let this through, so this is
+        // the second line of defence.
+        assert.equal(anchorAsSeen({ kind: 'zone', tz: 'America/Atlantis' }, false), null);
+    });
+
+    await t.test('nothing is still nothing', () => {
+        assert.equal(anchorAsSeen(null, true), null);
+        assert.equal(anchorAsSeen(null, false), null);
     });
 });
