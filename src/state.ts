@@ -93,6 +93,16 @@ export interface AppState {
     // (America/Vancouver) with a band's representative zone.
     hoveredTzid: string | null;
     /**
+     * The BAND the pointer is over, when there is one without a zone to name.
+     *
+     * Ordinarily it is just the hovered zone's own band and moves with it. The
+     * case it exists for is a followed person: their band should light and
+     * their zone must not be named, because the app knows they are somewhere at
+     * UTC−8 and deliberately declines to say Vancouver or Seattle. See
+     * resolveZoneStyle, where an outline is the thing that names one zone.
+     */
+    hoveredOffset: number | null;
+    /**
      * The hull the pointer is over, beside the zone it is over.
      *
      * Here rather than in map.ts because the marker layer has to style itself from
@@ -101,6 +111,14 @@ export interface AppState {
      */
     hoveredShipKey: string | null;
     selectedTzid: string | null;
+    /**
+     * The followed person whose band is on the map, by share id.
+     *
+     * A key rather than the record, so it cannot go stale against the list the
+     * relay keeps rewriting underneath it. Mutually exclusive with every other
+     * selection, as they all are with each other.
+     */
+    selectedPersonKey: string | null;
     /**
      * A place picked on the map but not kept, shown as one extra row with a pin.
      *
@@ -207,8 +225,10 @@ export const state: AppState = {
     geoJsonData: null,
     geoJsonLoaded: false,
     hoveredTzid: null,
+    hoveredOffset: null,
     hoveredShipKey: null,
     selectedTzid: null,
+    selectedPersonKey: null,
     temporaryZone: null,
     gpsTimezoneSelected: false,
     selectedShipKey: null,

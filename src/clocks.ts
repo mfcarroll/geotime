@@ -15,7 +15,7 @@
 // benign because every reference is inside a function body rather than at module
 // initialisation, so both are fully evaluated before either is called — but keep
 // it that way: a top-level call across this boundary would break at load.
-import { anchorSubLabel } from './anchor';
+import { anchorSubLabel, type Anchor } from './anchor';
 import { personSubLabel, type FollowedPerson } from './people';
 import { state } from './state';
 import { placeLabel } from './stored-zones';
@@ -73,13 +73,24 @@ export function clockOffset(entry: ClockEntry): number {
   if (entry.kind === 'ship') return entry.ship.offsetHours ?? 0;
   if (entry.kind === 'person') {
     const anchor = entry.person.anchor;
-    if (!anchor) return 0;                      // unresolved; sorted to the end anyway
-    // Ashore, ask the platform, which knows the DST rules — which is exactly
-    // why the zone id travels rather than an offset. Aboard, there are no rules
-    // to apply and the crew's number is the answer.
-    return anchor.kind === 'zone' ? getUtcOffset(anchor.tz) : anchor.offsetMinutes / 60;
+    return anchor ? anchorOffset(anchor) : 0;   // unresolved; sorted to the end anyway
   }
   return getUtcOffset(entry.zone.tz);
+}
+
+/**
+ * The hours from UTC an anchor stands for.
+ *
+ * Ashore, ask the platform, which knows the daylight-saving rules — which is
+ * exactly why the zone id travels rather than a number. Aboard there are no
+ * rules to apply and the crew's number IS the answer.
+ *
+ * Its own function because the map needs it too, and asking the same question
+ * in two places is how the two ends of a feature start disagreeing about what
+ * time it is.
+ */
+export function anchorOffset(anchor: Anchor): number {
+  return anchor.kind === 'zone' ? getUtcOffset(anchor.tz) : anchor.offsetMinutes / 60;
 }
 
 /**

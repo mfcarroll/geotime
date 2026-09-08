@@ -5,7 +5,7 @@ import './style.css';
 import { Loader } from '@googlemaps/js-api-loader';
 import * as dom from './dom';
 import { addShipClock, loadDebugFleet, migrateStoredTimezones, persistZones, savedZoneByKey, state, syncWidget } from './state';
-import { refreshAnchorChip, refreshMapStyles, initMaps, onLocationError, onLocationSuccess, selectSavedZone, selectShip, selectPlace, setHoveredShip, setHoveredPlace, renderWorldClocks, keepZone, updateUserTimezoneDetails, showLocationUnavailable, loadTimezoneGeoJson, selectAnchor, clearSelection, hoverAnchor, hoverSelected, hoverClockRow } from './map';
+import { refreshAnchorChip, refreshMapStyles, initMaps, onLocationError, onLocationSuccess, selectSavedZone, selectShip, selectPerson, selectPlace, setHoveredShip, setHoveredPlace, renderWorldClocks, keepZone, updateUserTimezoneDetails, showLocationUnavailable, loadTimezoneGeoJson, selectAnchor, clearSelection, hoverAnchor, hoverSelected, hoverClockRow } from './map';
 import { updateAllClocks, syncClock, startClockWatch, getDisplayTimezoneName, startClocks, findTimezoneFromGeoJSON } from './time';
 import { Capacitor } from '@capacitor/core';
 import { getDeviceTimezone, onDeviceTimezoneChanged } from './widget';
@@ -381,6 +381,9 @@ async function startApp() {
         // before the key reaches anything that stores or resolves it.
         if (key.startsWith('ship:')) {
             selectShip(key.slice('ship:'.length));
+        } else if (key.startsWith('person:')) {
+            // Their band, never their zone — see selectPerson.
+            selectPerson(key.slice('person:'.length));
         } else {
             // The row's own record, so a port row selects the port and a city
             // row does not answer with the name of its zone.

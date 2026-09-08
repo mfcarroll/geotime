@@ -4,7 +4,7 @@ import * as dom from './dom';
 import { aboardShip, state } from './state';
 import { msUntilNextSecond, serverClockOffset, type ServerTimeReading } from './clock-offset';
 import { getDisplayTimezoneName, isValidTimezone } from './utils';
-import { clockKey, clockOffset, clockZone, fixedOffsetWeekday, formatFixedOffsetDate, formatFixedOffsetTime, isUnresolved, visibleClocks } from './clocks';
+import { anchorOffset, clockKey, clockOffset, clockZone, fixedOffsetWeekday, formatFixedOffsetDate, formatFixedOffsetTime, isUnresolved, visibleClocks } from './clocks';
 import { fitSecondLines, type SecondLineRow } from './second-line';
 import { shipKey } from './ships';
 import { isUnresolvable } from './shiptime';
@@ -469,6 +469,17 @@ export function mapSelection(): { tzid: string | null; offset: number | null } {
     // No offset until one resolves — otherwise an unresolved ship reads as 0
     // and lights up UTC.
     return { tzid: null, offset: ship?.offsetHours ?? null };
+  }
+
+  if (state.selectedPersonKey) {
+    const person = state.followedPeople.find((p) => p.shareId === state.selectedPersonKey);
+    // A BAND, and never a zone — the null tzid is the whole point, not an
+    // accident of not having one to hand. Ashore this app knows their zone
+    // exactly and declines to draw it: gold across every zone at their offset
+    // says "somewhere at this time", where a gold segment would say Vancouver
+    // and not Seattle. That line is the one the whole feature is built on, and
+    // this is the one place it could quietly be crossed.
+    return { tzid: null, offset: person?.anchor ? anchorOffset(person.anchor) : null };
   }
 
   // The GPS zone is shown as "selected" (gold) while it is the active choice.
