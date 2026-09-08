@@ -41,6 +41,30 @@
     }
   ],
 
+  // Android App Links: the fingerprint of the certificate Play signs the app
+  // with, which is what a phone checks /.well-known/assetlinks.json against
+  // before it will open a geotime-api.matthewcarroll.ca/f/ link in the app.
+  //
+  // A PLAIN VAR AND NOT A SECRET, deliberately. This value is served publicly
+  // in assetlinks.json — publishing it is its entire purpose — so treating it
+  // as a secret would hide a public string from the repository and leave the
+  // one piece of this hostname's configuration that cannot be reproduced from
+  // source. It is a fingerprint, not a key.
+  //
+  // It has to be Play's APP SIGNING certificate, not the UPLOAD certificate,
+  // and the two sit next to each other on the same Play Console page — the
+  // upload one got copied here first and was wrong. Play re-signs every
+  // upload, so the phone only ever sees the app signing key.
+  //
+  // Do not read it off the fingerprint list at all: that page has a "Digital
+  // Asset Links JSON" section that emits the whole statement with the right
+  // certificate already in it. Copy from there and there is nothing to pick
+  // wrongly. Nothing on a developer machine can derive this value — the
+  // private key is Google's.
+  "vars": {
+    "ANDROID_CERT_SHA256": "57:A8:75:9D:E6:6D:12:A9:F3:1B:E6:1D:C3:DD:EA:B0:25:C2:0A:2D:5B:27:51:BE:18:FE:CB:39:F7:B6:AA:BD"
+  },
+
   // Rate limits, declared rather than provisioned: `namespace_id` is a number we
   // choose, unique within the account, and the platform makes the counter on
   // first use. Nothing to create, nothing to record afterwards — which is why
