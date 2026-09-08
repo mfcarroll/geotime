@@ -1910,6 +1910,13 @@ function createClockElement(entry: ClockEntry): HTMLElement {
     // zone, so it names its line instead.
     clone.querySelector('.region')!.textContent = clockSubLabel(entry);
     if (isShip) clone.querySelector('.ship-icon')!.classList.remove('hidden');
+    // A person, for the reason a ship carries a mark: "Dad" is a name and so is
+    // half the world's cities, and the row would otherwise be indistinguishable
+    // from a place somebody happened to call that. The mark is what says the
+    // clock belongs to somebody rather than somewhere.
+    if (entry.kind === 'person') {
+        clone.querySelector('.person-icon')!.classList.remove('hidden');
+    }
     // An anchor says this row is a port a ship on the list calls at, not a
     // place the user chose for its own sake. Mutually exclusive with the ship
     // mark by construction: a ship row has no tzid to have been added under.
@@ -1933,7 +1940,9 @@ function createClockElement(entry: ClockEntry): HTMLElement {
     const isAboard = entry.kind === 'ship' && shipKey(entry.ship) === state.aboardShipKey;
 
     // Only a zone can be transient — it is the map's unsaved selection. A ship
-    // is saved the moment it is added, so it otherwise always offers removal.
+    // is saved the moment it is added, and a followed person the moment the
+    // pairing went through, so both otherwise always offer removal. Removing a
+    // person also ends the sharing; see the handler in main.ts.
     if (isTransient) {
         removeBtn.classList.add('hidden');
         pinBtn.classList.remove('hidden');

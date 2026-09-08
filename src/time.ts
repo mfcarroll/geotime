@@ -4,7 +4,7 @@ import * as dom from './dom';
 import { aboardShip, state } from './state';
 import { msUntilNextSecond, serverClockOffset, type ServerTimeReading } from './clock-offset';
 import { getDisplayTimezoneName, isValidTimezone } from './utils';
-import { clockKey, fixedOffsetWeekday, formatFixedOffsetDate, formatFixedOffsetTime, isUnresolved, visibleClocks } from './clocks';
+import { clockKey, clockOffset, clockZone, fixedOffsetWeekday, formatFixedOffsetDate, formatFixedOffsetTime, isUnresolved, visibleClocks } from './clocks';
 import { fitSecondLines, type SecondLineRow } from './second-line';
 import { shipKey } from './ships';
 import { isUnresolvable } from './shiptime';
@@ -274,10 +274,18 @@ export function updateAllClocks() {
       // "Finding" only while it is still plausibly being found. Once a request
       // has come back with nothing, saying so is the honest option — that state
       // can last a whole cruise if the ship is unreachable.
+      //
+      // A PERSON in this state is a third thing again: nothing is being looked
+      // up and nothing has failed. They paired and have not opened their app
+      // since, so there is no time to find and nobody to ask — the sub-label
+      // already says "Not shared yet", and this side of the row should not
+      // claim a search is under way on their behalf.
       el.querySelector('.date-diff')!.textContent =
-        entry.kind === 'ship' && isUnresolvable(clockKey(entry))
-          ? 'Ship time unavailable'
-          : 'Finding ship time…';
+        entry.kind === 'person'
+          ? 'Waiting for them'
+          : entry.kind === 'ship' && isUnresolvable(clockKey(entry))
+            ? 'Ship time unavailable'
+            : 'Finding ship time…';
       return;
     }
 
@@ -286,14 +294,24 @@ export function updateAllClocks() {
     let dayFull: string;
     let timeDiff: string;
 
-    if (entry.kind === 'ship') {
-      const offset = entry.ship.offsetHours as number;
+    // A row draws its clock from a ZONE or from a fixed OFFSET, and which of
+    // the two it is is not the same question as what kind of row it is. A ship
+    // is always an offset and a saved place always a zone — but a person is
+    // either, depending on whether they are ashore, so asking clockZone is what
+    // keeps all three cases in two branches.
+    const tz = clockZone(entry);
+    if (tz === null) {
+      const offset = clockOffset(entry);
       timeString = formatFixedOffsetTime(offset, { hour: 'numeric', minute: '2-digit' }, correctedTime);
       dayShort = fixedOffsetWeekday(offset, 'short', correctedTime);
       dayFull = fixedOffsetWeekday(offset, 'long', correctedTime);
-      timeDiff = relativeTextForShip(entry.ship as { brand: string; code: string; offsetHours: number });
+      timeDiff = entry.kind === 'ship'
+        // A vessel can be the one underfoot, which reads "Ship time" rather
+        // than "+0 hrs". A person aboard one never is: they are somewhere else
+        // by definition, which is the entire reason you are following them.
+        ? relativeTextForShip(entry.ship as { brand: string; code: string; offsetHours: number })
+        : formatOffsetDiff(offset - anchorOffsetHours());
     } else {
-      const tz = entry.zone.tz;
       timeString = getFormattedTime(tz, { hour: 'numeric', minute: '2-digit' }, correctedTime);
       dayShort = correctedTime.toLocaleDateString('en-US', { timeZone: tz, weekday: 'short' });
       dayFull = correctedTime.toLocaleDateString('en-US', { timeZone: tz, weekday: 'long' });

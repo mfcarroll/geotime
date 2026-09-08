@@ -1,7 +1,9 @@
 // src/state.ts
 
+import { migrateFollowedPeople, type FollowedPerson } from './people';
 import { migrateStoredTimezones, zoneKey, type StoredZone } from './stored-zones';
 export { migrateStoredTimezones, type StoredZone };
+export type { FollowedPerson };
 import { syncWidgetTimezones } from './widget';
 import { loadShipRoster, newShipClock, shipKey, type ShipClock, type ShipRef } from './ships';
 import type { DeviceFix } from './ship-position';
@@ -48,6 +50,15 @@ export interface AppState {
      * by hand on three platforms — the exact thing 1.3.0 removed.
      */
     shipClocks: ShipClock[];
+    /**
+     * People whose anchor is shared with this device.
+     *
+     * Held here, not fetched on demand, for the reason the fleet cache is: a
+     * launch with no signal should show the rows it had, aged, rather than an
+     * empty list. Half of each record is yours — the name — and never leaves
+     * the device; see people.ts.
+     */
+    followedPeople: FollowedPerson[];
     /**
      * The ship we believe the user is currently on, by "brand/code" key.
      *
@@ -181,6 +192,7 @@ export const state: AppState = {
     localPlaceName: localStorage.getItem('localPlaceName') || null,
     savedZones: stored,
     shipClocks: loadStoredShips(),
+    followedPeople: loadFollowedPeople(),
     aboardShipKey: localStorage.getItem('aboardShipKey') || null,
     clocksInterval: null,
     locationMap: null,
@@ -277,6 +289,27 @@ export async function loadDebugFleet(): Promise<boolean> {
     announceShipClocks();
     // Whether the caller now has ships that have never been asked the time.
     return true;
+}
+
+function loadFollowedPeople(): FollowedPerson[] {
+    try {
+        return migrateFollowedPeople(JSON.parse(localStorage.getItem('followedPeople') || '[]'));
+    } catch {
+        return [];
+    }
+}
+
+/**
+ * Single write path for the followed list. Mirrors persistShipClocks.
+ *
+ * Rebuilt through the migration on the way out as well as in, so that whatever
+ * is written is exactly what will be read back — the same symmetry persistZones
+ * keeps, and the thing that stops a field being added on one side only.
+ */
+export function persistFollowedPeople(people: FollowedPerson[]): void {
+    state.followedPeople = migrateFollowedPeople(people);
+    localStorage.setItem('followedPeople', JSON.stringify(state.followedPeople));
+    syncWidget();
 }
 
 /** Single write path for the ship list. Mirrors persistZones. */

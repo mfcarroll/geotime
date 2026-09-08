@@ -4,7 +4,7 @@
 import './style.css';
 import { Loader } from '@googlemaps/js-api-loader';
 import * as dom from './dom';
-import { addShipClock, loadDebugFleet, migrateStoredTimezones, persistZones, savedZoneByKey, state, syncWidget } from './state';
+import { addShipClock, loadDebugFleet, migrateStoredTimezones, persistFollowedPeople, persistZones, savedZoneByKey, state, syncWidget } from './state';
 import { refreshAnchorChip, refreshMapStyles, initMaps, onLocationError, onLocationSuccess, selectSavedZone, selectShip, selectPlace, setHoveredShip, setHoveredPlace, renderWorldClocks, keepZone, updateUserTimezoneDetails, showLocationUnavailable, loadTimezoneGeoJson, selectAnchor, clearSelection, hoverAnchor, hoverSelected, hoverClockRow } from './map';
 import { updateAllClocks, syncClock, startClockWatch, getDisplayTimezoneName, startClocks, findTimezoneFromGeoJSON } from './time';
 import { Capacitor } from '@capacitor/core';
@@ -16,17 +16,18 @@ import { initShipTime } from './rccl';
 import { forgetShip, resolveAllShipClocks, startShipTimeWatch } from './shiptime';
 import { initShipTrack, cachedVoyageFor } from './shiptrack';
 import { portRefsFrom } from './ports';
+import { revokeShare } from './anchor-share';
 import { zoneKey, type StoredZone } from './stored-zones';
 import { refreshShipMarkers, startShipMarkerWatch, type PlaceMarkerDetail } from './ship-markers';
 import { installDiagnostics } from './diagnostics';
 import { maybeRunShipProbe } from './ship-probe';
 import { library, dom as faDom } from '@fortawesome/fontawesome-svg-core';
-import { faLocationDot, faWifi, faBullseye, faMobileAlt, faSatellite, faShip, faAnchor } from '@fortawesome/free-solid-svg-icons';
+import { faLocationDot, faWifi, faBullseye, faMobileAlt, faSatellite, faShip, faAnchor, faUser } from '@fortawesome/free-solid-svg-icons';
 
 // Every icon the markup names has to be registered here — the tree-shaken
 // core renders an unregistered one as a placeholder box, which is what the
-// anchor did until it was added.
-library.add(faLocationDot, faWifi, faBullseye, faMobileAlt, faSatellite, faShip, faAnchor);
+// anchor did until it was added, and what faUser did after it.
+library.add(faLocationDot, faWifi, faBullseye, faMobileAlt, faSatellite, faShip, faAnchor, faUser);
 faDom.watch();
 
 const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
@@ -337,6 +338,21 @@ async function startApp() {
       const key = (removeBtn as HTMLElement).dataset.clockTarget!;
       if (key.startsWith('ship:')) {
         forgetShip(key.slice('ship:'.length));
+      } else if (key.startsWith('person:')) {
+        // Locally first, so the row goes the instant it is tapped rather than
+        // after a round trip — and it goes even with no signal, which is when
+        // somebody most wants to be rid of a row.
+        //
+        // Then the relay, which is what actually ends the sharing. Not awaited:
+        // the answer changes nothing on this screen, and revoking is idempotent
+        // so a retry is always safe. What a call that never lands leaves behind
+        // is a share the relay still honours that nothing here asks about —
+        // harmless, but it means the other end goes on pushing, so a sweep of
+        // rows we no longer hold belongs in the foreground fetch.
+        const shareId = key.slice('person:'.length);
+        persistFollowedPeople(
+          state.followedPeople.filter((person) => person.shareId !== shareId));
+        void revokeShare(shareId);
       } else {
         // By place, so removing Tampa leaves New York alone.
         persistZones(state.savedZones.filter((zone) => zoneKey(zone) !== key));

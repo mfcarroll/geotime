@@ -15,6 +15,8 @@
 // benign because every reference is inside a function body rather than at module
 // initialisation, so both are fully evaluated before either is called — but keep
 // it that way: a top-level call across this boundary would break at load.
+import { anchorSubLabel } from './anchor';
+import { personSubLabel, type FollowedPerson } from './people';
 import { state } from './state';
 import { placeLabel } from './stored-zones';
 import { correctedNow, getUtcOffset } from './time';
@@ -25,11 +27,23 @@ import { shipTimeAvailable } from './rccl';
 
 export type ClockEntry =
   | { kind: 'zone'; zone: StoredZone }
-  | { kind: 'ship'; ship: ShipClock };
+  | { kind: 'ship'; ship: ShipClock }
+  | { kind: 'person'; person: FollowedPerson };
 
-/** The zone a row keeps time by, whichever kind of row it is. */
+/**
+ * The zone a row keeps time by, or null where there is none to name.
+ *
+ * A person has one exactly when they are ashore. Aboard, their anchor is a
+ * crew-set offset belonging to no region — the same reason a ship has no zone,
+ * arriving by a different route.
+ */
 export function clockZone(entry: ClockEntry): string | null {
-  return entry.kind === 'zone' ? entry.zone.tz : null;
+  if (entry.kind === 'zone') return entry.zone.tz;
+  if (entry.kind === 'person') {
+    const anchor = entry.person.anchor;
+    return anchor?.kind === 'zone' ? anchor.tz : null;
+  }
+  return null;
 }
 
 /**
@@ -41,7 +55,11 @@ export function clockZone(entry: ClockEntry): string | null {
  * written into it.
  */
 export function clockKey(entry: ClockEntry): string {
-  return entry.kind === 'ship' ? `ship:${shipKey(entry.ship)}` : zoneKey(entry.zone);
+  if (entry.kind === 'ship') return `ship:${shipKey(entry.ship)}`;
+  // The share, not the name: two people can be called "Mum" and one can be
+  // renamed, and a key that moved when you renamed a row would strand it.
+  if (entry.kind === 'person') return `person:${entry.person.shareId}`;
+  return zoneKey(entry.zone);
 }
 
 /**
@@ -52,7 +70,16 @@ export function clockKey(entry: ClockEntry): string {
  * ship cannot be modelled as a zone.
  */
 export function clockOffset(entry: ClockEntry): number {
-  return entry.kind === 'ship' ? entry.ship.offsetHours ?? 0 : getUtcOffset(entry.zone.tz);
+  if (entry.kind === 'ship') return entry.ship.offsetHours ?? 0;
+  if (entry.kind === 'person') {
+    const anchor = entry.person.anchor;
+    if (!anchor) return 0;                      // unresolved; sorted to the end anyway
+    // Ashore, ask the platform, which knows the DST rules — which is exactly
+    // why the zone id travels rather than an offset. Aboard, there are no rules
+    // to apply and the crew's number is the answer.
+    return anchor.kind === 'zone' ? getUtcOffset(anchor.tz) : anchor.offsetMinutes / 60;
+  }
+  return getUtcOffset(entry.zone.tz);
 }
 
 /**
@@ -65,6 +92,8 @@ export function clockOffset(entry: ClockEntry): number {
  */
 export function clockLabel(entry: ClockEntry): string {
   if (entry.kind === 'ship') return entry.ship.name;
+  // What YOU called them. The relay has never heard it — see people.ts.
+  if (entry.kind === 'person') return entry.person.name;
   return placeLabel(entry.zone) ?? getDisplayTimezoneName(entry.zone.tz);
 }
 
@@ -99,6 +128,22 @@ export function clockSubLabel(entry: ClockEntry, word: ZoneLabelWord = 'Timezone
     // first word. Same principle as the zone case below.
     return fold(entry.ship.name).startsWith(fold(line)) ? '' : line;
   }
+  if (entry.kind === 'person') {
+    // Where they are, and how old that is when it is old. The name above is
+    // yours; this line is the only thing on the row that they control.
+    //
+    // A zone anchor is named the way any place row is — the town if the device
+    // knew one, else the zone — so "Dad / Vancouver" reads like "Tampa /
+    // Timezone: New York" rather than like a fourth kind of thing.
+    const anchor = entry.person.anchor;
+    const where = anchor
+      ? (anchor.kind === 'zone' && !anchor.place
+          ? getDisplayTimezoneName(anchor.tz)
+          : anchorSubLabel(anchor))
+      : null;
+    return personSubLabel(entry.person, where, correctedNow().getTime());
+  }
+
   const zoneName = getDisplayTimezoneName(entry.zone.tz);
   // A row with no name of its own IS the zone, and says so. It used to say
   // nothing, which left it indistinguishable from a city that happened to share
@@ -112,7 +157,12 @@ export function clockSubLabel(entry: ClockEntry, word: ZoneLabelWord = 'Timezone
 
 /** True when this row is a ship whose offset we have never resolved. */
 export function isUnresolved(entry: ClockEntry): boolean {
-  return entry.kind === 'ship' && entry.ship.offsetHours === null;
+  if (entry.kind === 'ship') return entry.ship.offsetHours === null;
+  // Paired, but they have not pushed yet. No offset to sort by and no clock to
+  // draw, which is the same predicament an unresolved ship is in — so it sorts
+  // to the end beside her rather than pretending to be UTC.
+  if (entry.kind === 'person') return entry.person.anchor === null;
+  return false;
 }
 
 /**
@@ -192,6 +242,14 @@ export function visibleClocks(): ClockEntry[] {
   // a bug.
   for (const ship of shipTimeAvailable() ? state.shipClocks : []) {
     entries.push({ kind: 'ship', ship });
+  }
+
+  // People, unconditionally. Unlike a ship, a followed person needs no app key
+  // and no upstream that might be disabled — the anchor was pushed to the relay
+  // by their device, and the last one is held here, so the row can always be
+  // drawn even with nothing reachable. That is the point of holding it.
+  for (const person of state.followedPeople) {
+    entries.push({ kind: 'person', person });
   }
 
   return entries.sort((a, b) => {
