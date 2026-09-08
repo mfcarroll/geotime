@@ -1,0 +1,44 @@
+// Deploy: npm run deploy:api-gateway  (from the repo root)
+//
+// Deploy this LAST. Its service bindings name the four Workers behind it, and a
+// binding to a Worker that does not exist yet fails the deploy — which is what
+// `npm run deploy:workers` orders for you.
+//
+// Everything here is declarative on purpose. `custom_domain: true` is what makes
+// the hostname infrastructure-as-code rather than a click: wrangler creates the
+// DNS record and provisions the certificate on deploy, and re-deploying
+// reconciles rather than duplicating. The alternative — a route pattern — needs
+// a proxied DNS record put there by hand first, which is exactly the kind of
+// step that is done once, undocumented, and irreproducible a year later.
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "geotime-api-gateway",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-07",
+  "observability": {
+    "enabled": true,
+    // Every request to every service now passes through here, so this is the
+    // one place with a complete picture. Still small enough to keep all of it.
+    "head_sampling_rate": 1
+  },
+
+  // The hostname the 2.0 clients are built against. The Workers behind it keep
+  // their own *.workers.dev names, which is what every 1.7.0 install in the
+  // field is still calling — this is additive, and nothing shipped breaks.
+  "routes": [
+    {
+      "pattern": "geotime-api.matthewcarroll.ca",
+      "custom_domain": true
+    }
+  ],
+
+  // Worker-to-Worker, inside Cloudflare's network: no DNS, no TLS handshake, no
+  // second trip off the edge. The names must match the `name` field in each
+  // target's own wrangler.jsonc.
+  "services": [
+    { "binding": "TIME", "service": "geotime-utc-time" },
+    { "binding": "RCCL", "service": "geotime-rccl-proxy" },
+    { "binding": "SHIPS", "service": "geotime-ship-track" },
+    { "binding": "ANCHOR", "service": "geotime-anchor-share" }
+  ]
+}

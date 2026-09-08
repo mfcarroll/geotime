@@ -167,7 +167,7 @@ export async function syncClock() {
     // has shipped on the first.
     const SOURCES = [
       import.meta.env.VITE_UTC_TIME_URL
-        ?? 'https://geotime-utc-time.matthew-carroll.workers.dev/',
+        ?? 'https://geotime-api.matthewcarroll.ca/time',
       'https://get-utc-time-100547663673.us-west1.run.app/',
     ].filter(Boolean) as string[];
 

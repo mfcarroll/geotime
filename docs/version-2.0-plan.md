@@ -119,6 +119,55 @@ shared fact is a timezone. The `accountId` gives billing something to attach to
 need, Sign in with Apple can be added later to *link* two `accountId`s; nothing
 has to be migrated.
 
+## The API lives on a name we own
+
+Decided while building the alpha, and applied to the three Workers that
+predate it as well as the new one:
+
+```
+geotime-api.matthewcarroll.ca/time/…    → geotime-utc-time
+                             /rccl/…    → geotime-rccl-proxy
+                             /ships/…   → geotime-ship-track
+                             /anchor/…  → geotime-anchor-share
+```
+
+**Why now.** These URLs are compiled into binaries that go to the App Store and
+Play, and a shipped build calls whatever it was built with for as long as it is
+installed. `*.workers.dev` is Cloudflare's name, not ours: the day any of it has
+to move, every install still points at the old one and the only fix is an update
+every user has to take. 2.0 is the release that changes these URLs anyway.
+
+**Why a gateway rather than four names.** A Cloudflare custom domain binds a
+whole hostname to one Worker, so four Workers on one hostname needs something to
+dispatch between them. Four flat hostnames would work and is four CSP entries
+and not a namespace; nesting them (`anchor.geotime-api.…`) falls outside
+Cloudflare's universal certificate, which covers exactly one level of subdomain.
+So: a small Worker that routes by path prefix, strips it, and forwards over a
+service binding — Worker to Worker inside the network, no second trip off the
+edge.
+
+**Stripping the prefix is what makes it free.** The RCCL proxy forwards
+`url.pathname` upstream verbatim and the ship tracker matches `/fleet` exactly;
+both would break if they could see a prefix. Handled at the gateway, none of the
+three needed a line changed, and their `*.workers.dev` names keep working for
+every 1.7.0 install in the field. Nothing shipped breaks.
+
+**Infrastructure as code.** Everything is declarative except one thing:
+
+| | How |
+| --- | --- |
+| Workers | `wrangler.jsonc` each; `wrangler deploy` reconciles |
+| The hostname, its DNS record and certificate | `routes: [{ custom_domain: true }]` — wrangler creates them |
+| Service bindings | a list in the gateway's config |
+| D1 schema | `schema.sql`, re-runnable, one npm script |
+| **Creating the D1 database** | `npm run provision` — the gap, because an id is generated at creation and cannot be written down in advance |
+
+`scripts/provision.mjs` closes that last one: it asks what exists before making
+anything, records the generated id where the binding will look for it, refuses
+to overwrite an id it did not put there, and dry-runs by default. Terraform
+would cover the same ground and is more machinery than four Workers and one
+database deserve — the escalation path if this ever grows a second environment.
+
 ## Platform options
 
 The workload: tiny writes (one anchor per person, when it changes), tiny reads

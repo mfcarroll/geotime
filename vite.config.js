@@ -195,14 +195,20 @@ function workerCsp() {
     name: 'geotime:worker-csp',
     transformIndexHtml(html, ctx) {
       const env = loadEnv(ctx?.server ? 'development' : 'production', process.cwd(), 'VITE_');
-      // Defaults must match the ones in src/rccl.ts and src/time.ts: the CSP
-      // has to admit whatever the client will actually call, and the client
-      // falls back to these when the variables are unset.
+      // Defaults must match the ones in src/rccl.ts, src/time.ts, src/shiptrack.ts
+      // and src/anchor-share.ts: the CSP has to admit whatever the client will
+      // actually call, and the client falls back to these when the variables are
+      // unset.
+      //
+      // Four services, one origin — everything lives behind the API gateway now,
+      // so this list collapses to whatever each variable overrides it with. The
+      // entries stay separate because an override can still point one service
+      // somewhere else, which is what the shiptest mode does.
       const origins = [
-        env.VITE_RCCL_PROXY ?? 'https://geotime-rccl-proxy.matthew-carroll.workers.dev',
-        env.VITE_UTC_TIME_URL ?? 'https://geotime-utc-time.matthew-carroll.workers.dev',
-        env.VITE_SHIP_TRACK ?? 'https://geotime-ship-track.matthew-carroll.workers.dev',
-        env.VITE_ANCHOR_SHARE ?? 'https://geotime-anchor-share.matthew-carroll.workers.dev',
+        env.VITE_RCCL_PROXY ?? 'https://geotime-api.matthewcarroll.ca/rccl',
+        env.VITE_UTC_TIME_URL ?? 'https://geotime-api.matthewcarroll.ca/time',
+        env.VITE_SHIP_TRACK ?? 'https://geotime-api.matthewcarroll.ca/ships',
+        env.VITE_ANCHOR_SHARE ?? 'https://geotime-api.matthewcarroll.ca/anchor',
         // The onboard stand-in, in a shiptest build only. A browser enforces the
         // CSP where CapacitorHttp does not, so without this the gateway is
         // reachable on a device and blocked in the one place it is quickest to
