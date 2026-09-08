@@ -310,6 +310,11 @@ export function persistFollowedPeople(people: FollowedPerson[]): void {
     state.followedPeople = migrateFollowedPeople(people);
     localStorage.setItem('followedPeople', JSON.stringify(state.followedPeople));
     syncWidget();
+    // Here rather than at the call sites, because unlike the ship list this one
+    // changes without anybody touching the screen: the relay answering is a
+    // membership change nobody asked for, and every writer would otherwise have
+    // to remember to say so.
+    document.dispatchEvent(new CustomEvent('followedpeoplechanged'));
 }
 
 /** Single write path for the ship list. Mirrors persistZones. */

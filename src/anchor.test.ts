@@ -2,10 +2,15 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+    HEARTBEAT_MS,
     STALE_AFTER_MS,
+    anchorFrom,
     anchorIsStale,
     anchorSubLabel,
+    sameAnchor,
+    shouldPush,
     validateAnchor,
+    type Anchor,
 } from './anchor';
 
 test('an anchor ashore', async (t) => {
@@ -132,5 +137,110 @@ test('the line underneath the name', async (t) => {
             'Wonder');
         assert.equal(anchorSubLabel({ kind: 'ship', offsetMinutes: -240, name: 'Anthem' }),
                      'Anthem');
+    });
+});
+
+const NOW = 1_788_800_000_000;
+const wonder = { name: 'Wonder of the Seas', short: 'Wonder', offsetHours: -4 };
+const ashore: Anchor = { kind: 'zone', tz: 'America/Vancouver', place: 'Nelson' };
+
+test('what this device says its anchor is', async (t) => {
+    await t.test('the ship, when aboard one whose clock is known', () => {
+        assert.deepEqual(anchorFrom(wonder, 'America/New_York', 'Miami'), {
+            kind: 'ship',
+            offsetMinutes: -240,
+            name: 'Wonder of the Seas',
+            short: 'Wonder',
+        });
+    });
+
+    await t.test('the ground, when the ship has no clock yet', () => {
+        // Aboard is not a fact you can send; an offset is. Until one resolves
+        // there is nothing to say about the ship, so the ground is the answer.
+        assert.deepEqual(anchorFrom({ ...wonder, offsetHours: null }, 'America/Vancouver', 'Nelson'),
+                         ashore);
+    });
+
+    await t.test('the ground, when not aboard anything', () => {
+        assert.deepEqual(anchorFrom(null, 'America/Vancouver', 'Nelson'), ashore);
+    });
+
+    await t.test('nothing, when the device does not know its own zone', () => {
+        // Sending UTC and letting somebody read it would be worse than silence.
+        assert.equal(anchorFrom(null, null, 'Nelson'), null);
+    });
+
+    await t.test('carries no place when there is no place to carry', () => {
+        assert.deepEqual(anchorFrom(null, 'America/Vancouver', null),
+                         { kind: 'zone', tz: 'America/Vancouver' });
+    });
+
+    await t.test('omits a short name that is the name', () => {
+        const anchor = anchorFrom({ name: 'Icon', short: 'Icon', offsetHours: 0 }, null, null);
+        assert.equal('short' in anchor!, false);
+    });
+
+    await t.test('rounds a half-hour ship clock to whole minutes', () => {
+        const anchor = anchorFrom({ ...wonder, offsetHours: 5.75 }, null, null);
+        assert.deepEqual((anchor as { offsetMinutes: number }).offsetMinutes, 345);
+    });
+});
+
+test('whether two anchors read the same', async (t) => {
+    await t.test('same fields, same answer', () => {
+        assert.equal(sameAnchor(ashore, { ...ashore }), true);
+    });
+
+    await t.test('a different town in the same zone is a change', () => {
+        // It is what the far end's row says underneath, so it is a change.
+        assert.equal(sameAnchor(ashore, { ...ashore, place: 'Vancouver' }), false);
+    });
+
+    await t.test('an absent place and an empty one are the same nothing', () => {
+        assert.equal(sameAnchor({ kind: 'zone', tz: 'UTC' },
+                                { kind: 'zone', tz: 'UTC', place: '' }), true);
+    });
+
+    await t.test('kinds never match across', () => {
+        assert.equal(sameAnchor(ashore, anchorFrom(wonder, null, null)), false);
+    });
+
+    await t.test('null equals only null', () => {
+        assert.equal(sameAnchor(null, null), true);
+        assert.equal(sameAnchor(null, ashore), false);
+    });
+});
+
+test('whether it is due', async (t) => {
+    await t.test('a change is always due', () => {
+        assert.equal(shouldPush({ ...ashore, place: 'Victoria' }, ashore, NOW, NOW), true);
+    });
+
+    await t.test('unchanged and recent is not', () => {
+        assert.equal(shouldPush(ashore, ashore, NOW - 60_000, NOW), false);
+    });
+
+    await t.test('unchanged but past the heartbeat is', () => {
+        // Nothing else resets the follower's staleness clock, so an anchor that
+        // never changes has to be re-sent or somebody sitting still starts to
+        // look like somebody who has gone quiet.
+        assert.equal(shouldPush(ashore, ashore, NOW - HEARTBEAT_MS, NOW), true);
+        assert.equal(shouldPush(ashore, ashore, NOW - HEARTBEAT_MS + 1, NOW), false);
+    });
+
+    await t.test('never sent is due', () => {
+        assert.equal(shouldPush(ashore, null, null, NOW), true);
+        assert.equal(shouldPush(ashore, ashore, null, NOW), true);
+    });
+
+    await t.test('nothing to send is never due', () => {
+        // An anchor that has gone unknown does not retract the last one. A row
+        // ageing visibly beats a row that has lost its time.
+        assert.equal(shouldPush(null, ashore, NOW - 10 * HEARTBEAT_MS, NOW), false);
+    });
+
+    await t.test('the heartbeat is well inside the staleness window', () => {
+        assert.ok(HEARTBEAT_MS * 2 < 24 * 60 * 60 * 1000,
+                  'a missed heartbeat should not be able to strand a row as stale');
     });
 });

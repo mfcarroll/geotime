@@ -72,6 +72,97 @@ export function anchorIsStale(updatedAt: number, now = Date.now()): boolean {
 }
 
 /**
+ * How long a pushed anchor may sit before it is sent again unchanged.
+ *
+ * Deliberately next to STALE_AFTER_MS, because the only thing that makes either
+ * number right is its relation to the other. A push is the one event that
+ * resets a follower's staleness clock, so an anchor that never changes and is
+ * never re-sent would make somebody sitting still look like somebody who has
+ * gone quiet. Six hours leaves room for two missed heartbeats inside the day.
+ *
+ * It does not make a row fresh while the app is closed — nothing pushes in the
+ * background in 2.0 — so "stale" honestly means "has not opened their app in a
+ * day". That is the truth, and it reads as such.
+ */
+export const HEARTBEAT_MS = 6 * 60 * 60 * 1000;
+
+/**
+ * The anchor a device with these pieces would send.
+ *
+ * Aboard beats ashore, for the same reason anchorOffsetHours does it: ship time
+ * is what every announcement and gangway time aboard is quoted in, while the
+ * geographic zone under a hull is often one nobody observes. A ship whose clock
+ * has not resolved is not aboard for this purpose — there is no offset to send
+ * — so it falls through to the ground.
+ *
+ * Null when there is nothing worth saying, which is an answer rather than a
+ * failure: a device that does not yet know its own zone should send nothing,
+ * because sending UTC and having somebody read it is worse than silence.
+ *
+ * Given its inputs rather than reading state, so it lives here with the rest of
+ * the wire format and can be tested with it.
+ */
+export function anchorFrom(
+    ship: { name: string; short: string; offsetHours: number | null } | null,
+    tz: string | null,
+    place: string | null,
+): Anchor | null {
+    if (ship && ship.offsetHours !== null) {
+        return {
+            kind: 'ship',
+            offsetMinutes: Math.round(ship.offsetHours * 60),
+            name: ship.name,
+            // Only when it says something the full name does not. A short form
+            // identical to the name is a field that costs bytes and tells the
+            // far end nothing it could not work out.
+            ...(ship.short && ship.short !== ship.name ? { short: ship.short } : {}),
+        };
+    }
+    if (!tz) return null;
+    return { kind: 'zone', tz, ...(place ? { place } : {}) };
+}
+
+/**
+ * Whether two anchors would read identically on somebody else's screen.
+ *
+ * Field by field rather than by JSON, because key order is not meaning and a
+ * re-serialisation that shuffles them is not a change worth a request. This
+ * comparison is the thing that stops the heartbeat becoming a poll.
+ */
+export function sameAnchor(a: Anchor | null, b: Anchor | null): boolean {
+    if (!a || !b) return a === b;
+    if (a.kind === 'zone' && b.kind === 'zone') {
+        return a.tz === b.tz && (a.place ?? '') === (b.place ?? '');
+    }
+    if (a.kind === 'ship' && b.kind === 'ship') {
+        return a.offsetMinutes === b.offsetMinutes
+            && a.name === b.name
+            && (a.short ?? '') === (b.short ?? '');
+    }
+    return false;
+}
+
+/**
+ * Whether an anchor is due to be sent, given what was last sent and when.
+ *
+ * Three ways to be due: it changed, it has never been sent, or it is older than
+ * the heartbeat. Nothing to send is never due — an anchor that has gone unknown
+ * does not retract the last one, because a follower's row ageing visibly is a
+ * better answer than that row losing its time.
+ */
+export function shouldPush(
+    next: Anchor | null,
+    last: Anchor | null,
+    lastAt: number | null,
+    now: number,
+): boolean {
+    if (!next) return false;
+    if (!sameAnchor(next, last)) return true;
+    if (lastAt === null || !Number.isFinite(lastAt)) return true;
+    return now - lastAt >= HEARTBEAT_MS;
+}
+
+/**
  * Names are shown on other people's screens and stored in someone else's
  * database, so they are bounded here rather than trusted.
  */

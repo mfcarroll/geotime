@@ -173,6 +173,47 @@
             </div>
             <div id="world-clocks-container" class="space-y-4"></div>
           </div>
+
+          <!-- Sharing. Hidden until pairing.ts decides this build offers it —
+               2.0 is native-only, because the web has no widget to feed and a
+               far weaker place to keep an account id. See sharingAvailable. -->
+          <div id="sharing-card" class="card rounded-2xl shadow-lg p-6 hidden">
+            <h2 class="text-xl font-semibold text-white mb-1">Sharing</h2>
+            <!-- What a follower's row says right now, so somebody can check the
+                 app has the right idea of where they are before handing out a
+                 code. -->
+            <p class="text-sm text-gray-400 mb-4">
+              You appear as <span id="sharing-anchor" class="text-gray-200">…</span>
+            </p>
+
+            <div class="flex gap-2">
+              <button id="sharing-invite" class="flex-1 bg-blue-600 hover:bg-blue-500 text-white rounded-lg px-4 py-2 text-sm font-medium transition-colors">Share your time</button>
+              <button id="sharing-redeem" class="flex-1 bg-gray-700 hover:bg-gray-600 text-white rounded-lg px-4 py-2 text-sm font-medium transition-colors">Enter a code</button>
+            </div>
+
+            <!-- One panel at a time, and both start closed. -->
+            <div id="sharing-code-panel" class="hidden mt-4 text-center">
+              <p class="text-xs uppercase tracking-wide text-gray-500 mb-2">Read this out</p>
+              <!-- Tabular figures and wide tracking: this gets read aloud over a
+                   phone, and a code whose characters are hard to tell apart is
+                   the whole failure mode the alphabet was chosen to avoid. -->
+              <p id="sharing-code" class="text-3xl font-mono tabular-nums tracking-[0.2em] text-white select-all">--------</p>
+              <p id="sharing-code-note" class="text-sm text-gray-400 mt-2">Good for 24 hours, once.</p>
+            </div>
+
+            <div id="sharing-redeem-panel" class="hidden mt-4 space-y-2">
+              <input id="sharing-code-input" type="text" inputmode="latin" autocapitalize="characters" autocomplete="off" spellcheck="false"
+                     class="w-full bg-gray-700 border border-gray-600 text-white placeholder-gray-400 rounded-lg px-4 py-2 font-mono tracking-widest uppercase focus:ring-2 focus:ring-blue-500 focus:outline-none" placeholder="CODE">
+              <input id="sharing-name-input" type="text" autocomplete="off"
+                     class="w-full bg-gray-700 border border-gray-600 text-white placeholder-gray-400 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:outline-none" placeholder="What to call them">
+              <button id="sharing-confirm" class="w-full bg-blue-600 hover:bg-blue-500 text-white rounded-lg px-4 py-2 text-sm font-medium transition-colors">Follow</button>
+            </div>
+
+            <!-- The one line that says what happened. Never cleared silently:
+                 a form that resets itself is a form that looks like it did
+                 nothing. -->
+            <p id="sharing-status" class="text-sm mt-3 hidden"></p>
+          </div>
         </div>
       </div>
     </div>

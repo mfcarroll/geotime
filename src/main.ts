@@ -17,6 +17,8 @@ import { forgetShip, resolveAllShipClocks, startShipTimeWatch } from './shiptime
 import { initShipTrack, cachedVoyageFor } from './shiptrack';
 import { portRefsFrom } from './ports';
 import { revokeShare } from './anchor-share';
+import { startAnchorSync } from './anchor-sync';
+import { initPairing } from './pairing';
 import { zoneKey, type StoredZone } from './stored-zones';
 import { refreshShipMarkers, startShipMarkerWatch, type PlaceMarkerDetail } from './ship-markers';
 import { installDiagnostics } from './diagnostics';
@@ -120,6 +122,18 @@ async function startApp() {
       if (added) void resolveAllShipClocks();
     });
   });
+  // Sharing. The card decides for itself whether this build offers it, and
+  // the sync decides for itself whether there is an account to sync — so both
+  // are safe to start unconditionally, and neither touches the network for an
+  // install that has never paired.
+  initPairing();
+  startAnchorSync();
+  // The relay answering is the one thing that adds rows without a tap.
+  document.addEventListener('followedpeoplechanged', () => {
+    renderWorldClocks();
+    updateAllClocks();
+  });
+
   installDiagnostics(dom.deviceTimezoneEl);
 
   // Start watching for location immediately.
