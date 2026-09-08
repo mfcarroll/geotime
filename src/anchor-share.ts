@@ -9,9 +9,13 @@
 // never be confused for one another. The app's job on a null is to keep showing
 // what it last knew.
 //
-// The one place that rule is not enough is redeeming a code, where the person
-// is standing there having just typed something and deserves to know whether it
-// was wrong, expired, or simply unreachable. That one returns a reason.
+// The rule has one exception, and it is the pairing screen: somebody is
+// standing there having just tapped a button or typed a code, and "something
+// went wrong" is not an answer to a person who is waiting. Those two calls
+// return a reason instead of a null, so the screen can say whether the code was
+// wrong, whether the account is full, or whether the server simply could not be
+// reached — three states that want three different sentences and, more to the
+// point, three different next moves.
 
 import { Capacitor, CapacitorHttp } from '@capacitor/core';
 
@@ -53,6 +57,19 @@ export interface Invitation {
 export type RedeemResult =
     | { ok: true; shareId: string }
     | { ok: false; reason: 'invalid' | 'yourself' | 'full' | 'unreachable' };
+
+/**
+ * Why a code could not be minted. Same bargain as RedeemResult.
+ *
+ * The code is narrowed to a string here, where Invitation allows null: a
+ * listed invitation may have been redeemed and spent its code, but one that
+ * has just been minted has one by definition. Saying so in the type saves the
+ * caller — whose entire job is to put that code on a screen — from asserting
+ * past a null that cannot happen.
+ */
+export type InviteResult =
+    | { ok: true; invitation: Invitation & { code: string } }
+    | { ok: false; reason: 'full' | 'unreachable' };
 
 interface Sent {
     status: number;
@@ -161,19 +178,28 @@ export async function pushAnchor(anchor: Anchor): Promise<boolean> {
     return status === 200;
 }
 
-/** Mints a code to read out. Null when the relay is unreachable or full. */
-export async function createInvitation(): Promise<Invitation | null> {
+/**
+ * Mints a code to read out.
+ *
+ * A refusal is told apart from a failure, because the two want opposite things
+ * from the person: being at the cap means stopping somebody first, and being
+ * unable to reach the relay means trying again in a minute. Reporting the cap
+ * as a network problem sends them to look at their wifi over a limit that has
+ * nothing to do with it.
+ */
+export async function createInvitation(): Promise<InviteResult> {
     const token = await ensureAccount();
-    if (!token) return null;
+    if (!token) return { ok: false, reason: 'unreachable' };
 
     const { status, body } = await send('POST', '/v1/shares', token);
-    if (status !== 201) return null;
+    if (status === 409) return { ok: false, reason: 'full' };
+    if (status !== 201) return { ok: false, reason: 'unreachable' };
 
     const shareId = stringField(body, 'shareId');
     const code = stringField(body, 'code');
-    if (!shareId || !code) return null;
+    if (!shareId || !code) return { ok: false, reason: 'unreachable' };
 
-    return { shareId, code, createdAt: Date.now(), redeemedAt: null };
+    return { ok: true, invitation: { shareId, code, createdAt: Date.now(), redeemedAt: null } };
 }
 
 /**

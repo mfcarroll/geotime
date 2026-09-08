@@ -34,6 +34,15 @@ const REASONS: Record<string, string> = {
     unreachable: 'Could not reach the server. Try again in a moment.',
 };
 
+/**
+ * Being at the cap is not a network problem, and must not be reported as one:
+ * the way out is to stop somebody below, not to go and look at the wifi.
+ */
+const INVITE_REASONS: Record<string, string> = {
+    full: 'As many people can see your time as an account allows. Stop one of the shares below to make room.',
+    unreachable: REASONS.unreachable,
+};
+
 let card: HTMLElement;
 let anchorEl: HTMLElement;
 let codePanel: HTMLElement;
@@ -79,17 +88,18 @@ async function invite(): Promise<void> {
     codeEl.textContent = '·····';
     codeNote.textContent = 'Asking the server…';
 
-    const invitation = await createInvitation();
-    if (!invitation?.code) {
-        codeEl.textContent = '--------';
-        codeNote.textContent = '';
-        say(REASONS.unreachable, 'bad');
+    const result = await createInvitation();
+    if (!result.ok) {
+        codePanel.classList.add('hidden');
+        say(INVITE_REASONS[result.reason] ?? REASONS.unreachable, 'bad');
+        // A cap is only comprehensible beside the list it is a cap on.
+        if (result.reason === 'full') void refreshFollowers();
         return;
     }
 
     // Hyphenated for reading aloud, and only for that: the relay normalises
     // whatever is typed, so nobody has to reproduce the punctuation.
-    codeEl.textContent = formatShareCode(invitation.code);
+    codeEl.textContent = formatShareCode(result.invitation.code);
     codeNote.textContent = 'Good for 24 hours, once. They type it into their app.';
     // The mint IS a row in the list below — an outstanding code is a door that
     // is already open, and it should be visible and closeable from the moment
