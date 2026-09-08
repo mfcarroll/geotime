@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
     describeAge,
+    describeInvitation,
     mergeFollowed,
     migrateFollowedPeople,
     personSubLabel,
@@ -130,5 +131,42 @@ test('folding in what the relay says', async (t) => {
         const { people } = mergeFollowed([dad()], incoming({ anchor: null, updatedAt: null }));
         assert.deepEqual(people[0].anchor, dad().anchor);
         assert.equal(people[0].updatedAt, dad().updatedAt);
+    });
+});
+
+test('a code you handed out, from your side of it', async (t) => {
+    const invitation = (over = {}) => ({
+        code: null as string | null,
+        createdAt: NOW - 3 * DAY,
+        redeemedAt: null as number | null,
+        ...over,
+    });
+
+    await t.test('still live, and says so with the code itself', () => {
+        // Shown again rather than reminted: somebody who lost the slip of paper
+        // should not end up with two live codes for one intent.
+        const { text, code } = describeInvitation(invitation({ code: 'K7M29QRT' }), NOW);
+        assert.equal(code, 'K7M29QRT');
+        assert.match(text, /waiting/i);
+    });
+
+    await t.test('taken up, and ages like everything else', () => {
+        const { text, code } = describeInvitation(
+            invitation({ redeemedAt: NOW - DAY }), NOW);
+        assert.equal(code, null, 'a redeemed code is spent and must never be shown again');
+        assert.equal(text, 'Following you · shared 3 days ago');
+    });
+
+    await t.test('says nothing about WHO, because nothing about who comes back', () => {
+        // The asymmetry is the feature: you name the people you follow, and
+        // the people who follow you stay anonymous to you.
+        const { text } = describeInvitation(invitation({ redeemedAt: NOW }), NOW);
+        assert.doesNotMatch(text, /[A-Z][a-z]+ [A-Z]/, 'no name can appear here');
+    });
+
+    await t.test('expired with nobody using it is its own state, not a live one', () => {
+        const { text, code } = describeInvitation(invitation(), NOW);
+        assert.equal(code, null);
+        assert.match(text, /expired/i);
     });
 });

@@ -213,6 +213,22 @@
                  a form that resets itself is a form that looks like it did
                  nothing. -->
             <p id="sharing-status" class="text-sm mt-3 hidden"></p>
+
+            <!-- Who can read you. Absent until somebody can, because a heading
+                 over an empty list is a question nobody asked. It is the only
+                 place a share can be ended from the SHARING side — the × on a
+                 world clock row ends the ones you receive, and without this
+                 half you could stop listening but never stop speaking. -->
+            <div id="sharing-followers" class="hidden mt-5 pt-4 border-t border-gray-700">
+              <h3 class="text-xs uppercase tracking-wide text-gray-500 mb-3">Who can see your time</h3>
+              <ul id="sharing-follower-list" class="space-y-2"></ul>
+            </div>
+
+            <!-- Quiet, and last. Deleting is not a thing to reach for by
+                 accident, but it is a thing somebody must always be able to
+                 find — see the privacy policy, which promises it is here. -->
+            <button id="sharing-delete"
+                    class="hidden mt-5 text-xs text-gray-500 hover:text-red-400 transition-colors">Delete my sharing data</button>
           </div>
         </div>
       </div>

@@ -13,6 +13,12 @@
 // arrives over the wire. A person who changes ship, or flies home, changes
 // their half; nothing they do can rename their own row on your screen.
 //
+// Both directions of a share live here, because they are one idea seen from two
+// ends: a FollowedPerson is somebody whose time reaches you, and an invitation
+// is somebody whose you reach. They share their arithmetic — how old is this,
+// and what does the row say about it — and splitting them would have meant
+// describeAge in two files.
+//
 // Free of the DOM for the same reason stored-zones.ts is: it is the one thing
 // the followed list is read through, and it stays testable.
 
@@ -150,4 +156,36 @@ export function mergeFollowed(
         });
     }
     return { people, unnamed };
+}
+
+/**
+ * What one code you handed out currently says about itself.
+ *
+ * The mirror of personSubLabel, and the thinner half of it on purpose: you know
+ * who you follow, because you named them, but you do NOT know who redeemed your
+ * code. Nothing about a follower crosses back — no name, no device, no zone —
+ * so the honest answer is "somebody", and the row's real job is to carry the ×
+ * that ends it.
+ *
+ * Three states, from two nullable fields, which is why this is a function and
+ * not a template: a live code, a share somebody took up, and a code that
+ * expired with nobody using it. The last one is not a failure worth an alarm —
+ * it is the ordinary end of a code read out over a bad line — but it IS a row
+ * that should say so rather than sit there looking live.
+ *
+ * Structural in its parameter rather than importing Invitation, so this module
+ * stays clear of anchor-share.ts and the transport it drags in with it.
+ */
+export function describeInvitation(
+    invitation: { code: string | null; createdAt: number; redeemedAt: number | null },
+    now = Date.now(),
+): { text: string; code: string | null } {
+    if (invitation.code) {
+        return { text: 'Waiting for them to enter it', code: invitation.code };
+    }
+    if (invitation.redeemedAt !== null) {
+        return { text: `Following you · shared ${describeAge(now - invitation.createdAt)}`, code: null };
+    }
+    // No code left and nobody took it up: it timed out. See CODE_TTL_MS.
+    return { text: 'Code expired, never used', code: null };
 }
