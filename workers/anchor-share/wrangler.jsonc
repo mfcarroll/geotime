@@ -29,7 +29,7 @@
       // local SQLite regardless, while a deploy against a database that does not
       // exist fails immediately and says so. Empty would be tidier still, and
       // does not work — `wrangler dev` refuses to start on a falsy id.
-      "database_id": "00000000-0000-0000-0000-000000000000"
+      "database_id": "b86b1684-14eb-48b5-94c6-9a3b5eb36dda"
     }
   ]
 }

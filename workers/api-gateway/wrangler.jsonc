@@ -22,6 +22,15 @@
     "head_sampling_rate": 1
   },
 
+  // IF THE VERY FIRST DEPLOY OF THIS WORKER FAILS, RE-RUN IT. Wrangler uploads
+  // the script and then immediately asks the API about its workers.dev
+  // subdomain, and on a brand-new script that second call can reach a node that
+  // has not seen the upload yet — which it reports, confusingly, as
+  // "This Worker does not exist on your account [code: 10007]". The upload has
+  // in fact succeeded; what did not happen is the trigger being attached, so the
+  // hostname resolves and answers 502. A second deploy finds the script and
+  // attaches the route. It only ever happens once, on creation.
+  //
   // The hostname the 2.0 clients are built against. The Workers behind it keep
   // their own *.workers.dev names, which is what every 1.7.0 install in the
   // field is still calling — this is additive, and nothing shipped breaks.

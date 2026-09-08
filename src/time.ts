@@ -158,17 +158,17 @@ export function startClockWatch(): void {
 
 export async function syncClock() {
   try {
-    // Cloudflare Worker (workers/utc-time), with the original Cloud Run
-    // function as a fallback. Both return { dateTime: <ISO 8601> }.
+    // workers/utc-time, behind the API gateway. Returns { dateTime: <ISO 8601> }.
     //
-    // The fallback is a migration aid, not a permanent arrangement: the Cloud
-    // Run function was created in the console with no source control, and the
-    // point of the Worker is to retire it. Drop the second URL once a release
-    // has shipped on the first.
+    // A list of one, and kept as a list. It held the original Cloud Run function
+    // as a fallback while the Worker was unproven — a migration aid its own
+    // comment said to retire once a release had shipped on the Worker, which
+    // 1.7.0 did. The shape stays because the loop below is the useful part: it
+    // tries each source in turn and gives up quietly, which is what a second
+    // source would want if there is ever cause for one again.
     const SOURCES = [
       import.meta.env.VITE_UTC_TIME_URL
         ?? 'https://geotime-api.matthewcarroll.ca/time',
-      'https://get-utc-time-100547663673.us-west1.run.app/',
     ].filter(Boolean) as string[];
 
     let noted = false;
