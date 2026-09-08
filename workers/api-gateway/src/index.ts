@@ -151,21 +151,34 @@ function appleAssociation(): Response {
 /**
  * The same claim for Android, which wants a certificate fingerprint.
  *
- * The fingerprint is Play's, not ours — see ANDROID_CERT_SHA256. Served with an
- * empty list when it is unset rather than with a wrong one: an unverified link
- * opens the landing page, which is a worse experience and not a broken one,
- * whereas a bogus fingerprint is a claim that fails verification and can take a
- * while to stop being cached.
+ * The fingerprint is Play's rather than ours — Play re-signs every upload with
+ * its own key, so the value lives in Play Console and not in this repository.
+ * See ANDROID_CERT_SHA256.
+ *
+ * WITH IT UNSET, THIS SERVES AN EMPTY LIST — `[]`, and not a statement whose
+ * fingerprint array is empty. That distinction is the whole of this function
+ * and it is not cosmetic: Google's verifier rejects the second as
+ * ERROR_CODE_MALFORMED_CONTENT ("must contain at least one certificate"), so a
+ * file written that way is not an unverified claim, it is a broken document.
+ * An empty list is valid and simply asserts nothing, which is exactly the
+ * truth while nobody has supplied a fingerprint.
+ *
+ * Checked rather than assumed, against
+ * digitalassetlinks.googleapis.com/v1/statements:list — worth re-running after
+ * any change here, because this file is read by an operating system that will
+ * never report back.
  */
 function androidAssetLinks(env: Env): Response {
-  const fingerprints = env.ANDROID_CERT_SHA256 ? [env.ANDROID_CERT_SHA256] : [];
+  const fingerprint = env.ANDROID_CERT_SHA256?.trim();
+  if (!fingerprint) return json([]);
+
   return json([
     {
       relation: ['delegate_permission/common.handle_all_urls'],
       target: {
         namespace: 'android_app',
         package_name: 'ca.matthewcarroll.geotime',
-        sha256_cert_fingerprints: fingerprints,
+        sha256_cert_fingerprints: [fingerprint],
       },
     },
   ]);
