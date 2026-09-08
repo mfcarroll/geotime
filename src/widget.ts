@@ -6,6 +6,7 @@
 // can't be trusted to keep fresh after an OS timezone change.
 
 import { Capacitor, registerPlugin, type PluginListenerHandle } from '@capacitor/core';
+import type { FollowedPerson } from './people';
 import type { ShipClock } from './ships';
 import { placeRegion, type StoredZone } from './stored-zones';
 
@@ -45,6 +46,40 @@ export interface WidgetShip {
   refreshUntil: number;
 }
 
+/**
+ * Somebody you follow, as the widget needs them.
+ *
+ * A ship row with a different mark, which is most of why this was the last
+ * piece: the native side already knows how to draw a name against a clock.
+ *
+ * Either a zone id OR an offset, never both, and which one it is says whether
+ * they are ashore. The zone id is the important half: it means a widget that
+ * has not heard from the app in a fortnight still moves them correctly through
+ * a daylight-saving change, because the phone doing the drawing applies the
+ * rules. An offset could not — which is exactly why a zone crosses the wire
+ * from their device in the first place, and it would be a shame to throw that
+ * away at the last boundary.
+ *
+ * WHAT IS NOT HERE IS THE AGE. The app's row can say "· 3 days ago"; a widget
+ * row has no width for it, and no width for the sub-line it would sit on. The
+ * bargain is the same one the widget already makes with a ship's last known
+ * offset: last known beats nothing, and the app is the surface that qualifies
+ * it. Sending a stamp nothing draws would be sending it on the hope that 2.1
+ * finds a use.
+ */
+export interface WidgetPerson {
+  /** The share. Identity, and never a name — two people can be called Mum. */
+  key: string;
+  /** What YOU call them. It has never left this device before now. */
+  name: string;
+  /** IANA id when they are ashore; '' when they are aboard a ship. */
+  tz: string;
+  /** Minutes from UTC when aboard. Meaningless, and 0, when `tz` is set. */
+  offsetMinutes: number;
+  /** Their ship's short name, for a tight row. '' ashore. */
+  short: string;
+}
+
 export interface WidgetPayload {
   timezones: string[];
   /** Parallel to `timezones`; '' where the user never named the place. */
@@ -56,6 +91,8 @@ export interface WidgetPayload {
   localPlaceName: string | null;
   /** Ships with a resolved offset. See WidgetShip. */
   ships: WidgetShip[];
+  /** Followed people who have pushed an anchor. See WidgetPerson. */
+  people: WidgetPerson[];
   /**
    * The ship a wifi marker says we are aboard, or null ashore.
    *
@@ -94,6 +131,7 @@ export interface SyncOptions {
   localTimezone: string | null;
   localPlaceName: string | null;
   ships: ShipClock[];
+  people: FollowedPerson[];
   aboardShipKey: string | null;
 }
 
@@ -108,6 +146,7 @@ export function syncWidgetTimezones({
   localTimezone,
   localPlaceName,
   ships,
+  people,
   aboardShipKey,
 }: SyncOptions): void {
   if (!Capacitor.isNativePlatform()) return;
@@ -140,6 +179,19 @@ export function syncWidgetTimezones({
         offsetMinutes: Math.round((ship.offsetHours as number) * 60),
         fetchedAt: ship.fetchedAt ?? 0,
         refreshUntil: widgetRefreshUntil(ship),
+      })),
+    // Withheld exactly as an unresolved ship is, and for the same reason: a
+    // pairing whose other end has never opened their app has no time to show,
+    // and the widget has no way to say so. The app's list keeps the row and
+    // says "Not shared yet"; a widget row would have to invent a clock.
+    people: people
+      .filter((person) => person.anchor !== null)
+      .map((person) => ({
+        key: person.shareId,
+        name: person.name,
+        tz: person.anchor!.kind === 'zone' ? person.anchor!.tz : '',
+        offsetMinutes: person.anchor!.kind === 'ship' ? person.anchor!.offsetMinutes : 0,
+        short: person.anchor!.kind === 'ship' ? (person.anchor!.short ?? '') : '',
       })),
   }).catch((err) => {
     console.warn('WidgetBridge.setTimezones failed:', err);

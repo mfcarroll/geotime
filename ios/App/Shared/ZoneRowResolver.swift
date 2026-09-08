@@ -30,6 +30,9 @@ struct WidgetRow: Identifiable {
     let isLocal: Bool          // GPS-derived geographic zone (pin)
     let isDevice: Bool         // the device's OS zone, when it differs from the anchor (phone)
     let isShip: Bool           // a cruise ship's clock, set by the crew (ship mark)
+    /// Somebody the user follows (person mark). Defaulted, because every row
+    /// that existed before 2.0 is not one and should not have to say so.
+    var isPerson: Bool = false
     /// The row every other row's `relativeText` is measured from.
     ///
     /// Ashore this is the same row as `isLocal`, which is why one flag did for
@@ -97,6 +100,7 @@ enum ZoneRowResolver {
                         kinds: [String] = [],
                         regions: [String] = [],
                         ships: [WidgetSharedStore.Ship] = [],
+                        people: [WidgetSharedStore.Person] = [],
                         aboardShipKey: String? = nil) -> [WidgetRow] {
         let geographicOffset = local.secondsFromGMT(for: now)
         let deviceOffset = deviceTz.secondsFromGMT(for: now)
@@ -358,6 +362,46 @@ enum ZoneRowResolver {
                 isLocal: false,
                 isDevice: false,
                 isShip: true,
+                isAnchor: false,
+                timeDigits: parts.digits,
+                timePeriod: parts.period,
+                weekdayShort: differs ? TimezoneDisplay.weekday(tz, at: now, full: false) : nil,
+                weekdayFull: differs ? TimezoneDisplay.weekday(tz, at: now, full: true) : nil,
+                relativeText: TimezoneDisplay.relativeOffset(zoneSeconds: offset, deviceSeconds: anchorOffset),
+                offsetSeconds: offset
+            ))
+        }
+
+        // People, outside the no-repeated-clocks rule for the reason ships are,
+        // and more so. "Dad" is not a timezone: he is somebody, and a saved city
+        // keeping the same hour is not another copy of him. Following your
+        // father in Nelson while Nelson is also on your list is two rows that
+        // mean two things, and folding them would lose the one you cannot get
+        // anywhere else.
+        //
+        // Withheld here rather than drawn wrong: a record the app would not have
+        // written — no zone and no offset — has no clock to show, and there is
+        // no room on a widget row to say why.
+        //
+        // The age is not on the row. A person who has not opened their app for
+        // days still draws, and draws their last known time, which is the same
+        // bargain this widget already makes with a ship's last confirmed offset.
+        // The app's list is where "· 3 days ago" fits.
+        for person in people {
+            guard let tz = person.timeZone else { continue }
+            let offset = tz.secondsFromGMT(for: now)
+            let parts = TimezoneDisplay.timeParts(tz, at: now)
+            let differs = TimezoneDisplay.dayDiffers(tz, anchorTz, at: now)
+            rows.append(WidgetRow(
+                // The share, never the name — two people can be called Mum, and
+                // a ForEach with one id between them draws one of them twice.
+                id: "person:\(person.key)",
+                name: person.name,
+                shortName: person.short,
+                isLocal: false,
+                isDevice: false,
+                isShip: false,
+                isPerson: true,
                 isAnchor: false,
                 timeDigits: parts.digits,
                 timePeriod: parts.period,

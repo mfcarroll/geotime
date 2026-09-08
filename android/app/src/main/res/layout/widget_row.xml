@@ -83,6 +83,16 @@
             android:contentDescription="@null" />
 
         <ImageView
+            android:id="@+id/row_person"
+            android:layout_width="12dp"
+            android:layout_height="12dp"
+            android:layout_gravity="center_vertical"
+            android:layout_marginStart="5dp"
+            android:src="@drawable/ic_person"
+            android:visibility="gone"
+            android:contentDescription="@null" />
+
+        <ImageView
             android:id="@+id/row_pin"
             android:layout_width="12dp"
             android:layout_height="12dp"

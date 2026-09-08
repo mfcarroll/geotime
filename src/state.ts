@@ -230,6 +230,7 @@ export function syncWidget(): void {
         localTimezone: state.localTimezone,
         localPlaceName: state.localPlaceName,
         ships: state.shipClocks,
+        people: state.followedPeople,
         aboardShipKey: state.aboardShipKey,
     });
 }

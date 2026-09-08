@@ -67,6 +67,11 @@ struct Provider: TimelineProvider {
                                                         kinds: WidgetSharedStore.loadKinds(),
                                                         regions: WidgetSharedStore.loadRegions(),
                                                         ships: ships,
+                                                        // Read here rather than threaded through like
+                                                        // ships, because nothing in this extension
+                                                        // refreshes people — the app pushes them and
+                                                        // the store is as fresh as its last run.
+                                                        people: WidgetSharedStore.loadPeople(),
                                                         aboardShipKey: WidgetSharedStore.loadAboardShipKey()))
     }
 }

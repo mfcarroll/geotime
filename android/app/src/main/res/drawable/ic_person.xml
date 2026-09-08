@@ -1,0 +1,18 @@
+<!-- Font Awesome "user" (free, solid), in its native 448x512 box. The same glyph
+     the app's own World Clock rows draw for a followed person, so the list and
+     the widget show one mark rather than two that nearly agree.
+
+     iOS uses person.fill instead, which is the one place the two platforms'
+     marks are not the same path: SF Symbols has had a head-and-shoulders since
+     long before this project's deployment target, so there was nothing to work
+     around there. The ship and the anchor went to Font Awesome because SF
+     Symbols genuinely lacked them at iOS 15. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="12dp"
+    android:height="12dp"
+    android:viewportWidth="448"
+    android:viewportHeight="512">
+    <path
+        android:fillColor="@color/widget_pin"
+        android:pathData="M224 248a120 120 0 1 0 0-240 120 120 0 1 0 0 240zm-29.7 56C95.8 304 16 383.8 16 482.3 16 498.7 29.3 512 45.7 512l356.6 0c16.4 0 29.7-13.3 29.7-29.7 0-98.5-79.8-178.3-178.3-178.3l-59.4 0z" />
+</vector>

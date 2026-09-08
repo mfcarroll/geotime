@@ -30,6 +30,8 @@ public class WidgetBridgePlugin extends Plugin {
     static final String PREFS_KINDS_KEY = "worldClockKinds";
     static final String PREFS_REGIONS_KEY = "worldClockRegions";
     static final String PREFS_SHIPS_KEY = "shipClocks";
+    /** People whose anchor is shared with this device. See WidgetPerson in widget.ts. */
+    static final String PREFS_PEOPLE_KEY = "followedPeople";
     /**
      * The Royal Caribbean app key, mirrored here so the widget can refresh on
      * its own. An AppWidgetProvider cannot read the Capacitor config, and the
@@ -74,6 +76,11 @@ public class WidgetBridgePlugin extends Plugin {
         // the minutes, which is correct for a vessel: a crew-set clock has no
         // DST rules for a tzdb entry to describe.
         JSArray ships = call.getArray("ships");
+        // People cross as {key, name, tz, offsetMinutes, short}. Either a real
+        // IANA id — ashore, so this widget applies the daylight-saving rules
+        // itself and stays right through a transition the app was not open for
+        // — or an offset, aboard, where no zone describes a crew-set clock.
+        JSArray people = call.getArray("people");
         Context ctx = getContext();
         ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
            .edit()
@@ -82,6 +89,7 @@ public class WidgetBridgePlugin extends Plugin {
            .putString(PREFS_KINDS_KEY, kinds == null ? "[]" : kinds.toString())
            .putString(PREFS_REGIONS_KEY, regions == null ? "[]" : regions.toString())
            .putString(PREFS_SHIPS_KEY, ships == null ? "[]" : ships.toString())
+           .putString(PREFS_PEOPLE_KEY, people == null ? "[]" : people.toString())
            .putString(PREFS_LOCAL_TZ_KEY, call.getString("localTimezone")) // may be null -> cleared
            .putString(PREFS_LOCAL_PLACE_KEY, call.getString("localPlaceName"))
            // Stored now so the provider has it the day its rules are ported;
