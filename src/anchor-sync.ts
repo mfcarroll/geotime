@@ -19,6 +19,7 @@
 import { Capacitor } from '@capacitor/core';
 
 import { anchorFrom, anchorSubLabel, shouldPush, type Anchor } from './anchor';
+import { getDisplayTimezoneName } from './utils';
 import { storedAccountId } from './account';
 import { fetchFollowing, pushAnchor, revokeShare } from './anchor-share';
 import { mergeFollowed } from './people';
@@ -239,7 +240,18 @@ export function startAnchorSync(): void {
 export function myAnchorLabel(): string {
     const anchor = myAnchor();
     if (!anchor) return 'Not known yet';
-    return anchorSubLabel(anchor);
+    if (anchor.kind === 'ship') return anchorSubLabel(anchor);
+
+    // "the Vancouver timezone", not "Vancouver" and not "America/Vancouver".
+    //
+    // The raw id is what anchorSubLabel returns, because that function is
+    // compiled into the Worker too and cannot reach the display-name table. It
+    // is also the wrong thing to show somebody: they are being told how they
+    // look to other people, and this is the one line where the answer and the
+    // reassurance are the same sentence. A ZONE is what goes out — not a town,
+    // not a city — and saying "timezone" out loud here is cheaper than any
+    // amount of explaining elsewhere.
+    return `the ${getDisplayTimezoneName(anchor.tz)} timezone`;
 }
 
 /** True where sharing is offered at all. See the note in the pairing UI. */
