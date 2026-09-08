@@ -232,6 +232,24 @@ function showDateWhenItDiffers(el: HTMLElement, date: string, groundDate: string
   el.classList.toggle('hidden', !differs);
 }
 
+/**
+ * Things that want redrawing on the same tick the clocks are.
+ *
+ * One registration point rather than a second interval. The sharing card's
+ * preview row is a clock like any other and should move when the others do —
+ * a preview whose time drifts a minute behind the list it is imitating is a
+ * preview nobody trusts.
+ *
+ * Corrected time is passed through rather than read again, for the reason
+ * updateAllClocks takes one reading: two clocks drawn from two readings can
+ * differ by a second that was never real.
+ */
+const tickHooks: Array<(correctedTime: Date) => void> = [];
+
+export function onClockTick(hook: (correctedTime: Date) => void): void {
+  tickHooks.push(hook);
+}
+
 export function updateAllClocks() {
   // ONE reading, for everything this paint draws. Both stamps come off the same
   // millisecond, so the Local and Device cards can now differ only by the
@@ -338,6 +356,13 @@ export function updateAllClocks() {
     second: '2-digit'
   });
   dom.deviceTimezoneEl.textContent = getDisplayTimezoneName(deviceTz);
+
+  // Last, and never allowed to take the clocks down with it: a hook is a
+  // secondary surface, and a throw in one would stop every row on the page
+  // updating for the rest of the session.
+  for (const hook of tickHooks) {
+    try { hook(correctedTime); } catch (err) { console.warn('clock tick hook failed:', err); }
+  }
   // The date, but only when the device is on a different day from the ground.
   // Crossing a date line or sitting near midnight is exactly when "8:15" on two
   // cards means two different things, and a bare time cannot say so.

@@ -3,14 +3,14 @@
 import * as dom from './dom';
 import type { FollowedPerson } from './people';
 import { aboardShip, addSavedZone, state, persistZones, savedZoneByKey, setLocalPlaceName, syncWidget, whenMapReady } from './state';
-import { timezoneForCoordinates, findTimezoneFromGeoJSON, mapSelection, zoneForCoordinates, startClocks, relativeTextForZone, relativeTextForShip, getFormattedTime, getUtcOffset, getDisplayTimezoneName, updateAllClocks, formatOffsetDiff, anchorOffsetHours } from './time';
+import { timezoneForCoordinates, findTimezoneFromGeoJSON, mapSelection, zoneForCoordinates, startClocks, relativeTextForZone, relativeTextForShip, getFormattedTime, getUtcOffset, getDisplayTimezoneName, updateAllClocks, formatOffsetDiff, anchorOffsetHours, correctedNow } from './time';
 import { locationMapStyles, worldTimezoneMapStyles } from './map-styles';
 import { debugFlag, distance, formatAccuracy, fold } from './utils';
 import { loadCityIndex, nearestPlace } from './cities';
 import { feature as topoFeature } from 'topojson-client';
 import { resolveZoneStyle } from './map-highlight';
 import { flyTo, flyToBox } from './map-fly';
-import { anchorOffset, clockKey, clockLabel, clockSubLabel, formatFixedOffsetTime, visibleClocks, type ClockEntry } from './clocks';
+import { anchorOffset, clockKey, clockLabel, clockOffset, clockSubLabel, clockZone, fixedOffsetWeekday, formatFixedOffsetTime, visibleClocks, type ClockEntry } from './clocks';
 import { shipKey, type ShipClock } from './ships';
 import { cachedVoyageFor, voyageForShip, type ShipPort, type ShipVoyage } from './shiptrack';
 import { clearShipChart, drawShipChart, fitToShip, refreshPlaceMarkers, refreshShipMarkers, type PlaceMarkerDetail } from './ship-markers';
@@ -2026,6 +2026,53 @@ export function renderWorldClocks() {
     // the time column is flex-none, so its width is set by its content — measure
     // before the real "12:13 AM" lands and every name is judged against a column
     // narrower than the one it will actually sit beside.
+}
+
+/**
+ * A clock row built to be looked at rather than used.
+ *
+ * The sharing card shows you your own row as your followers will see it, and
+ * the only way to be sure that picture is honest is for it to BE the row —
+ * same template, same label and sub-label functions, same person mark. A
+ * hand-drawn approximation would drift from the real thing exactly when
+ * somebody was relying on it to understand what they are sharing.
+ *
+ * What it is not is a control: the clock key goes, so the per-second updater
+ * cannot find it and try to treat it as a real row, and the buttons go with the
+ * padding that was reserved for them.
+ */
+export function buildPreviewRow(entry: ClockEntry): HTMLElement {
+    const row = createClockElement(entry);
+    delete row.dataset.clockKey;
+    row.querySelectorAll('button').forEach((button) => button.remove());
+    row.classList.remove('pr-10');
+    return row;
+}
+
+/**
+ * Puts the time into a preview row, on the same tick the real ones move.
+ *
+ * The right-hand column carries the WEEKDAY rather than a difference, because
+ * a difference is measured from the reader's own clock and a preview has no
+ * reader: "+3 hrs" would be true only for somebody who happens to be three
+ * hours behind you. The day is true for everybody.
+ */
+export function fillPreviewRow(row: HTMLElement, entry: ClockEntry | null): void {
+    if (!entry) return;
+
+    const at = correctedNow();
+    const tz = clockZone(entry);
+    const offset = clockOffset(entry);
+
+    row.querySelector('.time')!.textContent = tz
+        ? getFormattedTime(tz, { hour: 'numeric', minute: '2-digit' }, at)
+        : formatFixedOffsetTime(offset, { hour: 'numeric', minute: '2-digit' }, at);
+    row.querySelector('.date-diff')!.textContent = tz
+        ? at.toLocaleDateString('en-US', { timeZone: tz, weekday: 'short' })
+        : fixedOffsetWeekday(offset, 'short', at);
+    // Re-read every tick rather than once: the switch can move while this row
+    // is on screen, and the second line appearing IS the feedback.
+    row.querySelector('.region')!.textContent = clockSubLabel(entry);
 }
 
 function createClockElement(entry: ClockEntry): HTMLElement {

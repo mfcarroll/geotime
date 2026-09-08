@@ -41,7 +41,11 @@
                     This is entirely optional. Nothing described in this section happens, and no record of you exists on our server, unless and until you tap &ldquo;Share your time&rdquo; or enter somebody's code.
                 </p>
                 <p>
-                    When you do, the app asks our server for a random identifier and keeps it on your device. It is not linked to your name, email address, phone number, device, or any account you hold elsewhere; there is no password, because there is nothing to sign in to.
+                    When you do, the app asks our server for a random identifier and keeps it on your device. It is not linked to your email address, phone number, device, or any account you hold elsewhere; there is no password, because there is nothing to sign in to.
+                </p>
+                <p>
+                    It asks you for a name, and that name is sent &mdash; it is what the people you share with see above your clock, and without it their screen would show a time with nothing to say whose it is. Put whatever you like in it; nothing checks it against anything.
+                    Whoever you share with can rename you on their own device afterwards, and that renaming happens entirely on their phone: we never see it.
                 </p>
                 <p>
                     While sharing is on, the app sends the server <em>what time it is where you are</em>, and nothing more. In practice that is a timezone name such as
@@ -50,7 +54,11 @@
                 <p>
                     <strong class="text-white">Nothing narrower than a timezone is ever sent.</strong> Not your coordinates, and not the name of your town either.
                     A timezone is thousands of kilometres wide and shared by millions of people: everyone from Vancouver to Nelson to Los Angeles keeps the same one, and nothing in what we send distinguishes them.
-                    The people you share with see what time it is for you. They do not see where you are, and there is nothing in the record for them to see it from.
+                </p>
+                <p>
+                    <strong class="text-white">By default they are not even told which timezone.</strong> Unless you turn on &ldquo;Share my exact timezone&rdquo;, the only thing our server passes on is how many hours your clock is from theirs &mdash; a number, with no region attached.
+                    Turning it on tells them the timezone by name, which is a region and never a place; the app's map deliberately lights up the whole band of that time rather than the single zone, and the Sharing screen shows you a preview of the row they will see so you can decide with it in front of you.
+                    Either way they see what time it is for you and not where you are.
                 </p>
                 <p>
                     No history is kept either. Each update replaces the last, so there is no record of where you have been or when. The only date stored is when your current time was last updated, which is what lets the other person see that an answer has gone stale.

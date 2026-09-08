@@ -399,3 +399,75 @@
    mark never wraps alone. See the comment on .city-tail in index.html — the
    split itself happens in map.ts, since only JS knows where the last word is. */
 .city-tail { white-space: nowrap; }
+
+/* --- toasts ----------------------------------------------------------- */
+/*
+  Bottom of the screen, above the home indicator, out of the thumb's way.
+
+  Fixed and pointer-events-none on the CONTAINER so a toast never blocks a tap
+  aimed at the card behind it; each toast turns pointers back on for itself,
+  because tapping one to dismiss it is the only interaction it has.
+*/
+#toasts {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: calc(env(safe-area-inset-bottom) + 1rem);
+  z-index: 55;                 /* under the diagnostics overlay (60) */
+  display: flex;
+  flex-direction: column-reverse;   /* newest nearest the thumb */
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0 1rem;
+  pointer-events: none;
+}
+
+.toast {
+  pointer-events: auto;
+  max-width: 32rem;
+  padding: 0.625rem 1rem;
+  border-radius: 0.75rem;
+  font-size: 0.875rem;
+  line-height: 1.35;
+  color: #f9fafb;
+  background: #374151;         /* gray-700, a shade above the cards */
+  border: 1px solid #4b5563;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.45);
+  cursor: pointer;
+  /* Starts low and transparent; .is-in lifts it. Transform rather than a
+     margin so nothing above it reflows as it arrives. */
+  opacity: 0;
+  transform: translateY(0.5rem);
+  transition: opacity 180ms ease-out, transform 180ms ease-out;
+}
+
+.toast.is-in {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.toast.is-leaving {
+  opacity: 0;
+  transform: translateY(0.5rem);
+}
+
+/* Tone is carried by a left edge rather than by the whole background: a
+   full-colour toast reads as an alert, and most of these are confirmations. */
+.toast-good { border-left: 3px solid #34c759; }
+.toast-bad  { border-left: 3px solid #f87171; }
+
+@media (prefers-reduced-motion: reduce) {
+  .toast { transition: opacity 120ms linear; transform: none; }
+  .toast.is-in,
+  .toast.is-leaving { transform: none; }
+}
+
+/* --- the sharing preview row ------------------------------------------ */
+/*
+  The world-clock row template, cloned and shown as an example rather than as a
+  control. Nothing here restyles it: what makes the preview trustworthy is that
+  it IS the row, so the only job is to stop it looking tappable.
+*/
+#sharing-preview .clock-row {
+  cursor: default;
+}

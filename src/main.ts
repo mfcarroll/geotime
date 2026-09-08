@@ -7,6 +7,7 @@ import * as dom from './dom';
 import { addShipClock, loadDebugFleet, migrateStoredTimezones, persistZones, savedZoneByKey, state, syncWidget } from './state';
 import { refreshAnchorChip, refreshMapStyles, initMaps, onLocationError, onLocationSuccess, selectSavedZone, selectShip, selectPerson, selectPlace, setHoveredShip, setHoveredPlace, renderWorldClocks, keepZone, updateUserTimezoneDetails, showLocationUnavailable, loadTimezoneGeoJson, selectAnchor, clearSelection, hoverAnchor, hoverSelected, hoverClockRow } from './map';
 import { updateAllClocks, syncClock, startClockWatch, getDisplayTimezoneName, startClocks, findTimezoneFromGeoJSON } from './time';
+import { App } from '@capacitor/app';
 import { Capacitor } from '@capacitor/core';
 import { getDeviceTimezone, onDeviceTimezoneChanged } from './widget';
 import { Geolocation, PositionOptions } from '@capacitor/geolocation';
@@ -17,7 +18,7 @@ import { forgetShip, resolveAllShipClocks, startShipTimeWatch } from './shiptime
 import { initShipTrack, cachedVoyageFor } from './shiptrack';
 import { portRefsFrom } from './ports';
 import { startAnchorSync, stopFollowing } from './anchor-sync';
-import { initPairing } from './pairing';
+import { followFromLink, initPairing } from './pairing';
 import { zoneKey, type StoredZone } from './stored-zones';
 import { refreshShipMarkers, startShipMarkerWatch, type PlaceMarkerDetail } from './ship-markers';
 import { installDiagnostics } from './diagnostics';
@@ -127,6 +128,7 @@ async function startApp() {
   // install that has never paired.
   initPairing();
   startAnchorSync();
+  watchFollowLinks();
   // The relay answering is the one thing that adds rows without a tap.
   document.addEventListener('followedpeoplechanged', () => {
     renderWorldClocks();
@@ -274,6 +276,36 @@ async function startApp() {
       updateAllClocks();
     },
   });
+
+  /**
+   * Follows somebody from a link, with no code to type.
+   *
+   * The link the share sheet sends is an https URL on our own hostname, claimed
+   * by the app through Associated Domains on iOS and an autoVerify intent
+   * filter on Android — so a tap in a messaging app opens GeoTime here rather
+   * than a browser. Somebody without the app installed gets the Worker's
+   * landing page instead, which shows the code to type in.
+   *
+   * Two arrivals, not one. `appUrlOpen` covers a running app; `getLaunchUrl`
+   * covers the cold start, where the event has already been and gone before any
+   * of this was listening. Missing the second is the classic version of this
+   * bug — it works every time you test it and never on a phone that was closed.
+   */
+  function watchFollowLinks(): void {
+    const follow = (url: string | null | undefined) => {
+      if (!url) return;
+      // Only our own path, and only the last segment. A URL is attacker-supplied
+      // input even when it arrives through a mechanism only we can claim.
+      const code = /\/f\/([0-9A-Za-z-]{1,32})\/?$/.exec(url)?.[1];
+      if (code) void followFromLink(code);
+    };
+
+    App.addListener('appUrlOpen', (event) => follow(event.url))
+      .catch((err) => console.warn('appUrlOpen listener failed:', err));
+    App.getLaunchUrl()
+      .then((launch) => follow(launch?.url))
+      .catch(() => { /* no launch URL is the ordinary case */ });
+  }
 
   /**
    * Brings the map back into view.

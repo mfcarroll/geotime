@@ -182,61 +182,94 @@
                2.0 is native-only, because the web has no widget to feed and a
                far weaker place to keep an account id. See sharingAvailable. -->
           <div id="sharing-card" class="card rounded-2xl shadow-lg p-6 hidden">
-            <h2 class="text-xl font-semibold text-white mb-1">Sharing</h2>
+            <h2 class="text-xl font-semibold text-white">Sharing</h2>
+            <p class="text-sm text-gray-400 mt-1">Let someone see what time it is for you — never where you are.</p>
 
             <!-- The one thing about you that ever leaves this device by name,
-                 and it is here first because it is what the other end's row
-                 gets called. Asked for rather than derived: the app has no
-                 other source for it and should not invent one. -->
-            <label for="sharing-my-name" class="block text-xs uppercase tracking-wide text-gray-500 mt-4 mb-1">Your name</label>
+                 and it is first because it is what the other end's row gets
+                 called. Asked for rather than derived: the app has no other
+                 source for it and should not invent one. -->
+            <label for="sharing-my-name" class="block text-xs uppercase tracking-wide text-gray-500 mt-5 mb-1">Your name</label>
             <input id="sharing-my-name" type="text" autocomplete="name" maxlength="60"
                    class="w-full bg-gray-700 border border-gray-600 text-white placeholder-gray-400 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:outline-none"
                    placeholder="What they should see you as">
 
-            <!-- Default OFF, and the label says what OFF means rather than what
-                 ON means, because off is where everybody starts. -->
+            <!-- Default OFF, and the note under it says what the CURRENT state
+                 means rather than what the switch would do. See
+                 refreshSharingCard, which writes it through the same function
+                 the relay uses to decide what to send. -->
             <label class="flex items-start gap-3 mt-4 cursor-pointer">
               <input id="sharing-exact" type="checkbox"
-                     class="mt-0.5 h-4 w-4 shrink-0 rounded border-gray-500 bg-gray-700 text-blue-600 focus:ring-blue-500">
+                     class="mt-1 h-4 w-4 shrink-0 rounded border-gray-500 bg-gray-700 text-blue-600 focus:ring-blue-500">
               <span class="text-sm text-gray-300">Share my exact timezone
-                <span id="sharing-exact-note" class="block text-xs text-gray-500"></span>
+                <span id="sharing-exact-note" class="block text-xs text-gray-500 mt-0.5"></span>
               </span>
             </label>
 
-            <div class="flex gap-2">
+            <!-- The row as they will actually see it, drawn from the world
+                 clock template so it is the same object rather than a drawing
+                 of one. This is what makes the switch legible: tick it and a
+                 second line appears under your name. -->
+            <div id="sharing-preview-wrap" class="mt-5">
+              <p class="text-xs uppercase tracking-wide text-gray-500 mb-2">How you appear to them</p>
+              <div id="sharing-preview"></div>
+            </div>
+
+            <div id="sharing-actions" class="flex gap-2 mt-5">
               <button id="sharing-invite" class="flex-1 bg-blue-600 hover:bg-blue-500 text-white rounded-lg px-4 py-2 text-sm font-medium transition-colors">Share your time</button>
-              <button id="sharing-redeem" class="flex-1 bg-gray-700 hover:bg-gray-600 text-white rounded-lg px-4 py-2 text-sm font-medium transition-colors">Enter a code</button>
+              <button id="sharing-redeem" class="flex-1 bg-gray-700 hover:bg-gray-600 text-white rounded-lg px-4 py-2 text-sm font-medium transition-colors">Follow someone</button>
             </div>
 
-            <!-- One panel at a time, and both start closed. -->
-            <div id="sharing-code-panel" class="hidden mt-4 text-center">
-              <p class="text-xs uppercase tracking-wide text-gray-500 mb-2">Read this out</p>
-              <!-- Tabular figures and wide tracking: this gets read aloud over a
-                   phone, and a code whose characters are hard to tell apart is
-                   the whole failure mode the alphabet was chosen to avoid. -->
+            <!-- One flow at a time. The two buttons above go away while a panel
+                 is open, because offering both while one is mid-way through is
+                 offering to abandon it without saying so. -->
+            <div id="sharing-code-panel" class="hidden mt-5 text-center">
+              <p class="text-xs uppercase tracking-wide text-gray-500 mb-2">Send them this code</p>
+              <!-- Tabular figures and wide tracking: this gets read aloud over
+                   a phone, and a code whose characters are hard to tell apart
+                   is the whole failure mode the alphabet was chosen to avoid. -->
               <p id="sharing-code" class="text-3xl font-mono tabular-nums tracking-[0.2em] text-white select-all">--------</p>
-              <p id="sharing-code-note" class="text-sm text-gray-400 mt-2">Good for 24 hours, once.</p>
+              <p id="sharing-code-note" class="text-sm text-gray-400 mt-2"></p>
+              <div class="flex gap-2 mt-4">
+                <button id="sharing-send" class="flex-1 bg-blue-600 hover:bg-blue-500 text-white rounded-lg px-4 py-2 text-sm font-medium transition-colors">Send…</button>
+                <button id="sharing-code-done" class="flex-1 bg-gray-700 hover:bg-gray-600 text-white rounded-lg px-4 py-2 text-sm font-medium transition-colors">Done</button>
+              </div>
             </div>
 
-            <div id="sharing-redeem-panel" class="hidden mt-4 space-y-2">
-              <input id="sharing-code-input" type="text" inputmode="latin" autocapitalize="characters" autocomplete="off" spellcheck="false"
-                     class="w-full bg-gray-700 border border-gray-600 text-white placeholder-gray-400 rounded-lg px-4 py-2 font-mono tracking-widest uppercase focus:ring-2 focus:ring-blue-500 focus:outline-none" placeholder="CODE">
-              <input id="sharing-name-input" type="text" autocomplete="off"
-                     class="w-full bg-gray-700 border border-gray-600 text-white placeholder-gray-400 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:outline-none" placeholder="What to call them">
-              <button id="sharing-confirm" class="w-full bg-blue-600 hover:bg-blue-500 text-white rounded-lg px-4 py-2 text-sm font-medium transition-colors">Follow</button>
+            <div id="sharing-redeem-panel" class="hidden mt-5 space-y-2">
+              <div class="flex gap-2">
+                <input id="sharing-code-input" type="text" inputmode="latin" autocapitalize="characters" autocomplete="off" spellcheck="false"
+                       class="min-w-0 flex-1 bg-gray-700 border border-gray-600 text-white placeholder-gray-400 rounded-lg px-4 py-2 font-mono tracking-widest uppercase focus:ring-2 focus:ring-blue-500 focus:outline-none" placeholder="CODE">
+                <!-- Because the code usually arrives in a message, and retyping
+                     something you were just sent is the kind of small friction
+                     that makes a feature feel unfinished. -->
+                <button id="sharing-paste" class="flex-none bg-gray-700 hover:bg-gray-600 text-gray-200 rounded-lg px-3 py-2 text-sm transition-colors">Paste</button>
+              </div>
+              <!-- Only for what the field itself is wrong about. Outcomes are
+                   toasts; a reason to fix the box in front of you has to stay
+                   on screen while you fix it. -->
+              <p id="sharing-redeem-error" class="text-sm text-red-400 hidden"></p>
+              <div class="flex gap-2">
+                <button id="sharing-confirm" class="flex-1 bg-blue-600 hover:bg-blue-500 text-white rounded-lg px-4 py-2 text-sm font-medium transition-colors">Follow</button>
+                <button id="sharing-redeem-cancel" class="flex-1 bg-gray-700 hover:bg-gray-600 text-white rounded-lg px-4 py-2 text-sm font-medium transition-colors">Cancel</button>
+              </div>
             </div>
 
-            <!-- The one line that says what happened. Never cleared silently:
-                 a form that resets itself is a form that looks like it did
-                 nothing. -->
-            <p id="sharing-status" class="text-sm mt-3 hidden"></p>
+            <!-- The people you follow, for renaming and for letting go. The
+                 world clock list above shows their TIMES; this is where you
+                 manage who they are, which is why a name that is yours to
+                 choose is editable here and nowhere else. -->
+            <div id="sharing-following" class="hidden mt-6 pt-4 border-t border-gray-700">
+              <h3 class="text-xs uppercase tracking-wide text-gray-500 mb-3">People you follow</h3>
+              <ul id="sharing-following-list" class="space-y-2"></ul>
+            </div>
 
             <!-- Who can read you. Absent until somebody can, because a heading
                  over an empty list is a question nobody asked. It is the only
                  place a share can be ended from the SHARING side — the × on a
                  world clock row ends the ones you receive, and without this
                  half you could stop listening but never stop speaking. -->
-            <div id="sharing-followers" class="hidden mt-5 pt-4 border-t border-gray-700">
+            <div id="sharing-followers" class="hidden mt-6 pt-4 border-t border-gray-700">
               <h3 class="text-xs uppercase tracking-wide text-gray-500 mb-3">Who can see your time</h3>
               <ul id="sharing-follower-list" class="space-y-2"></ul>
             </div>
@@ -245,7 +278,7 @@
                  accident, but it is a thing somebody must always be able to
                  find — see the privacy policy, which promises it is here. -->
             <button id="sharing-delete"
-                    class="hidden mt-5 text-xs text-gray-500 hover:text-red-400 transition-colors">Delete my sharing data</button>
+                    class="hidden mt-6 text-xs text-gray-500 hover:text-red-400 transition-colors">Delete my sharing data</button>
           </div>
         </div>
       </div>

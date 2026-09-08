@@ -23,6 +23,23 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+
+            <!-- App Links, so a follow link opens the app rather than a
+                 browser. autoVerify makes Android fetch
+                 /.well-known/assetlinks.json from the host and check this
+                 package against the signing certificate in it — which is
+                 PLAY'S certificate, not the upload key, and is served from a
+                 var on the gateway Worker. Until that var is set, verification
+                 fails and the link opens the landing page instead: a worse
+                 experience, not a broken one. -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https"
+                      android:host="geotime-api.matthewcarroll.ca"
+                      android:pathPrefix="/f/" />
+            </intent-filter>
         </activity>
 
         <receiver

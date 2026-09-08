@@ -40,6 +40,17 @@ interface Env {
   SHIPS: Fetcher;
   ANCHOR: Fetcher;
   /**
+   * The Play app-signing certificate's SHA-256, for Android App Links.
+   *
+   * A var rather than a constant because it is not ours to know: Play re-signs
+   * every upload with its own key, so the fingerprint that has to appear in
+   * assetlinks.json lives in Play Console under App integrity and nowhere in
+   * this repository. Set it with `wrangler secret put` or in the dashboard;
+   * until it is set, assetlinks.json is served without it and Android falls
+   * back to opening the landing page, where the code can still be read.
+   */
+  ANDROID_CERT_SHA256?: string;
+  /**
    * Per-IP limiters. Optional because `wrangler dev` without them is a normal
    * way to work on this, and a missing limiter should mean "not limited here",
    * not a 500 on every request.
@@ -110,6 +121,126 @@ const tooMany = () =>
     },
   });
 
+/**
+ * Tells iOS that this app owns /f/ on this hostname.
+ *
+ * Universal Links, so a tap in Messages opens GeoTime rather than Safari. The
+ * appID is TEAMID.bundleID; the team is in the Xcode project as
+ * DEVELOPMENT_TEAM and is not a secret.
+ *
+ * Served from a Worker rather than a static file because this hostname IS a
+ * Worker, and because it is the only domain the project actually owns — the web
+ * app lives on a github.io project path, where /.well-known belongs to GitHub.
+ *
+ * Both spellings of the payload: `details` with `components` is the modern one,
+ * and `paths` is what older iOS reads. Neither is expensive and getting it
+ * wrong fails silently, which is the worst way for this to fail.
+ */
+function appleAssociation(): Response {
+  const appID = '3WCH54M3A8.ca.matthewcarroll.geotime';
+  return json({
+    applinks: {
+      apps: [],
+      details: [
+        { appID, appIDs: [appID], paths: ['/f/*'], components: [{ '/': '/f/*' }] },
+      ],
+    },
+  });
+}
+
+/**
+ * The same claim for Android, which wants a certificate fingerprint.
+ *
+ * The fingerprint is Play's, not ours — see ANDROID_CERT_SHA256. Served with an
+ * empty list when it is unset rather than with a wrong one: an unverified link
+ * opens the landing page, which is a worse experience and not a broken one,
+ * whereas a bogus fingerprint is a claim that fails verification and can take a
+ * while to stop being cached.
+ */
+function androidAssetLinks(env: Env): Response {
+  const fingerprints = env.ANDROID_CERT_SHA256 ? [env.ANDROID_CERT_SHA256] : [];
+  return json([
+    {
+      relation: ['delegate_permission/common.handle_all_urls'],
+      target: {
+        namespace: 'android_app',
+        package_name: 'ca.matthewcarroll.geotime',
+        sha256_cert_fingerprints: fingerprints,
+      },
+    },
+  ]);
+}
+
+/**
+ * What somebody sees when the app did not open.
+ *
+ * Which is most of the point of using an https link at all: a custom scheme is
+ * dead for anybody who has not installed the app, and the person being invited
+ * is exactly the person most likely not to have it. So this page shows the code
+ * in a form they can read out or type, and points at both stores.
+ *
+ * The code is NOT redeemed here and nothing is looked up. This route touches no
+ * database: it exists to be a page, and a link that quietly spent its one-shot
+ * code because a link preview crawler fetched it would be a fine way to break
+ * every invitation ever sent through a chat app.
+ */
+function followPage(code: string): Response {
+  const shown = `${code.slice(0, Math.ceil(code.length / 2))}-${code.slice(Math.ceil(code.length / 2))}`;
+  const escaped = shown.replace(/[^0-9A-Za-z-]/g, '');
+  return new Response(`<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>Follow on GeoTime</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; min-height: 100vh; display: grid; place-items: center;
+         background: #111827; color: #e5e7eb; padding: 2rem 1.25rem;
+         font: 16px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 26rem; text-align: center; }
+  h1 { font-size: 1.375rem; margin: 0 0 .5rem; color: #fff; }
+  p { margin: 0 0 1rem; color: #9ca3af; }
+  .code { font: 700 2rem/1.2 ui-monospace, SFMono-Regular, Menlo, monospace;
+          letter-spacing: .18em; color: #fff; margin: 1.5rem 0; user-select: all; }
+  a { display: block; margin: .5rem 0; padding: .75rem 1rem; border-radius: .75rem;
+      background: #1f2937; color: #93c5fd; text-decoration: none; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Someone wants to share their time</h1>
+  <p>If you have GeoTime, open it, tap <strong>Follow someone</strong> and enter this code.</p>
+  <p class="code">${escaped}</p>
+  <p>It works once, and lasts 24 hours.</p>
+  <a href="https://apps.apple.com/app/geotime/id6753636878">Get GeoTime for iPhone</a>
+  <a href="https://play.google.com/store/apps/details?id=ca.matthewcarroll.geotime">Get GeoTime for Android</a>
+</main>
+</body>
+</html>`, {
+    status: 200,
+    headers: {
+      'Content-Type': 'text/html; charset=utf-8',
+      // A code is a one-shot secret. Nothing about this page should sit in a
+      // shared cache with it in the body.
+      'Cache-Control': 'no-store',
+      'Referrer-Policy': 'no-referrer',
+    },
+  });
+}
+
+const json = (body: unknown) =>
+  new Response(JSON.stringify(body), {
+    status: 200,
+    headers: {
+      'Content-Type': 'application/json',
+      // Long, because an OS fetches these rarely and caching them is the
+      // difference between a link that works instantly and one that hesitates.
+      'Cache-Control': 'public, max-age=3600',
+    },
+  });
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     if (request.method === 'OPTIONS') {
@@ -117,6 +248,16 @@ export default {
     }
 
     const url = new URL(request.url);
+
+    // The three paths that are a WEBSITE rather than an API, and the only ones
+    // here that are meant to be opened by a human or by an operating system.
+    // Ahead of the rate limiter because a phone verifying an app link is not a
+    // caller we want to turn away, and ahead of the mounts because none of them
+    // would claim these anyway.
+    if (url.pathname === '/.well-known/apple-app-site-association') return appleAssociation();
+    if (url.pathname === '/.well-known/assetlinks.json') return androidAssetLinks(env);
+    const follow = /^\/f\/([0-9A-Za-z-]{1,32})\/?$/.exec(url.pathname);
+    if (follow) return followPage(follow[1]);
 
     // Keyed on the caller's address, which this layer has and the Workers
     // behind it may not — see the note in wrangler.jsonc. An absent address
