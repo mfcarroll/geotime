@@ -125,6 +125,15 @@ test('folding in what the relay says', async (t) => {
         assert.deepEqual(unnamed, ['share-1']);
     });
 
+    await t.test('a share we have asked to end is neither kept nor reported', () => {
+        // The removal already happened locally; the relay just has not been told
+        // yet, or was told and did not hear. Reporting it as unnamed is what
+        // brought the row back calling itself "Someone".
+        const { people, unnamed } = mergeFollowed([], incoming(), new Set(['share-1']));
+        assert.deepEqual(people, []);
+        assert.deepEqual(unnamed, [], 'and not resurrected under a made-up name');
+    });
+
     await t.test('an anchor that has gone missing leaves the last one standing', () => {
         // The relay saying nothing about somebody is not the relay saying they
         // have no time. Better an old answer, ageing visibly, than none.

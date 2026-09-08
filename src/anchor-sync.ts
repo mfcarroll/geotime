@@ -20,7 +20,7 @@ import { Capacitor } from '@capacitor/core';
 
 import { anchorFrom, anchorSubLabel, shouldPush, type Anchor } from './anchor';
 import { storedAccountId } from './account';
-import { fetchFollowing, pushAnchor } from './anchor-share';
+import { fetchFollowing, pushAnchor, revokeShare } from './anchor-share';
 import { mergeFollowed } from './people';
 import { aboardShip, persistFollowedPeople, state } from './state';
 
@@ -36,6 +36,17 @@ const TICK_MS = 5 * 60 * 1000;
 
 /** Where the last successful push is remembered, so a relaunch does not repeat it. */
 const PUSHED_KEY = 'anchorPushed';
+
+/**
+ * Shares this device has asked to end and not had confirmed.
+ *
+ * Kept because the removal is local and instant while the revoke is neither.
+ * Without this list, a × tapped with no signal removes the row here, fails
+ * quietly at the relay, and then the next foreground fetch finds a share the
+ * relay still lists with no local name for it — and puts the row back, called
+ * "Someone". The user's one deliberate act, undone and renamed.
+ */
+const REVOKED_KEY = 'anchorRevoked';
 
 /** This device's anchor right now. */
 export function myAnchor(): Anchor | null {
@@ -84,6 +95,68 @@ export async function pushMyAnchor(): Promise<boolean> {
     return true;
 }
 
+/** Shares asked to end and not yet confirmed. */
+function pendingRevokes(): Set<string> {
+    try {
+        const raw = JSON.parse(localStorage.getItem(REVOKED_KEY) || '[]') as unknown;
+        return new Set(Array.isArray(raw) ? raw.filter((id): id is string => typeof id === 'string') : []);
+    } catch {
+        return new Set();
+    }
+}
+
+function rememberRevokes(ids: ReadonlySet<string>): void {
+    try {
+        if (ids.size === 0) localStorage.removeItem(REVOKED_KEY);
+        else localStorage.setItem(REVOKED_KEY, JSON.stringify([...ids]));
+    } catch { /* private mode; the worst case is a retry that never happens */ }
+}
+
+/**
+ * Stops following somebody: here first, then at the relay, then remembered
+ * until the relay agrees.
+ *
+ * Local first so the row goes the instant it is tapped rather than after a
+ * round trip, and so it goes with no signal at all — which is exactly when
+ * somebody most wants to be rid of a row. The relay is what actually ends the
+ * sharing, and until it says so this device keeps asking; see refreshFollowing.
+ */
+export async function stopFollowing(shareId: string): Promise<void> {
+    persistFollowedPeople(state.followedPeople.filter((person) => person.shareId !== shareId));
+
+    const pending = pendingRevokes();
+    pending.add(shareId);
+    rememberRevokes(pending);
+
+    if (await revokeShare(shareId)) {
+        const left = pendingRevokes();
+        left.delete(shareId);
+        rememberRevokes(left);
+    }
+}
+
+/**
+ * Tries again on every revoke still outstanding, and returns the ones that are.
+ *
+ * A share the relay no longer lists is done, however it got that way — revoked
+ * from the other end, swept, or by a call whose answer this device never saw —
+ * so it leaves the list without another request.
+ */
+async function retryRevokes(
+    pending: ReadonlySet<string>,
+    listed: ReadonlyArray<{ shareId: string }>,
+): Promise<Set<string>> {
+    if (pending.size === 0) return new Set();
+
+    const stillThere = new Set(listed.map((row) => row.shareId));
+    const left = new Set<string>();
+    for (const shareId of pending) {
+        if (!stillThere.has(shareId)) continue;
+        if (!await revokeShare(shareId)) left.add(shareId);
+    }
+    return left;
+}
+
 /**
  * Asks the relay who is sharing with this device, and folds the answer in.
  *
@@ -97,7 +170,13 @@ export async function refreshFollowing(): Promise<boolean> {
     const incoming = await fetchFollowing();
     if (!incoming) return false;
 
-    const { people, unnamed } = mergeFollowed(state.followedPeople, incoming);
+    // Everything asked to end is held back from this pass, INCLUDING the ones
+    // just confirmed: `incoming` was read before the retries went out, so a
+    // share that has this moment been revoked is still in it.
+    const asked = pendingRevokes();
+    rememberRevokes(await retryRevokes(asked, incoming));
+
+    const { people, unnamed } = mergeFollowed(state.followedPeople, incoming, asked);
 
     // A share the relay lists that this device has no name for. It should not
     // be possible — the name is written when the code is redeemed, and the

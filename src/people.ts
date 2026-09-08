@@ -134,12 +134,22 @@ export function describeAge(ms: number): string {
 export function mergeFollowed(
     known: FollowedPerson[],
     incoming: ReadonlyArray<{ shareId: string; anchor: Anchor | null; updatedAt: number | null }>,
+    revoked: ReadonlySet<string> = new Set(),
 ): { people: FollowedPerson[]; unnamed: string[] } {
     const byId = new Map(known.map((person) => [person.shareId, person]));
     const people: FollowedPerson[] = [];
     const unnamed: string[] = [];
 
     for (const row of incoming) {
+        // A share this device has asked to end, whose revoke has not been
+        // confirmed yet. Neither kept nor reported: it has no local row to keep,
+        // and reporting it unnamed is precisely how the removed row came BACK
+        // on the next foreground calling itself "Someone" — the app undoing the
+        // one thing the user actually asked it to do, and renaming it on the
+        // way. The relay is the authority on who, EXCEPT about the requests it
+        // has not answered yet.
+        if (revoked.has(row.shareId)) continue;
+
         const existing = byId.get(row.shareId);
         if (!existing) {
             unnamed.push(row.shareId);
