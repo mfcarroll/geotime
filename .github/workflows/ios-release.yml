@@ -4,6 +4,11 @@ on:
   push:
     branches: ["main"]
   workflow_dispatch:
+    inputs:
+      submit:
+        description: "Submit to App Store review (uncheck to prepare the version and stop, e.g. to add screenshots first)"
+        type: boolean
+        default: true
 
 jobs:
   release:
@@ -23,10 +28,30 @@ jobs:
         with:
           node-version: 24
 
+      # Prepare-only mode. The release script still waits for the build, creates
+      # the App Store version, attaches the build and writes What's New — it just
+      # stops before pressing Submit, leaving the version editable for screenshots
+      # or other metadata. Ask for it either by unchecking the box on a manual run,
+      # or by putting [no-submit] in the commit message of the push to main.
+      - name: Decide whether to submit for review
+        env:
+          EVENT: ${{ github.event_name }}
+          INPUT_SUBMIT: ${{ inputs.submit }}
+          COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
+        run: |
+          if [ "$EVENT" = "workflow_dispatch" ]; then
+            echo "IOS_SUBMIT=$INPUT_SUBMIT"
+          elif printf '%s' "$COMMIT_MESSAGE" | grep -qF '[no-submit]'; then
+            echo "IOS_SUBMIT=false"
+          else
+            echo "IOS_SUBMIT=true"
+          fi >> "$GITHUB_ENV"
+
       # Waits for Xcode Cloud (triggered by the same push) to upload and
-      # process the build, then attaches it to an App Store version and
-      # submits for review with automatic release on approval.
-      - name: Submit to App Store review
+      # process the build, then attaches it to an App Store version and — unless
+      # IOS_SUBMIT says otherwise — submits for review with automatic release on
+      # approval.
+      - name: Prepare and submit the App Store version
         run: |
           if [ -z "$ASC_PRIVATE_KEY" ]; then
             echo "ASC_* secrets not configured; skipping App Store submission."

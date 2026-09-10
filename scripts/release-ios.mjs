@@ -10,6 +10,9 @@
 //   ASC_PRIVATE_KEY (PEM contents) or ASC_PRIVATE_KEY_PATH (file path)
 // Optional env:
 //   ASC_APP_ID (defaults to GeoTime), RELEASE_NOTES (What's New text)
+//   IOS_SUBMIT=false to prepare the version and stop short of submitting it,
+//     which is what you want when the version still needs screenshots or other
+//     metadata added by hand in App Store Connect.
 
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -127,6 +130,18 @@ for (const loc of locs) {
 console.log(`What's New set on ${locs.length} localization(s).`);
 
 // --- 4. Submit for review ---------------------------------------------------
+// Unless we were only asked to prepare it. Everything above is safe to redo, so
+// a later run with IOS_SUBMIT unset picks the version back up and submits it.
+if (/^(false|0|no)$/i.test(process.env.IOS_SUBMIT ?? '')) {
+  console.log(
+    `\nPrepared ${VERSION} (build ${build.attributes.version}) without submitting it.\n` +
+    `The version is still editable in App Store Connect: add screenshots and any\n` +
+    `other metadata, then either submit there, or re-run this workflow with\n` +
+    `"Submit to App Store review" checked.`,
+  );
+  process.exit(0);
+}
+
 const subs = (await api(`/v1/reviewSubmissions?filter[app]=${APP_ID}&filter[state]=READY_FOR_REVIEW,WAITING_FOR_REVIEW,IN_REVIEW,UNRESOLVED_ISSUES&limit=5`)).data;
 if (subs.some((s) => ['WAITING_FOR_REVIEW', 'IN_REVIEW'].includes(s.attributes.state))) {
   console.log('A review submission is already in flight; nothing to do.');
