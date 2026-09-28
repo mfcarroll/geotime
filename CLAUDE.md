@@ -11,19 +11,42 @@ dies with `Cannot find AVD system path. Please define ANDROID_SDK_ROOT`, which
 reads like "no system images are installed on this machine" and is not what it
 means. That misreading has happened more than once.
 
-The AVDs in `~/.android/avd` (Pixel_7 and four `wa-*`) all want
-`system-images/android-33/google_apis_playstore/arm64-v8a/`, which the shared
-SDK has and the home-directory one does not.
+## Use the GeoTime_Test AVD, never the ones in ~/.android/avd
+
+GeoTime has its own throwaway AVD, `GeoTime_Test` (android-36, Play Store
+image, Pixel 7 profile), kept in its own directory so that nothing GeoTime does
+touches anyone else's emulators:
 
 ```bash
 export ANDROID_SDK_ROOT=/Users/Shared/android/sdk
 export ANDROID_HOME=/Users/Shared/android/sdk
-/Users/Shared/android/sdk/emulator/emulator -avd Pixel_7 -no-boot-anim &
+export ANDROID_AVD_HOME=/Users/Shared/android/avd-geotime
+/Users/Shared/android/sdk/emulator/emulator -avd GeoTime_Test -no-boot-anim -no-snapshot &
 /Users/Shared/android/sdk/platform-tools/adb devices     # wait for `device`
 ```
 
-Gradle needs the same two variables. `adb` from the home-directory SDK talks to
-the same daemon, so a stray `adb` on PATH is harmless — only the emulator and
+**Never boot the `WA_*` AVDs in `~/.android/avd`.** They are sealed base images
+for another project. Its clones use their disks as copy-on-write backing files,
+so booting one silently corrupts every clone (see the README beside them). The
+`Pixel_7` AVD these notes used to name is gone. Without `ANDROID_AVD_HOME`,
+`-avd GeoTime_Test` fails with "Unknown AVD name", which is the safe failure.
+
+If `GeoTime_Test` is ever missing, recreate it in the same place:
+
+```bash
+echo no | ANDROID_AVD_HOME=/Users/Shared/android/avd-geotime \
+  /Users/Shared/android/sdk/cmdline-tools/latest/bin/avdmanager create avd \
+  -n GeoTime_Test -k "system-images;android-36;google_apis_playstore;arm64-v8a" -d pixel_7
+```
+
+On this image `adb shell monkey -p …` does not launch the app. Use
+`adb shell am start -n ca.matthewcarroll.geotime/.MainActivity`.
+
+Debug builds log Capacitor plugin return values to logcat, and one of those is
+the RCCL app key. Filter logcat before pasting it anywhere.
+
+Gradle needs the same two SDK variables. `adb` from the home-directory SDK talks
+to the same daemon, so a stray `adb` on PATH is harmless: only the emulator and
 Gradle care which root they are given.
 
 ## `npx cap sync ios` needs a UTF-8 locale
