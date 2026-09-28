@@ -14,6 +14,7 @@ import {
     validateAnchor,
     type Anchor,
     profileNeedsPush,
+    reconcileProfile,
 } from './anchor';
 
 test('an anchor ashore', async (t) => {
@@ -381,4 +382,37 @@ test('a rename goes up', () => {
 
 test('nothing changed since the relay said yes: nothing is sent', () => {
     assert.equal(profileNeedsPush(exactOn, { account: 'acct-1', profile: exactOn }, 'acct-1'), false);
+});
+
+// ---------------------------------------------------------------------------
+// reconcileProfile — more than one device, one name and one switch
+// ---------------------------------------------------------------------------
+
+const matthewOff = { name: 'Matthew', shareExact: false };
+const matthewOn = { name: 'Matthew', shareExact: true };
+const blank = { name: '', shareExact: false };
+
+test('a device just linked takes the account\'s profile, not its own blank one', () => {
+    // Pushing here would erase the name every follower sees.
+    assert.equal(reconcileProfile(blank, null, matthewOn), 'adopt');
+});
+
+test('a change made on another device is taken up here', () => {
+    assert.equal(reconcileProfile(matthewOff, matthewOff, matthewOn), 'adopt');
+});
+
+test('an edit on this device the relay has not acknowledged is sent', () => {
+    // Unticked here with no signal; the relay still has it on.
+    assert.equal(reconcileProfile(matthewOff, matthewOn, matthewOn), 'push');
+});
+
+test('the creating device still sends a switch ticked before its first share', () => {
+    // It records what the relay was told at creation — the name, switch off —
+    // so its own tick reads as an edit rather than as nothing to keep.
+    assert.equal(reconcileProfile(matthewOn, matthewOff, matthewOff), 'push');
+});
+
+test('nothing to do when this screen and the relay agree', () => {
+    assert.equal(reconcileProfile(matthewOn, null, matthewOn), 'same');
+    assert.equal(reconcileProfile(matthewOn, matthewOff, matthewOn), 'same');
 });

@@ -19,33 +19,49 @@
 // Offering both while one is half-finished is offering to abandon it without
 // saying so, and it was the thing that made this card feel unfinished.
 //
-// Native only, and not for want of trying: the web build has no widget to feed,
-// which is most of the point, and localStorage on a page anybody can visit is a
-// far weaker place to keep an identity than an app container is. `DEV` is the
-// escape hatch so the flow can be exercised in a browser.
+// MORE THAN ONE DEVICE. One person may read their people on a phone, a tablet
+// and a browser on a computer. A new one is linked from one that already is: it
+// types a code that device shows, and that device then asks whether the one
+// that took it is really yours. Everything is shared across them except the
+// time itself, which only one device — the primary — reports, because two in
+// two places would take turns being where you are.
+//
+// A browser joins only by being linked. It cannot start an account or share
+// anybody's time: it knows where the computer is, not where the person is, and
+// the page's own storage is a weaker home for a credential than an app's. What
+// it is for is seeing your family's times on the screen in front of you.
 
 import { Share } from '@capacitor/share';
 
 import { anchorAsSeen } from './anchor';
 import { findShareCode, formatShareCode, normaliseShareCode, shapeCodeField } from './share-code';
-import { storedAccountId } from './account';
+import { forgetCredential, rememberPrimary, storedToken } from './account';
 import {
+    approveDevice,
+    claimLinkCode,
     createInvitation,
+    createLinkCode,
     deleteAccount,
     fetchInvitations,
+    fetchMe,
+    makePrimary,
     redeemInvitation,
+    removeDevice,
     revokeShare,
+    type LinkedDevice,
 } from './anchor-share';
 import {
-    myAnchor,
+    currentMe,
+    isBrowser,
     pushMyAnchorNow,
     pushProfile,
     refreshFollowing,
-    sharingAvailable,
+    sharedAnchor,
     stopFollowing,
+    syncNow,
 } from './anchor-sync';
 import type { ClockEntry } from './clocks';
-import { describeInvitation } from './people';
+import { describeAge, describeInvitation } from './people';
 import { persistFollowedPeople, setSharePrefs, state } from './state';
 import { onClockTick } from './time';
 import { toast } from './toast';
@@ -71,6 +87,19 @@ const INVITE_REASONS: Record<string, string> = {
     unreachable: REASONS.unreachable,
 };
 
+const LINK_REASONS: Record<string, string> = {
+    invalid: 'That code is not one we know. Link codes last 10 minutes and work once.',
+    full: 'That account already has as many devices as it can. Remove one from it first.',
+    unreachable: REASONS.unreachable,
+};
+
+/** How often a panel waiting on the other device looks again. */
+const WATCH_MS = 2000;
+/** How long a link code, and the claim it makes, can be waited on. As at the relay. */
+const LINK_TTL_MS = 10 * 60 * 1000;
+
+const wait = (ms: number) => new Promise((done) => setTimeout(done, ms));
+
 let card: HTMLElement;
 let actions: HTMLElement;
 let codePanel: HTMLElement;
@@ -89,6 +118,34 @@ let exactBox: HTMLInputElement;
 let exactNote: HTMLElement;
 let previewEl: HTMLElement;
 let previewRow: HTMLElement | null = null;
+let introEl: HTMLElement;
+let profileEl: HTMLElement;
+let joinButton: HTMLButtonElement;
+let joinPanel: HTMLElement;
+let joinStatus: HTMLElement;
+let joinForm: HTMLElement;
+let joinInput: HTMLInputElement;
+let joinError: HTMLElement;
+let joinConfirm: HTMLElement;
+let linkPanel: HTMLElement;
+let linkWaiting: HTMLElement;
+let linkCodeEl: HTMLElement;
+let linkNote: HTMLElement;
+let linkAsk: HTMLElement;
+let linkQuestion: HTMLElement;
+let linkCancel: HTMLElement;
+let devicesEl: HTMLElement;
+let deviceList: HTMLElement;
+let noPrimaryEl: HTMLElement;
+
+/** The panel open now, if any. See show. */
+let openPanel: HTMLElement | null = null;
+/** Bumped to call off whichever wait on the other device is running. */
+let watchGeneration = 0;
+/** A claim this device made, waiting for its owner's other device to say yes. */
+let joining = false;
+/** The claim on screen for approval. */
+let askingAbout: LinkedDevice | null = null;
 
 /** The code currently on screen, so the share sheet has something to send. */
 let liveCode: string | null = null;
@@ -100,10 +157,44 @@ let liveCode: string | null = null;
  * both actions are offered.
  */
 function show(panel: HTMLElement | null): void {
-    codePanel.classList.toggle('hidden', panel !== codePanel);
-    redeemPanel.classList.toggle('hidden', panel !== redeemPanel);
-    actions.classList.toggle('hidden', panel !== null);
+    openPanel = panel;
+    for (const each of [codePanel, redeemPanel, joinPanel, linkPanel]) {
+        each.classList.toggle('hidden', panel !== each);
+    }
     fieldError(null);
+    joinFieldError(null);
+    renderMode();
+}
+
+/**
+ * What the card offers, given whether this device is linked and what it is.
+ *
+ * Three states: not linked, waiting to be approved, linked. A browser that is
+ * not linked sees only the way in, because it can do nothing else; an app that
+ * is not linked sees everything, with the way in as a quiet line for the few
+ * who have a second device.
+ */
+function renderMode(): void {
+    const token = storedToken();
+    const standing = currentMe();
+    const linked = !!token && standing?.status !== 'pending';
+    const browserOutside = isBrowser() && !linked;
+
+    introEl.textContent = browserOutside
+        ? 'See the people you follow on this computer. Link it to GeoTime on your phone.'
+        : 'Let someone see what time it is for you — never where you are.';
+    profileEl.classList.toggle('hidden', browserOutside);
+    actions.classList.toggle('hidden', openPanel !== null || browserOutside);
+
+    joinButton.textContent = isBrowser()
+        ? 'Link this browser to GeoTime on your phone'
+        : 'Link to GeoTime on your other device';
+    joinButton.className = isBrowser()
+        ? 'w-full mt-5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg px-4 py-2 text-sm font-medium transition-colors'
+        : 'w-full mt-3 text-sm text-gray-400 hover:text-white transition-colors';
+    if (openPanel !== null || !!token) joinButton.classList.add('hidden');
+
+    renderDevices();
 }
 
 /** The one message that stays: what is wrong with the box in front of you. */
@@ -128,7 +219,7 @@ function fieldError(text: string | null): void {
  * state on a cold start and worth saying rather than faking.
  */
 function previewEntry(): ClockEntry | null {
-    const seen = anchorAsSeen(myAnchor(), state.shareExact);
+    const seen = anchorAsSeen(sharedAnchor(), state.shareExact);
     if (!seen) return null;
     return {
         kind: 'person',
@@ -167,7 +258,7 @@ function renderPreview(): void {
 export function refreshSharingCard(): void {
     if (!exactNote) return;
 
-    const seen = anchorAsSeen(myAnchor(), state.shareExact);
+    const seen = anchorAsSeen(sharedAnchor(), state.shareExact);
     exactNote.textContent = !seen
         ? 'Waiting to work out what time it is here.'
         : seen.kind === 'offset'
@@ -221,10 +312,13 @@ async function invite(): Promise<void> {
     // "Not shared yet" long enough to look broken. The profile goes with it for
     // the same reason: the account was created with a name and nothing else, so
     // until this lands the relay treats the exact switch as off, whatever it
-    // says here.
-    void pushProfile();
-    void pushMyAnchorNow();
-    void refreshFollowers();
+    // says here. Then a whole sync, which also learns this device's standing:
+    // without it, "Your devices" stayed hidden until the next tick, which is
+    // exactly when somebody who just started sharing looks for it.
+    void (async () => {
+        await pushMyAnchorNow();
+        await syncNow();
+    })();
 }
 
 /**
@@ -242,15 +336,26 @@ async function sendCode(): Promise<void> {
     if (!liveCode) return;
 
     const url = `${FOLLOW_LINK_BASE}/${liveCode}`;
+    const text = `${state.shareName} wants to share their time with you on GeoTime.\n\n`
+        + `Tap to follow: ${url}\n\n`
+        + `Or open GeoTime, tap "Follow someone" and enter ${formatShareCode(liveCode)}.`;
+
+    // A browser on a computer usually has no share sheet. The message goes on
+    // the clipboard instead, which is what somebody would have done by hand.
+    const { value: canShare } = await Share.canShare().catch(() => ({ value: false }));
+    if (!canShare) {
+        try {
+            await navigator.clipboard.writeText(text);
+            show(null);
+            toast('Copied. Paste it into a message to them.', 'good');
+        } catch {
+            toast('This browser would not let the app copy it. Read them the code instead.', 'bad');
+        }
+        return;
+    }
+
     try {
-        await Share.share({
-            title: 'GeoTime',
-            text: `${state.shareName} wants to share their time with you on GeoTime.\n\n`
-                + `Tap to follow: ${url}\n\n`
-                + `Or open GeoTime, tap "Follow someone" and enter ${formatShareCode(liveCode)}.`,
-            url,
-            dialogTitle: 'Share your GeoTime code',
-        });
+        await Share.share({ title: 'GeoTime', text, url, dialogTitle: 'Share your GeoTime code' });
         show(null);
         toast('Code sent. It works once, and lasts 24 hours.', 'good');
     } catch {
@@ -314,8 +419,9 @@ async function follow(typed: string): Promise<void> {
     toast(`Following ${name}.`, 'good');
 
     // Redeeming may have created this device's account, and with no name on it:
-    // the sharer's list of who can see their time would say "Someone".
-    void pushProfile();
+    // the sharer's list of who can see their time would say "Someone". A whole
+    // sync sends the profile and learns this device's standing — see invite.
+    void syncNow();
     void catchUp(result.shareId);
 }
 
@@ -404,7 +510,7 @@ function renderFollowing(): void {
  * stopped when all that has stopped is the asking.
  */
 async function refreshFollowers(): Promise<void> {
-    if (!storedAccountId()) {
+    if (!storedToken() || currentMe()?.status === 'pending') {
         followersEl.classList.add('hidden');
         deleteBtn.classList.add('hidden');
         return;
@@ -476,9 +582,17 @@ async function stopSharing(shareId: string): Promise<void> {
 async function deleteEverything(): Promise<void> {
     const following = state.followedPeople.length;
     const rows = following === 1 ? 'row' : `${following} rows`;
+    const standing = currentMe();
+    const others = standing?.status === 'active'
+        ? standing.devices.filter((device) => !device.pending && device.deviceId !== standing.deviceId).length
+        : 0;
+    // Deleting is about the person, so it reaches every device they linked.
+    const everywhere = others > 0
+        ? ` It goes from your ${others === 1 ? 'other device' : `${others} other devices`} too.`
+        : '';
     const warning = following > 0
-        ? `Delete your sharing data? Your ${rows} for other people will go, and anybody who can see your time will stop being able to. This cannot be undone.`
-        : 'Delete your sharing data? Anybody who can see your time will stop being able to. This cannot be undone.';
+        ? `Delete your sharing data? Your ${rows} for other people will go, and anybody who can see your time will stop being able to.${everywhere} This cannot be undone.`
+        : `Delete your sharing data? Anybody who can see your time will stop being able to.${everywhere} This cannot be undone.`;
     if (!window.confirm(warning)) return;
 
     if (!await deleteAccount()) {
@@ -494,6 +608,266 @@ async function deleteEverything(): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// Linking another device — from one already linked
+// ---------------------------------------------------------------------------
+
+/**
+ * Shows a code for the new device, then waits for it to be claimed and asks
+ * whether the device that claimed it is yours.
+ *
+ * The asking is the point. A link code hands over more than a share code does,
+ * and reading one out to the wrong person should get them a request that can
+ * be refused, not the account. Only while this panel is open: nobody is asked
+ * about a device they did not just try to link.
+ */
+async function startLink(): Promise<void> {
+    show(linkPanel);
+    linkWaiting.classList.remove('hidden');
+    linkAsk.classList.add('hidden');
+    linkCancel.classList.remove('hidden');
+    linkCodeEl.textContent = '·····';
+    linkNote.textContent = 'Asking the server…';
+
+    const result = await createLinkCode();
+    if (openPanel !== linkPanel) return;
+    if (!result.ok) {
+        show(null);
+        toast(result.reason === 'full'
+            ? 'This account already has as many devices as it can. Remove one below first.'
+            : REASONS.unreachable, 'bad');
+        return;
+    }
+
+    linkCodeEl.textContent = formatShareCode(result.code);
+    linkNote.textContent = 'On the other device, open Sharing and tap “Link”. Good for 10 minutes, once.';
+
+    const generation = ++watchGeneration;
+    while (generation === watchGeneration && Date.now() < result.expiresAt) {
+        await wait(WATCH_MS);
+        if (generation !== watchGeneration) return;
+        const answer = await fetchMe();
+        const claim = answer?.status === 'active' ? answer.devices.find((device) => device.pending) : undefined;
+        if (claim) {
+            askAbout(claim);
+            return;
+        }
+    }
+    if (generation === watchGeneration) {
+        linkNote.textContent = 'That code has run out. Cancel, and link again for a new one.';
+    }
+}
+
+function askAbout(claim: LinkedDevice): void {
+    askingAbout = claim;
+    linkWaiting.classList.add('hidden');
+    linkAsk.classList.remove('hidden');
+    // "Don't link" is the way out now, and says what it does.
+    linkCancel.classList.add('hidden');
+    linkQuestion.textContent = `Link ${claim.label ?? 'a new device'}?`;
+}
+
+async function answerClaim(yes: boolean): Promise<void> {
+    const claim = askingAbout;
+    if (!claim) return;
+    askingAbout = null;
+    const label = claim.label ?? 'the new device';
+
+    if (yes) {
+        if (!await approveDevice(claim.deviceId)) {
+            toast('Could not reach the server, or it waited too long. Try linking again.', 'bad');
+            show(null);
+            return;
+        }
+        show(null);
+        toast(`Linked ${label}.`, 'good');
+    } else {
+        // Turning it down removes it outright; it never had access to anything.
+        await removeDevice(claim.deviceId);
+        show(null);
+        toast(`Not linked. ${label} has no access to anything.`, 'good');
+    }
+    await syncNow();
+}
+
+// ---------------------------------------------------------------------------
+// Linking this device — to one already linked
+// ---------------------------------------------------------------------------
+
+function joinFieldError(text: string | null): void {
+    joinError.textContent = text ?? '';
+    joinError.classList.toggle('hidden', !text);
+}
+
+function startJoin(): void {
+    show(joinPanel);
+    joinForm.classList.remove('hidden');
+    joinConfirm.classList.remove('hidden');
+    joinStatus.textContent = 'On your other device, open Sharing, tap “Link another device”, and enter the code it shows here.';
+    joinInput.value = '';
+    joinInput.focus();
+}
+
+async function confirmJoin(): Promise<void> {
+    const code = joinInput.value.trim();
+    if (!code) { joinFieldError('Enter the code your other device is showing.'); return; }
+
+    joinFieldError(null);
+    const result = await claimLinkCode(code);
+    if (!result.ok) {
+        joinFieldError(LINK_REASONS[result.reason] ?? REASONS.unreachable);
+        return;
+    }
+    void waitForApproval();
+}
+
+/**
+ * Waits for the other device to say yes. Resumed on launch if the app was
+ * closed while waiting — see the anchorsynced listener in initPairing.
+ */
+async function waitForApproval(): Promise<void> {
+    if (openPanel !== joinPanel) show(joinPanel);
+    joinForm.classList.add('hidden');
+    joinConfirm.classList.add('hidden');
+    joinStatus.textContent = 'Now say yes on your other device. This carries on by itself.';
+    joining = true;
+
+    const generation = ++watchGeneration;
+    const deadline = Date.now() + LINK_TTL_MS;
+    while (generation === watchGeneration && Date.now() < deadline) {
+        await wait(WATCH_MS);
+        if (generation !== watchGeneration) return;
+        const answer = await fetchMe();
+        // Turned down, or lapsed: the relay no longer knows this token, and
+        // signedOutIf has already forgotten it.
+        if (!storedToken()) {
+            joining = false;
+            show(null);
+            toast('Not linked. It was turned down, or the ten minutes ran out.', 'bad');
+            return;
+        }
+        if (answer?.status === 'active') {
+            joining = false;
+            show(null);
+            toast('Linked. Your people are on their way.', 'good');
+            await syncNow();
+            return;
+        }
+    }
+    if (generation === watchGeneration) {
+        joining = false;
+        forgetCredential();
+        show(null);
+        toast('Not linked. The ten minutes ran out — start again from your other device.', 'bad');
+    }
+}
+
+function cancelJoin(): void {
+    watchGeneration++;
+    // A claim still waiting is abandoned here; the relay lets it lapse.
+    if (joining) forgetCredential();
+    joining = false;
+    show(null);
+}
+
+// ---------------------------------------------------------------------------
+// Your devices
+// ---------------------------------------------------------------------------
+
+const PLATFORM_NAMES: Record<LinkedDevice['platform'], string> = {
+    ios: 'An iPhone or iPad', android: 'An Android device', web: 'A browser',
+};
+
+function renderDevices(): void {
+    const standing = currentMe();
+    if (!storedToken() || standing?.status !== 'active') {
+        devicesEl.classList.add('hidden');
+        return;
+    }
+    devicesEl.classList.remove('hidden');
+
+    const linked = standing.devices.filter((device) => !device.pending);
+    noPrimaryEl.classList.toggle('hidden', linked.some((device) => device.primary));
+    deviceList.replaceChildren(...linked.map((device) => {
+        const isThis = device.deviceId === standing.deviceId;
+        const label = device.label ?? PLATFORM_NAMES[device.platform];
+
+        const body = document.createElement('div');
+        const title = document.createElement('p');
+        title.className = 'text-gray-200';
+        title.textContent = isThis ? `${label} (this one)` : label;
+        const note = document.createElement('p');
+        note.className = 'text-xs text-gray-500';
+        note.textContent = device.primary
+            ? 'Shares your time'
+            : isThis ? 'Shows your people' : `Last used ${describeAge(Date.now() - device.lastSeenAt)}`;
+        body.append(title, note);
+
+        const buttons = document.createElement('div');
+        buttons.className = 'flex shrink-0 gap-3';
+        // Never a browser: see makePrimary in the relay.
+        if (!device.primary && device.platform !== 'web') {
+            const share = document.createElement('button');
+            share.className = 'text-xs text-blue-400 hover:text-blue-300 transition-colors';
+            share.textContent = 'Share from this';
+            share.addEventListener('click', () => { void shareFrom(device, isThis, label); });
+            buttons.append(share);
+        }
+        // Not on the only one: the relay would refuse, since that would leave an
+        // account nothing can reach. Leaving entirely is "Delete my sharing data".
+        if (linked.length > 1) {
+            const remove = quietButton(isThis ? 'Unlink' : 'Remove');
+            remove.addEventListener('click', () => { void removeFromAccount(device, isThis, label); });
+            buttons.append(remove);
+        }
+        return listRow(body, buttons);
+    }));
+}
+
+/** Moves "shares your time" to another device, say when the phone is replaced. */
+async function shareFrom(device: LinkedDevice, isThis: boolean, label: string): Promise<void> {
+    if (!await makePrimary(device.deviceId)) {
+        toast(REASONS.unreachable, 'bad');
+        return;
+    }
+    if (isThis) {
+        rememberPrimary(true);
+        // Now, rather than on the next tick: until it lands, followers are
+        // still being told wherever the last primary was.
+        void pushMyAnchorNow();
+    }
+    toast(isThis ? 'This device now shares your time.' : `${label} now shares your time.`, 'good');
+    await syncNow();
+}
+
+async function removeFromAccount(device: LinkedDevice, isThis: boolean, label: string): Promise<void> {
+    const question = isThis
+        ? 'Unlink this device? It will stop showing your people. Your other devices keep them.'
+        : `Remove ${label}? It will stop showing your people.`
+            + (device.primary ? ' It shares your time now, so until you choose another device, the people who follow you will see it getting older.' : '');
+    if (!window.confirm(question)) return;
+
+    const result = await removeDevice(device.deviceId);
+    if (result === 'last') {
+        toast('This is your only device. To leave entirely, delete your sharing data below.', 'bad');
+        return;
+    }
+    if (result === 'failed') {
+        toast('Could not reach the server, so nothing changed.', 'bad');
+        return;
+    }
+    if (isThis) {
+        forgetCredential();
+        persistFollowedPeople([]);
+        toast('Unlinked. This device no longer shows your people.', 'good');
+    } else {
+        toast(`Removed ${label}.`, 'good');
+    }
+    await syncNow();
+    renderFollowing();
+    renderMode();
+}
+
+// ---------------------------------------------------------------------------
 
 /**
  * Follows somebody from a link they sent, with no code to type.
@@ -505,13 +879,14 @@ async function deleteEverything(): Promise<void> {
  */
 export async function followFromLink(code: string): Promise<void> {
     const normalised = normaliseShareCode(code);
-    if (!normalised || !card || !sharingAvailable()) return;
+    // Follow links open the app; a browser never gets one to handle.
+    if (!normalised || !card || isBrowser()) return;
     await follow(normalised);
 }
 
 export function initPairing(): void {
     card = document.getElementById('sharing-card')!;
-    if (!card || !sharingAvailable()) return;
+    if (!card) return;
 
     actions = document.getElementById('sharing-actions')!;
     codePanel = document.getElementById('sharing-code-panel')!;
@@ -529,6 +904,25 @@ export function initPairing(): void {
     exactBox = document.getElementById('sharing-exact') as HTMLInputElement;
     exactNote = document.getElementById('sharing-exact-note')!;
     previewEl = document.getElementById('sharing-preview')!;
+    introEl = document.getElementById('sharing-intro')!;
+    profileEl = document.getElementById('sharing-profile')!;
+    joinButton = document.getElementById('sharing-join') as HTMLButtonElement;
+    joinPanel = document.getElementById('sharing-join-panel')!;
+    joinStatus = document.getElementById('sharing-join-status')!;
+    joinForm = document.getElementById('sharing-join-form')!;
+    joinInput = document.getElementById('sharing-join-input') as HTMLInputElement;
+    joinError = document.getElementById('sharing-join-error')!;
+    joinConfirm = document.getElementById('sharing-join-confirm')!;
+    linkPanel = document.getElementById('sharing-link-panel')!;
+    linkWaiting = document.getElementById('sharing-link-waiting')!;
+    linkCodeEl = document.getElementById('sharing-link-code')!;
+    linkNote = document.getElementById('sharing-link-note')!;
+    linkAsk = document.getElementById('sharing-link-ask')!;
+    linkQuestion = document.getElementById('sharing-link-question')!;
+    linkCancel = document.getElementById('sharing-link-cancel')!;
+    devicesEl = document.getElementById('sharing-devices')!;
+    deviceList = document.getElementById('sharing-device-list')!;
+    noPrimaryEl = document.getElementById('sharing-no-primary')!;
 
     myNameInput.value = state.shareName ?? '';
     exactBox.checked = state.shareExact;
@@ -559,6 +953,26 @@ export function initPairing(): void {
     });
     deleteBtn.addEventListener('click', () => { void deleteEverything(); });
 
+    joinButton.addEventListener('click', startJoin);
+    joinConfirm.addEventListener('click', () => { void confirmJoin(); });
+    document.getElementById('sharing-join-cancel')!.addEventListener('click', cancelJoin);
+    joinInput.addEventListener('input', (event) => {
+        if ((event as InputEvent).isComposing) return;
+        const shaped = shapeCodeField(joinInput.value);
+        if (shaped !== joinInput.value) joinInput.value = shaped;
+    });
+    joinInput.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') { event.preventDefault(); void confirmJoin(); }
+    });
+    document.getElementById('sharing-link-device')!.addEventListener('click', () => { void startLink(); });
+    document.getElementById('sharing-link-yes')!.addEventListener('click', () => { void answerClaim(true); });
+    document.getElementById('sharing-link-no')!.addEventListener('click', () => { void answerClaim(false); });
+    linkCancel.addEventListener('click', () => {
+        watchGeneration++;
+        askingAbout = null;
+        show(null);
+    });
+
     // Shaped as it is typed or pasted into, rather than only checked on Follow:
     // see shapeCodeField. Not mid-composition, which would fight the keyboard.
     codeInput.addEventListener('input', (event) => {
@@ -586,5 +1000,27 @@ export function initPairing(): void {
     // open a follower who had gone stayed listed. Now on every sync — the same
     // beat as the people you follow: returning to the app, and the five-minute
     // tick.
-    document.addEventListener('anchorsynced', () => { void refreshFollowers(); });
+    document.addEventListener('anchorsynced', () => {
+        void refreshFollowers();
+        // Closed while waiting to be approved: carry on waiting.
+        if (currentMe()?.status === 'pending' && !joining) void waitForApproval();
+        renderMode();
+        refreshSharingCard();
+    });
+
+    // Another device changed the name or the switch. See adoptProfile.
+    document.addEventListener('shareprefschanged', () => {
+        myNameInput.value = state.shareName ?? '';
+        exactBox.checked = state.shareExact;
+        refreshSharingCard();
+    });
+
+    // Removed from another device, or the account deleted elsewhere. A claim
+    // turned down says so in its own words; see waitForApproval.
+    document.addEventListener('anchorsignedout', () => {
+        if (!joining) toast('This device is no longer linked to your account.', 'bad');
+        show(null);
+        renderFollowing();
+        void refreshFollowers();
+    });
 }

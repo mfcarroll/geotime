@@ -183,7 +183,12 @@
                far weaker place to keep an account id. See sharingAvailable. -->
           <div id="sharing-card" class="card rounded-2xl shadow-lg p-6 hidden">
             <h2 class="text-xl font-semibold text-white">Sharing</h2>
-            <p class="text-sm text-gray-400 mt-1">Let someone see what time it is for you — never where you are.</p>
+            <p id="sharing-intro" class="text-sm text-gray-400 mt-1">Let someone see what time it is for you — never where you are.</p>
+
+            <!-- Everything about how you appear. Hidden in a browser that is not
+                 linked yet: a browser cannot start an account or share anybody's
+                 time, so until it joins one there is nothing here for it to set. -->
+            <div id="sharing-profile">
 
             <!-- The one thing about you that ever leaves this device by name,
                  and it is first because it is what the other end's row gets
@@ -214,10 +219,52 @@
               <p class="text-xs uppercase tracking-wide text-gray-500 mb-2">How you appear to them</p>
               <div id="sharing-preview"></div>
             </div>
+            </div>
 
             <div id="sharing-actions" class="flex gap-2 mt-5">
               <button id="sharing-invite" class="flex-1 bg-blue-600 hover:bg-blue-500 text-white rounded-lg px-4 py-2 text-sm font-medium transition-colors">Share your time</button>
               <button id="sharing-redeem" class="flex-1 bg-gray-700 hover:bg-gray-600 text-white rounded-lg px-4 py-2 text-sm font-medium transition-colors">Follow someone</button>
+            </div>
+
+            <!-- The way in for a second device: a tablet, or a browser on a
+                 computer. Quiet in the app, where most people never need it;
+                 the whole card, in a browser that is not linked yet. -->
+            <button id="sharing-join" class="hidden w-full mt-3 text-sm text-gray-400 hover:text-white transition-colors">Link to GeoTime on your other device</button>
+
+            <!-- A new device, typing the code its owner's other device shows.
+                 Then waiting, because that other device has to say yes. -->
+            <div id="sharing-join-panel" class="hidden mt-5 space-y-2">
+              <p id="sharing-join-status" class="text-sm text-gray-400">On your other device, open Sharing, tap “Link another device”, and enter the code it shows here.</p>
+              <div id="sharing-join-form" class="space-y-2">
+                <input id="sharing-join-input" type="text" inputmode="latin" autocapitalize="characters" autocomplete="off" autocorrect="off" spellcheck="false"
+                       class="w-full bg-gray-700 border border-gray-600 text-white placeholder-gray-400 rounded-lg px-4 py-2 font-mono tracking-widest uppercase focus:ring-2 focus:ring-blue-500 focus:outline-none" placeholder="CODE">
+                <p id="sharing-join-error" class="text-sm text-red-400 hidden"></p>
+              </div>
+              <div class="flex gap-2">
+                <button id="sharing-join-confirm" class="flex-1 bg-blue-600 hover:bg-blue-500 text-white rounded-lg px-4 py-2 text-sm font-medium transition-colors">Link</button>
+                <button id="sharing-join-cancel" class="flex-1 bg-gray-700 hover:bg-gray-600 text-white rounded-lg px-4 py-2 text-sm font-medium transition-colors">Cancel</button>
+              </div>
+            </div>
+
+            <!-- A device already linked, showing a code for the new one — and
+                 then asking whether the device that took it is yours. That
+                 question is the safeguard: a code read out to the wrong person
+                 gets them a request, not an account. -->
+            <div id="sharing-link-panel" class="hidden mt-5 text-center">
+              <div id="sharing-link-waiting">
+                <p class="text-xs uppercase tracking-wide text-gray-500 mb-2">Enter this on your other device</p>
+                <p id="sharing-link-code" class="text-3xl font-mono tabular-nums tracking-[0.2em] text-white select-all">--------</p>
+                <p id="sharing-link-note" class="text-sm text-gray-400 mt-2"></p>
+              </div>
+              <div id="sharing-link-ask" class="hidden text-left">
+                <p id="sharing-link-question" class="text-white font-medium"></p>
+                <p class="text-sm text-gray-400 mt-1">It will see the people you follow and who can see your time, and be able to change them. Only link a device you have in front of you.</p>
+                <div class="flex gap-2 mt-4">
+                  <button id="sharing-link-yes" class="flex-1 bg-blue-600 hover:bg-blue-500 text-white rounded-lg px-4 py-2 text-sm font-medium transition-colors">Link it</button>
+                  <button id="sharing-link-no" class="flex-1 bg-gray-700 hover:bg-gray-600 text-white rounded-lg px-4 py-2 text-sm font-medium transition-colors">Don’t link</button>
+                </div>
+              </div>
+              <button id="sharing-link-cancel" class="w-full mt-4 bg-gray-700 hover:bg-gray-600 text-white rounded-lg px-4 py-2 text-sm font-medium transition-colors">Cancel</button>
             </div>
 
             <!-- One flow at a time. The two buttons above go away while a panel
@@ -272,6 +319,17 @@
             <div id="sharing-followers" class="hidden mt-6 pt-4 border-t border-gray-700">
               <h3 class="text-xs uppercase tracking-wide text-gray-500 mb-3">Who can see your time</h3>
               <ul id="sharing-follower-list" class="space-y-2"></ul>
+            </div>
+
+            <!-- Every screen this account is on, and which one shares your time.
+                 Only one does: two in two places would take turns being where
+                 you are. The same person owns all of them, so any can remove
+                 any other. -->
+            <div id="sharing-devices" class="hidden mt-6 pt-4 border-t border-gray-700">
+              <h3 class="text-xs uppercase tracking-wide text-gray-500 mb-3">Your devices</h3>
+              <p id="sharing-no-primary" class="hidden text-sm text-amber-300 mb-3">None of your devices is sharing your time, so the people who follow you see it getting older.</p>
+              <ul id="sharing-device-list" class="space-y-2"></ul>
+              <button id="sharing-link-device" class="mt-3 text-sm text-blue-400 hover:text-blue-300 transition-colors">Link another device</button>
             </div>
 
             <!-- Quiet, and last. Deleting is not a thing to reach for by

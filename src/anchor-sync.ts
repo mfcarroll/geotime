@@ -18,12 +18,18 @@
 
 import { Capacitor } from '@capacitor/core';
 
-import { anchorFrom, anchorSubLabel, profileNeedsPush, shouldPush, type AcknowledgedProfile, type Anchor, type SharedProfile } from './anchor';
+import { anchorFrom, anchorSubLabel, profileNeedsPush, reconcileProfile, shouldPush, type Anchor, type SharedProfile } from './anchor';
 import { getDisplayTimezoneName } from './utils';
-import { storedAccountId } from './account';
-import { fetchFollowing, pushAnchor, revokeShare, updateProfile } from './anchor-share';
+import {
+    acknowledgedProfile,
+    dropAlphaAccount,
+    rememberAcknowledgedProfile,
+    storedDevice,
+    storedToken,
+} from './account';
+import { fetchFollowing, fetchMe, pushAnchor, revokeShare, updateProfile, type Me } from './anchor-share';
 import { mergeFollowed } from './people';
-import { aboardShip, persistFollowedPeople, state } from './state';
+import { aboardShip, persistFollowedPeople, setSharePrefs, state } from './state';
 
 /**
  * How often the anchor is re-examined while the app is open.
@@ -37,9 +43,6 @@ const TICK_MS = 5 * 60 * 1000;
 
 /** Where the last successful push is remembered, so a relaunch does not repeat it. */
 const PUSHED_KEY = 'anchorPushed';
-
-/** The name and privacy switch the relay last acknowledged, and for which account. */
-const PROFILE_KEY = 'anchorProfilePushed';
 
 /**
  * Shares this device has asked to end and not had confirmed.
@@ -81,20 +84,75 @@ function rememberPushed(anchor: Anchor, at: number): void {
     } catch { /* private mode; the worst case is pushing again next tick */ }
 }
 
-function acknowledgedProfile(): AcknowledgedProfile | null {
-    try {
-        const raw = JSON.parse(localStorage.getItem(PROFILE_KEY) || 'null') as AcknowledgedProfile | null;
-        if (!raw || typeof raw.account !== 'string' || !raw.profile) return null;
-        return raw;
-    } catch {
-        return null;
-    }
+// ---------------------------------------------------------------------------
+// This device, among the account's others
+// ---------------------------------------------------------------------------
+
+/** What the relay last said about this device and its account. Null until asked. */
+let me: Me | null = null;
+
+export function currentMe(): Me | null {
+    return me;
 }
 
-function rememberProfile(account: string, profile: SharedProfile): void {
-    try {
-        localStorage.setItem(PROFILE_KEY, JSON.stringify({ account, profile }));
-    } catch { /* private mode; the worst case is sending it again next sync */ }
+/**
+ * Whether this device is the one that shares its owner's time.
+ *
+ * True before there is any account at all, because the first device to share
+ * becomes the primary: what it would share is its own time, and that is what
+ * the preview should show. After that, what the relay last said.
+ */
+export function isPrimaryDevice(): boolean {
+    return !storedToken() || (storedDevice()?.primary ?? false);
+}
+
+/**
+ * The anchor followers are given for this account — this device's own when it
+ * is the one sharing, otherwise whatever the primary last reported.
+ *
+ * For the sharing card's preview. A tablet's own location is not what anybody
+ * following this person sees, and a preview drawn from it would be a promise
+ * about somebody else's screen that is not true.
+ */
+export function sharedAnchor(): Anchor | null {
+    if (isPrimaryDevice()) return myAnchor();
+    return me?.status === 'active' ? me.anchor : null;
+}
+
+/**
+ * Asks the relay who this device is, and brings the profile into line.
+ *
+ * Kept when the relay cannot be reached: the last answer is a better guess
+ * than none, for the same reason the followed rows keep their last time.
+ */
+async function refreshMe(): Promise<Me | null> {
+    if (!storedToken()) {
+        me = null;
+        return null;
+    }
+    const answer = await fetchMe();
+    if (answer) me = answer;
+    if (answer?.status === 'active') adoptProfile(answer);
+    return answer;
+}
+
+/**
+ * Takes the account's name and switch when another device changed them.
+ *
+ * See reconcileProfile. Only 'adopt' changes anything here; 'push' is left for
+ * pushProfile, which runs next in the same sync.
+ */
+function adoptProfile(answer: Extract<Me, { status: 'active' }>): void {
+    const remote: SharedProfile = { name: answer.name ?? '', shareExact: answer.shareExact };
+    const local: SharedProfile = { name: state.shareName ?? '', shareExact: state.shareExact };
+    const decision = reconcileProfile(local, acknowledgedProfile(), remote);
+    if (decision === 'push') return;
+
+    if (decision === 'adopt') {
+        setSharePrefs({ name: remote.name || null, exact: remote.shareExact });
+        document.dispatchEvent(new CustomEvent('shareprefschanged'));
+    }
+    rememberAcknowledgedProfile(remote);
 }
 
 /**
@@ -107,7 +165,9 @@ function rememberProfile(account: string, profile: SharedProfile): void {
  * ends agree on.
  */
 export async function pushMyAnchor(): Promise<boolean> {
-    if (!storedAccountId()) return false;
+    // Only the device that shares its owner's time says what that time is.
+    // The relay refuses the rest anyway; asking first saves it the refusal.
+    if (!storedToken() || !isPrimaryDevice()) return false;
 
     const next = myAnchor();
     const { anchor, at } = lastPushed();
@@ -188,7 +248,7 @@ async function retryRevokes(
  * fetchFollowing returns null rather than [].
  */
 export async function refreshFollowing(): Promise<boolean> {
-    if (!storedAccountId()) return false;
+    if (!storedToken() || me?.status === 'pending') return false;
 
     const incoming = await fetchFollowing();
     if (!incoming) return false;
@@ -224,9 +284,24 @@ export async function refreshFollowing(): Promise<boolean> {
     return true;
 }
 
-/** Both halves, in the order that makes the answer include this device's own news. */
-async function syncNow(): Promise<void> {
-    // The profile first: it decides what a follower's next read of the anchor
+/**
+ * Everything, in the order that makes the answer include this device's own news.
+ *
+ * Who this device is comes first: whether it is still linked, whether it is the
+ * one that shares, and whether another device changed the name or the switch.
+ * A device still waiting to be approved stops there, since that question is
+ * the only one the relay will answer for it.
+ *
+ * Exported for the moment a link is approved, when waiting for the next tick
+ * would leave the new device empty for five minutes.
+ */
+export async function syncNow(): Promise<void> {
+    const standing = await refreshMe();
+    if (standing?.status === 'pending') {
+        document.dispatchEvent(new CustomEvent('anchorsynced'));
+        return;
+    }
+    // The profile next: it decides what a follower's next read of the anchor
     // below is reduced to.
     await pushProfile();
     await pushMyAnchor();
@@ -246,7 +321,7 @@ async function syncNow(): Promise<void> {
  * minutes — the feature's first impression, and it looked broken.
  */
 export async function pushMyAnchorNow(): Promise<boolean> {
-    if (!storedAccountId()) return false;
+    if (!storedToken() || !isPrimaryDevice()) return false;
 
     const anchor = myAnchor();
     if (!anchor) return false;
@@ -269,14 +344,17 @@ export async function pushMyAnchorNow(): Promise<boolean> {
  * Does nothing without an account, like updateProfile, rather than minting one.
  */
 export async function pushProfile(): Promise<boolean> {
-    const account = storedAccountId();
-    if (!account) return false;
+    const token = storedToken();
+    if (!token || me?.status === 'pending') return false;
 
     const profile: SharedProfile = { name: state.shareName ?? '', shareExact: state.shareExact };
-    if (!profileNeedsPush(profile, acknowledgedProfile(), account)) return true;
+    const acknowledged = acknowledgedProfile();
+    if (!profileNeedsPush(profile, acknowledged ? { account: token, profile: acknowledged } : null, token)) {
+        return true;
+    }
     if (!await updateProfile(profile)) return false;
 
-    rememberProfile(account, profile);
+    rememberAcknowledgedProfile(profile);
     return true;
 }
 
@@ -294,6 +372,16 @@ let started = false;
 export function startAnchorSync(): void {
     if (started) return;
     started = true;
+
+    // People followed through an alpha account, which nothing can sign in as
+    // any more: their rows could never update again, and never be stopped.
+    if (dropAlphaAccount()) persistFollowedPeople([]);
+    // Removed from another device, turned down, or deleted elsewhere: the
+    // people followed through that account are no longer this device's to see.
+    document.addEventListener('anchorsignedout', () => {
+        me = null;
+        persistFollowedPeople([]);
+    });
 
     document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'visible') void syncNow();
@@ -334,7 +422,10 @@ export function myAnchorLabel(): string {
     return `the ${getDisplayTimezoneName(anchor.tz)} timezone`;
 }
 
-/** True where sharing is offered at all. See the note in the pairing UI. */
-export function sharingAvailable(): boolean {
-    return Capacitor.isNativePlatform() || import.meta.env?.DEV === true;
+/**
+ * Whether this is a browser, which can be linked to an account but never share
+ * its owner's time or start an account of its own. See the pairing UI.
+ */
+export function isBrowser(): boolean {
+    return !Capacitor.isNativePlatform();
 }

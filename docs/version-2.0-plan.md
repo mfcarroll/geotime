@@ -263,7 +263,9 @@ Settled 7 September 2026, before the alpha was built.
 | Share lifetime | **Until revoked** — by the sharer, or by the recipient deleting the row. No TTL. |
 | Paid in 2.0.0 | **No.** Free, to learn from. The server-side gate goes in anyway, so the line can be drawn later without re-architecture. |
 | Staleness | **Stale after 24 hours, but never hidden.** The row stays and says so. Hiding a row because it is old is the app pretending it knows something it does not. |
-| Web follow | **Not in 2.0.** |
+| Web follow | **Not in 2.0** as a standalone account. Superseded 28 September: a browser can be *linked* to an account, below. |
+| Second devices | **Linked by code, not by signing in.** A device already linked shows a 10-minute, single-use code; the new device claims it and waits; the first device asks "Link iPad?" before anything is shared. Everything is account-wide except the time: **one primary** device reports it, because two in two places would take turns being where you are. A browser can be linked and never be primary. Decided 28 September 2026. |
+| Credentials | **One random token per device, stored hashed** at the relay. The account id stops being a secret, which it had to before billing hands it to Apple as appAccountToken. |
 
 The questions below are what those answers were chosen from, kept because the
 reasoning is worth more than the conclusion when one of them is reopened.

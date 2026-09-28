@@ -278,6 +278,39 @@ export function profileNeedsPush(
         || acknowledged.profile.shareExact !== current.shareExact;
 }
 
+const sameProfile = (a: SharedProfile, b: SharedProfile) =>
+    a.name === b.name && a.shareExact === b.shareExact;
+
+/**
+ * What to do with the profile the relay holds, now that more than one device
+ * can change it.
+ *
+ * Three-way, like any merge: what is on this screen, what this device last
+ * knew the relay to hold, and what it holds now.
+ *
+ * - Nothing to reconcile when this screen and the relay already agree.
+ * - ADOPT the relay's when this device has no edit of its own outstanding. The
+ *   difference came from another device, and it is the newer word. That
+ *   includes a device that has never known this account's profile at all —
+ *   one just linked — whose blank name must not be pushed over the account's.
+ * - PUSH this device's when it has an edit the relay has not acknowledged. The
+ *   first device's switch ticked before its first share is exactly that, and
+ *   is why the device that creates an account records what the relay was
+ *   actually told at creation, rather than nothing.
+ *
+ * Last edit wins between two devices editing at once, which for a name and a
+ * switch set by one person is the right answer rather than a compromise.
+ */
+export function reconcileProfile(
+    local: SharedProfile,
+    acknowledged: SharedProfile | null,
+    remote: SharedProfile,
+): 'same' | 'adopt' | 'push' {
+    if (sameProfile(local, remote)) return 'same';
+    if (!acknowledged || sameProfile(local, acknowledged)) return 'adopt';
+    return 'push';
+}
+
 /**
  * Names are shown on other people's screens and stored in someone else's
  * database, so they are bounded here rather than trusted.

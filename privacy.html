@@ -41,7 +41,7 @@
                     This is entirely optional. Nothing described in this section happens, and no record of you exists on our server, unless and until you tap &ldquo;Share your time&rdquo; or enter somebody's code.
                 </p>
                 <p>
-                    When you do, the app asks our server for a random identifier and keeps it on your device. It is not linked to your email address, phone number, device, or any account you hold elsewhere; there is no password, because there is nothing to sign in to.
+                    When you do, our server creates an account for you under a random identifier, and gives this device a random key of its own, which it keeps. The server stores only a scrambled form of that key, so its records cannot be used to act as you. None of it is tied to your email address, phone number, your device's own identifiers, or any account you hold elsewhere; there is no password, because there is nothing to sign in to.
                 </p>
                 <p>
                     It asks you for a name, and that name is sent &mdash; it is what the people you share with see above your clock, and without it their screen would show a time with nothing to say whose it is. Put whatever you like in it; nothing checks it against anything.
@@ -61,22 +61,27 @@
                     Either way they see what time it is for you and not where you are.
                 </p>
                 <p>
-                    No history is kept either. Each update replaces the last, so there is no record of where you have been or when. The only date stored is when your current time was last updated, which is what lets the other person see that an answer has gone stale.
+                    No history is kept either. Each update replaces the last, so there is no record of where you have been or when. The only date kept with your time is when it was last updated, which is what lets the other person see that an answer has gone stale.
+                    Beyond that the server notes when your account and each linked device were created and last used, and when each share was made and accepted &mdash; dates, never places &mdash; which is what lets you tell your devices apart and lets an account nobody has opened in a long time eventually be removed.
                 </p>
                 <p>
                     The name you give somebody you follow &mdash; &ldquo;Mum&rdquo;, &ldquo;Dad&rdquo; &mdash; is stored only on your own device and is never sent anywhere. The server does not know it and cannot be asked for it.
                 </p>
                 <p>
+                    You can use the same account on more than one device &mdash; a tablet, or a browser on your computer &mdash; by linking it from a device that already is. The device already linked shows a code that works once and stops working after 10 minutes, and it has to approve the new device before that device can see anything.
+                    For each device linked to your account, the server records what kind it is (&ldquo;iPhone&rdquo;, &ldquo;Chrome on macOS&rdquo;), whether it is the one that shares your time, and when it was last used, so that you can recognise each one and remove it under &ldquo;Your devices&rdquo;. Only one device shares your time, and a browser never does.
+                </p>
+                <p>
                     Codes are single-use and stop working after 24 hours. A share, once accepted, lasts until either of you ends it: removing somebody from your list also stops their time reaching you, and removing a follower stops your time reaching them. Either side can do this at any moment without the other's agreement.
                 </p>
                 <p>
-                    You can delete everything at once from the Sharing card in the app. That removes your identifier, your current time, and every share you are part of, immediately and permanently, and every share you were part of stops working for the other person too.
+                    You can delete everything at once from the Sharing card in the app. That removes your account, every device linked to it, your current time, and every share you are part of, immediately and permanently, and every share you were part of stops working for the other person too.
                     Nothing is retained after deletion, and there is no backup copy to ask us for.
                 </p>
                 <p>
                     The server is a small application run by us on <a href="https://www.cloudflare.com/privacypolicy/" class="text-blue-400 hover:text-blue-500">Cloudflare</a>'s network, which processes the requests on our behalf. Nothing is sold, shared with advertisers, or used to build a profile, and there is no analytics or tracking in the app at all.
                 </p>
-                <p class="text-sm text-gray-400 pt-6">Last updated 7 September 2026.</p>
+                <p class="text-sm text-gray-400 pt-6">Last updated 28 September 2026.</p>
                 <p class="text-center"><a href="/" class="text-blue-400 hover:text-blue-500">← Back to the app</a></p>
             </div>
         </div>

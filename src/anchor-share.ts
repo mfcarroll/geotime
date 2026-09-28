@@ -19,8 +19,15 @@
 
 import { Capacitor, CapacitorHttp } from '@capacitor/core';
 
-import { forgetAccountId, rememberAccountId, storedAccountId } from './account';
+import {
+    forgetCredential,
+    rememberAcknowledgedProfile,
+    rememberCredential,
+    rememberPrimary,
+    storedToken,
+} from './account';
 import { validateAnchor, type Anchor } from './anchor';
+import { deviceLabel, type DevicePlatform } from './device-label';
 
 /**
  * Must match the default in vite.config.js, which builds the CSP from it — a
@@ -88,9 +95,55 @@ export type InviteResult =
     | { ok: true; invitation: Invitation & { code: string } }
     | { ok: false; reason: 'full' | 'unreachable' };
 
+/** One of the devices linked to this account, as "Your devices" lists it. */
+export interface LinkedDevice {
+    deviceId: string;
+    platform: DevicePlatform;
+    label: string | null;
+    /** Claimed a link code, and waiting to be approved on a linked device. */
+    pending: boolean;
+    /** The one that shares this person's time. */
+    primary: boolean;
+    createdAt: number;
+    lastSeenAt: number;
+}
+
+/**
+ * This device's standing, from GET /v1/me.
+ *
+ * A pending device is told that it is pending and nothing else — see getMe in
+ * the relay — so the type has nothing else to give it.
+ */
+export type Me =
+    | { status: 'pending'; deviceId: string }
+    | {
+        status: 'active';
+        accountId: string;
+        deviceId: string;
+        primary: boolean;
+        name: string | null;
+        shareExact: boolean;
+        /** The account's anchor as stored — what the primary last said. */
+        anchor: Anchor | null;
+        anchorUpdatedAt: number | null;
+        devices: LinkedDevice[];
+    };
+
+/** Why a link code could not be minted or taken. Same bargain as RedeemResult. */
+export type LinkCodeResult =
+    | { ok: true; code: string; expiresAt: number }
+    | { ok: false; reason: 'full' | 'unreachable' };
+export type ClaimResult = { ok: true } | { ok: false; reason: 'invalid' | 'full' | 'unreachable' };
+
 interface Sent {
     status: number;
     body: unknown;
+}
+
+/** What this device says it is, when it asks for a credential. */
+function thisDevice(): { platform: DevicePlatform; label: string } {
+    const platform = Capacitor.getPlatform() as DevicePlatform;
+    return { platform, label: deviceLabel(globalThis.navigator?.userAgent ?? '', platform) };
 }
 
 /**
@@ -125,17 +178,33 @@ async function send(
             const parsed = typeof response.data === 'string'
                 ? safeParse(response.data)
                 : response.data;
-            return { status: response.status, body: parsed };
+            return signedOutIf(token, { status: response.status, body: parsed });
         }
 
         const response = await fetch(url, {
             method, headers,
             body: body === undefined ? undefined : JSON.stringify(body),
         });
-        return { status: response.status, body: safeParse(await response.text()) };
+        return signedOutIf(token, { status: response.status, body: safeParse(await response.text()) });
     } catch {
         return { status: 0, body: null };
     }
+}
+
+/**
+ * A 401 on a request that carried a token means the relay no longer knows it:
+ * this device was removed from another one, a link was turned down, or the
+ * account was deleted elsewhere. Holding a token it will never honour again
+ * helps nobody, so it is forgotten HERE, once, rather than by whichever caller
+ * happened to be first to see it — and the app is told, so the sharing card
+ * can stop offering an account this device no longer has.
+ */
+function signedOutIf(token: string | null, sent: Sent): Sent {
+    if (token && sent.status === 401 && storedToken() === token) {
+        forgetCredential();
+        globalThis.document?.dispatchEvent(new CustomEvent('anchorsignedout'));
+    }
+    return sent;
 }
 
 function safeParse(text: string): unknown {
@@ -155,7 +224,7 @@ const stringField = (body: unknown, name: string): string | null => {
 };
 
 /**
- * This install's id, minting one if it has never needed one before.
+ * This device's token, minting an account if it has never needed one before.
  *
  * Minting is deliberately lazy. An app that has never shared and never followed
  * has no business having an identity on a server, and the overwhelming majority
@@ -168,7 +237,7 @@ const stringField = (body: unknown, name: string): string | null => {
 let minting: Promise<string | null> | null = null;
 
 export async function ensureAccount(name?: string | null): Promise<string | null> {
-    const existing = storedAccountId();
+    const existing = storedToken();
     if (existing) return existing;
 
     // ONE mint, however many callers. Two concurrent calls used to make two
@@ -192,14 +261,19 @@ async function mintAccount(name?: string | null): Promise<string | null> {
     // code being minted and a share with no name on it gives the other end a
     // blank row to look at.
     const { status, body } = await send('POST', '/v1/account', null,
-                                        name ? { name } : undefined);
+                                        { ...(name ? { name } : {}), ...thisDevice() });
     if (status !== 201) return null;
 
-    const id = stringField(body, 'accountId');
-    if (!id) return null;
+    const token = stringField(body, 'token');
+    const deviceId = stringField(body, 'deviceId');
+    if (!token || !deviceId) return null;
 
-    rememberAccountId(id);
-    return id;
+    rememberCredential(token, { deviceId, primary: field(body, 'primary') === true });
+    // What the relay was actually told: the name, and the switch at its default
+    // of off. Recording nothing would read as "adopt the relay's" and quietly
+    // undo a switch ticked before this very first share — see reconcileProfile.
+    rememberAcknowledgedProfile({ name: name?.trim() ?? '', shareExact: false });
+    return token;
 }
 
 /**
@@ -211,10 +285,12 @@ async function mintAccount(name?: string | null): Promise<string | null> {
  * an account exists.
  */
 export async function pushAnchor(anchor: Anchor): Promise<boolean> {
-    const token = storedAccountId();
+    const token = storedToken();
     if (!token) return false;
 
     const { status } = await send('PUT', '/v1/anchor', token, anchor);
+    // Another device became the one that shares, and this one had not heard.
+    if (status === 409) rememberPrimary(false);
     return status === 200;
 }
 
@@ -282,16 +358,12 @@ export async function redeemInvitation(typed: string): Promise<RedeemResult> {
  * and the difference between "they have stopped sharing" and "I cannot ask".
  */
 export async function fetchFollowing(): Promise<Followed[] | null> {
-    const token = storedAccountId();
+    const token = storedToken();
     if (!token) return [];
 
     const { status, body } = await send('GET', '/v1/following', token);
-    if (status === 401) {
-        // The account is gone from the relay — deleted from another device, or
-        // swept. Holding a token it will never honour again helps nobody.
-        forgetAccountId();
-        return [];
-    }
+    // Signed out — see signedOutIf, which has already forgotten the token.
+    if (status === 401) return [];
     if (status !== 200) return null;
 
     const people = field(body, 'people');
@@ -328,7 +400,7 @@ export async function fetchFollowing(): Promise<Followed[] | null> {
 export async function updateProfile(
     profile: { name?: string; shareExact?: boolean },
 ): Promise<boolean> {
-    const token = storedAccountId();
+    const token = storedToken();
     if (!token) return false;
 
     const { status } = await send('PUT', '/v1/profile', token, profile);
@@ -337,7 +409,7 @@ export async function updateProfile(
 
 /** Every code you have handed out, so they can be shown or withdrawn. */
 export async function fetchInvitations(): Promise<Invitation[] | null> {
-    const token = storedAccountId();
+    const token = storedToken();
     if (!token) return [];
 
     const { status, body } = await send('GET', '/v1/followers', token);
@@ -370,7 +442,7 @@ export async function fetchInvitations(): Promise<Invitation[] | null> {
  * to keep a row they no longer want.
  */
 export async function revokeShare(shareId: string): Promise<boolean> {
-    const token = storedAccountId();
+    const token = storedToken();
     if (!token) return false;
 
     const { status } = await send('DELETE', `/v1/shares/${encodeURIComponent(shareId)}`, token);
@@ -386,12 +458,121 @@ export async function revokeShare(shareId: string): Promise<boolean> {
  * ask for them again.
  */
 export async function deleteAccount(): Promise<boolean> {
-    const token = storedAccountId();
+    const token = storedToken();
     if (!token) return true;
 
     const { status } = await send('DELETE', '/v1/me', token);
     if (status !== 200 && status !== 401) return false;
 
-    forgetAccountId();
+    forgetCredential();
     return true;
+}
+
+// ---------------------------------------------------------------------------
+// Devices
+// ---------------------------------------------------------------------------
+
+/**
+ * This device's standing, or null if the relay could not be asked.
+ *
+ * Null when there is no token too: an unlinked device has no standing to ask
+ * about, and every caller treats that the same as "not linked".
+ */
+export async function fetchMe(): Promise<Me | null> {
+    const token = storedToken();
+    if (!token) return null;
+
+    const { status, body } = await send('GET', '/v1/me', token);
+    if (status !== 200) return null;
+
+    const deviceId = stringField(body, 'deviceId');
+    if (!deviceId) return null;
+    if (field(body, 'status') === 'pending') return { status: 'pending', deviceId };
+
+    const rawDevices = field(body, 'devices');
+    const devices: LinkedDevice[] = Array.isArray(rawDevices)
+        ? rawDevices.flatMap((row) => {
+            const id = stringField(row, 'deviceId');
+            const platform = stringField(row, 'platform');
+            if (!id || (platform !== 'ios' && platform !== 'android' && platform !== 'web')) return [];
+            return [{
+                deviceId: id,
+                platform,
+                label: stringField(row, 'label'),
+                pending: field(row, 'pending') === true,
+                primary: field(row, 'primary') === true,
+                createdAt: Number(field(row, 'createdAt')) || 0,
+                lastSeenAt: Number(field(row, 'lastSeenAt')) || 0,
+            }];
+        })
+        : [];
+
+    const primary = field(body, 'primary') === true;
+    rememberPrimary(primary);
+    const anchorUpdatedAt = Number(field(body, 'anchorUpdatedAt'));
+    return {
+        status: 'active',
+        accountId: stringField(body, 'accountId') ?? '',
+        deviceId,
+        primary,
+        name: stringField(body, 'name'),
+        shareExact: field(body, 'shareExact') === true,
+        anchor: validateAnchor(field(body, 'anchor')),
+        anchorUpdatedAt: Number.isFinite(anchorUpdatedAt) ? anchorUpdatedAt : null,
+        devices,
+    };
+}
+
+/** A code to type into the device being linked. Ten minutes, once. */
+export async function createLinkCode(): Promise<LinkCodeResult> {
+    const token = storedToken();
+    if (!token) return { ok: false, reason: 'unreachable' };
+
+    const { status, body } = await send('POST', '/v1/devices/link', token);
+    if (status === 409) return { ok: false, reason: 'full' };
+    const code = stringField(body, 'code');
+    const expiresAt = Number(field(body, 'expiresAt'));
+    if (status !== 201 || !code) return { ok: false, reason: 'unreachable' };
+    return { ok: true, code, expiresAt: Number.isFinite(expiresAt) ? expiresAt : Date.now() + 10 * 60_000 };
+}
+
+/**
+ * Takes a link code shown on another device. This device then holds a token
+ * for a PENDING device, and waits — fetchMe says when it has been approved.
+ */
+export async function claimLinkCode(typed: string): Promise<ClaimResult> {
+    if (storedToken()) return { ok: false, reason: 'invalid' };
+
+    const { status, body } = await send('POST', '/v1/devices/claim', null, { code: typed, ...thisDevice() });
+    if (status === 201) {
+        const token = stringField(body, 'token');
+        const deviceId = stringField(body, 'deviceId');
+        if (!token || !deviceId) return { ok: false, reason: 'unreachable' };
+        rememberCredential(token, { deviceId, primary: false });
+        return { ok: true };
+    }
+    if (status === 409) return { ok: false, reason: 'full' };
+    if (status === 400 || status === 404) return { ok: false, reason: 'invalid' };
+    return { ok: false, reason: 'unreachable' };
+}
+
+async function deviceAction(method: 'POST' | 'DELETE', path: string): Promise<number> {
+    const token = storedToken();
+    if (!token) return 0;
+    return (await send(method, path, token)).status;
+}
+
+export async function approveDevice(deviceId: string): Promise<boolean> {
+    return await deviceAction('POST', `/v1/devices/${encodeURIComponent(deviceId)}/approve`) === 200;
+}
+
+/** Removing, or turning a claim down: the same act. 'last' when it is the only one. */
+export async function removeDevice(deviceId: string): Promise<'removed' | 'last' | 'failed'> {
+    const status = await deviceAction('DELETE', `/v1/devices/${encodeURIComponent(deviceId)}`);
+    if (status === 200 || status === 404) return 'removed';
+    return status === 409 ? 'last' : 'failed';
+}
+
+export async function makePrimary(deviceId: string): Promise<boolean> {
+    return await deviceAction('POST', `/v1/devices/${encodeURIComponent(deviceId)}/primary`) === 200;
 }
