@@ -16,17 +16,22 @@ takes up to ten.
 
 1. **overview** — local vs device time, GPS, and the timezone map with the GPS
    band in blue and a selected band in gold
-2. **people** — the clock list with Mum and Dad on it, Mum's row tapped so her
-   band is lit on the map. The one shot that says what 2.0 is for.
-3. **widget** — the home screen widget, which carries the two people as well
-4. **sharing** — the Sharing card: the name, the exact-timezone switch left
+2. **people** — Mum's row tapped, so her UTC+10 band is lit on the map, with
+   Dad aboard Wonder in the list below
+3. **widget** — the large home screen widget, the only size with room for both
+   people by name
+4. **ship-track** — a cruise's wake, the route ahead and its ports
+5. timezone-map — the Americas, with a second zone selected
+6. clocks — the whole list, people included
+7. **sharing** — the Sharing card: the name, the exact-timezone switch left
    off, *How you appear to them*, and the people you follow
-5. **ship-track** — a cruise's wake, the route ahead and its ports
-6. timezone-map, 7. clocks — phone sets only
 
-For 2.0, ship-track gives up its place in the first three to **people**. The
-sharing feature is the reason for the release, and the installation sheet is
-where someone decides whether to read further.
+5 and 6 are phone sets only; the iPad set is 1, 2, 3, 4 and 7.
+
+The first three are what the installation sheet shows, so they carry 2.0: people
+on the list and on the map, and on the widget. The ship track comes next because
+it is the most striking picture, and Sharing goes last — by then the list has
+already shown that people exist, so the card is detail rather than news.
 
 ## Why three iPhone sizes when Apple scales one
 
