@@ -116,7 +116,11 @@ export function describeAge(ms: number): string {
     if (days >= 14) return `${Math.floor(days / 7)} weeks ago`;
     if (days >= 2) return `${days} days ago`;
     if (days >= 1) return 'yesterday';
-    return `${Math.max(1, Math.floor(ms / (60 * 60 * 1000)))} hours ago`;
+    // Stale rows never get this far, but "who can see your time" does, for a
+    // share made minutes ago — which read "1 hours ago".
+    const hours = Math.floor(ms / (60 * 60 * 1000));
+    if (hours < 1) return 'less than an hour ago';
+    return hours === 1 ? '1 hour ago' : `${hours} hours ago`;
 }
 
 /**

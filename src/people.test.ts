@@ -93,9 +93,11 @@ test('how long ago, in terms that are honest', async (t) => {
         assert.equal(describeAge(21 * DAY), '3 weeks ago');
     });
 
-    await t.test('never says "0 hours ago"', () => {
-        assert.equal(describeAge(0), '1 hours ago');
-        assert.equal(describeAge(60_000), '1 hours ago');
+    await t.test('never says "0 hours ago", nor "1 hours ago"', () => {
+        assert.equal(describeAge(0), 'less than an hour ago');
+        assert.equal(describeAge(13 * 60_000), 'less than an hour ago');
+        assert.equal(describeAge(HOUR), '1 hour ago');
+        assert.equal(describeAge(HOUR + 59 * 60_000), '1 hour ago');
     });
 });
 
