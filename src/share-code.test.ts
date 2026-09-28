@@ -7,6 +7,8 @@ import {
     formatShareCode,
     mintShareCode,
     normaliseShareCode,
+    findShareCode,
+    shapeCodeField,
 } from './share-code';
 
 /** Bytes in a known order, so a code can be asserted rather than sampled. */
@@ -103,4 +105,49 @@ test('showing a code', async (t) => {
     await t.test('and the break costs the person typing it nothing', () => {
         assert.equal(normaliseShareCode(formatShareCode('ABCDEFGH')), 'ABCDEFGH');
     });
+});
+
+// What the share sheet sends — keep in step with sendCode() in pairing.ts.
+const message = (name: string) =>
+    `${name} wants to share their time with you on GeoTime.\n\n`
+    + 'Tap to follow: https://geotime-api.matthewcarroll.ca/f/AH90M8FX\n\n'
+    + 'Or open GeoTime, tap "Follow someone" and enter AH90-M8FX.';
+
+test('the code is found in the whole message, not in the hostname', () => {
+    // The old rule took the first eight letters in a row: "matthewc".
+    assert.equal(findShareCode(message('Matthew')), 'AH90M8FX');
+    assert.equal(findShareCode(message('Christopher')), 'AH90M8FX');
+});
+
+test('the code is found in a link, a printed code, or on its own', () => {
+    assert.equal(findShareCode('https://geotime-api.matthewcarroll.ca/f/AH90-M8FX'), 'AH90M8FX');
+    assert.equal(findShareCode('enter ah90-m8fx please'), 'AH90M8FX');
+    assert.equal(findShareCode('  AH90 M8FX '), 'AH90M8FX');
+});
+
+test('a long word that merely has eight letters is not a code', () => {
+    assert.equal(findShareCode('Christopher says hello'), null);
+    assert.equal(findShareCode('AH90M8FXAH90M8FX'), null);
+});
+
+test('the box takes a code being typed, with the hyphen once it is due', () => {
+    assert.equal(shapeCodeField('ah9'), 'AH9');
+    assert.equal(shapeCodeField('AH90'), 'AH90');
+    assert.equal(shapeCodeField('AH90M'), 'AH90-M');
+    assert.equal(shapeCodeField('AH90-M8'), 'AH90-M8');
+    assert.equal(shapeCodeField('AH90-'), 'AH90');     // backspacing past the hyphen
+});
+
+test('the box stops at a code\'s worth', () => {
+    // Typed twice by mistake: the second copy has nowhere to go.
+    assert.equal(shapeCodeField('AH90M8FXAH90M8FX'), 'AH90-M8FX');
+});
+
+test('the box maps lookalikes and drops what a code cannot contain', () => {
+    assert.equal(shapeCodeField('oh9o'), '0H90');
+    assert.equal(shapeCodeField('AH!9?0'), 'AH90');
+});
+
+test('pasting the whole message into the box gives the code', () => {
+    assert.equal(shapeCodeField(message('Matthew')), 'AH90-M8FX');
 });

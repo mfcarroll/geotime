@@ -89,3 +89,53 @@ export function formatShareCode(code: string): string {
     const half = Math.ceil(code.length / 2);
     return `${code.slice(0, half)}-${code.slice(half)}`;
 }
+
+/**
+ * The code in whatever somebody pasted, or null.
+ *
+ * What gets pasted is usually the whole message the share sheet sent, and that
+ * message is mostly not the code. Taking the first eight letters in a row found
+ * "matthewc" in the link's hostname, and filled the box with MATT-HEWC. So, in
+ * order of how sure each is: the code at the end of a follow link, then a code
+ * printed the way the app prints one (four, a hyphen, four), then the text as a
+ * code on its own. Never a run of letters that merely happens to be long enough.
+ */
+export function findShareCode(text: string): string | null {
+    if (typeof text !== 'string') return null;
+
+    const inLink = /\/f\/([0-9A-Za-z-]+)/.exec(text)?.[1];
+    const fromLink = inLink ? normaliseShareCode(inLink) : null;
+    if (fromLink) return fromLink;
+
+    for (const match of text.matchAll(/(?<![0-9A-Za-z])([0-9A-Za-z]{4}-[0-9A-Za-z]{4})(?![0-9A-Za-z])/g)) {
+        const code = normaliseShareCode(match[1]);
+        if (code) return code;
+    }
+    return normaliseShareCode(text.trim());
+}
+
+/**
+ * What the code box should show after somebody typed or pasted into it.
+ *
+ * A whole code found anywhere in it wins, so pasting the message straight into
+ * the box works as well as the Paste button does. Otherwise it is a code being
+ * typed: only characters a code can contain (lookalikes mapped, as when it is
+ * redeemed), at most a code's worth, with the hyphen put in once it is due.
+ * The box used to take anything, so typing a code twice made a sixteen-letter
+ * string that only the relay turned away.
+ */
+export function shapeCodeField(raw: string): string {
+    const found = findShareCode(raw);
+    if (found) return formatShareCode(found);
+
+    let code = '';
+    for (const ch of raw.toUpperCase()) {
+        const mapped = ch === 'I' || ch === 'L' ? '1' : ch === 'O' ? '0' : ch;
+        if (SHARE_CODE_ALPHABET.includes(mapped)) code += mapped;
+        if (code.length === SHARE_CODE_LENGTH) break;
+    }
+    // Split where a finished code splits, not in the middle of what is there so
+    // far: formatShareCode halves its input, which for six letters is 3-3.
+    const half = SHARE_CODE_LENGTH / 2;
+    return code.length > half ? `${code.slice(0, half)}-${code.slice(half)}` : code;
+}

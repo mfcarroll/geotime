@@ -27,7 +27,7 @@
 import { Share } from '@capacitor/share';
 
 import { anchorAsSeen } from './anchor';
-import { formatShareCode, normaliseShareCode } from './share-code';
+import { findShareCode, formatShareCode, normaliseShareCode, shapeCodeField } from './share-code';
 import { storedAccountId } from './account';
 import {
     createInvitation,
@@ -269,8 +269,7 @@ async function paste(): Promise<void> {
         const text = await navigator.clipboard.readText();
         // Whatever they copied might be the whole message rather than the code,
         // so the code is fished out of it rather than demanded on its own.
-        const found = /([0-9A-Za-z]{4}-?[0-9A-Za-z]{4})/.exec(text);
-        const code = normaliseShareCode(found?.[1] ?? text);
+        const code = findShareCode(text);
         if (!code) { fieldError('Nothing on the clipboard looks like a code.'); return; }
         codeInput.value = formatShareCode(code);
         fieldError(null);
@@ -560,6 +559,13 @@ export function initPairing(): void {
     });
     deleteBtn.addEventListener('click', () => { void deleteEverything(); });
 
+    // Shaped as it is typed or pasted into, rather than only checked on Follow:
+    // see shapeCodeField. Not mid-composition, which would fight the keyboard.
+    codeInput.addEventListener('input', (event) => {
+        if ((event as InputEvent).isComposing) return;
+        const shaped = shapeCodeField(codeInput.value);
+        if (shaped !== codeInput.value) codeInput.value = shaped;
+    });
     codeInput.addEventListener('keydown', (event) => {
         if (event.key === 'Enter') { event.preventDefault(); void follow(codeInput.value); }
     });
