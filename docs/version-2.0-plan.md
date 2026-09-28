@@ -350,8 +350,12 @@ pushed and the followed pulled; rows in the app. The widgets come last because
 they are the best-understood part — a person is a ship row with a different
 icon — and because everything above has to be right first.
 
-**2.1** — polish that needs real use to tune. Staleness thresholds; heartbeat
-while aboard; widget-side fetch if app-open frequency proves too low; the
+**2.1** — polish that needs real use to tune, and one promise to keep: the
+privacy policy says an account nobody has opened in a long time is eventually
+removed, and nothing removes one yet. A scheduled Worker on the relay, using
+`accounts.last_seen_at`, deleting the way `DELETE /v1/me` does. Decided 28
+September 2026 to build it in 2.1 rather than soften the policy. Beyond that:
+staleness thresholds; heartbeat while aboard; widget-side fetch if app-open frequency proves too low; the
 "share back" affordance.
 
 **Known, and left for later** — an in-place reload of the Android app crashes
