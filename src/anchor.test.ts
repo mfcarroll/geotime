@@ -13,6 +13,7 @@ import {
     shouldPush,
     validateAnchor,
     type Anchor,
+    profileNeedsPush,
 } from './anchor';
 
 test('an anchor ashore', async (t) => {
@@ -348,4 +349,36 @@ test('what a follower is allowed to see', async (t) => {
         assert.equal(anchorAsSeen(null, true), null);
         assert.equal(anchorAsSeen(null, false), null);
     });
+});
+
+// ---------------------------------------------------------------------------
+// profileNeedsPush — the name and the exact switch reaching the relay
+// ---------------------------------------------------------------------------
+
+const exactOn = { name: 'Matthew', shareExact: true };
+const exactOff = { name: 'Matthew', shareExact: false };
+
+test('a profile the relay has never acknowledged goes up', () => {
+    assert.equal(profileNeedsPush(exactOff, null, 'acct-1'), true);
+});
+
+test('a switch ticked before the first share goes up with the new account', () => {
+    // What happened: ticked with no account, so nothing was sent; the account
+    // was then created with a name only, and the relay kept share_exact = 0.
+    // An acknowledgement for some other account says nothing about this one.
+    assert.equal(profileNeedsPush(exactOn, { account: 'old-acct', profile: exactOn }, 'new-acct'), true);
+});
+
+test('unticking with no signal keeps being sent until the relay says yes', () => {
+    // The failed send left the acknowledgement at "on", so every later sync
+    // still sees a difference, rather than the relay sharing the zone forever.
+    assert.equal(profileNeedsPush(exactOff, { account: 'acct-1', profile: exactOn }, 'acct-1'), true);
+});
+
+test('a rename goes up', () => {
+    assert.equal(profileNeedsPush({ name: 'Mum', shareExact: false }, { account: 'acct-1', profile: exactOff }, 'acct-1'), true);
+});
+
+test('nothing changed since the relay said yes: nothing is sent', () => {
+    assert.equal(profileNeedsPush(exactOn, { account: 'acct-1', profile: exactOn }, 'acct-1'), false);
 });

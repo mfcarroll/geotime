@@ -218,7 +218,11 @@ async function invite(): Promise<void> {
     // The account may have been created by the call above, which means the relay
     // has never heard this device's time — and somebody is about to send a code.
     // Waiting for the next five-minute tick is what made the other end sit on
-    // "Not shared yet" long enough to look broken.
+    // "Not shared yet" long enough to look broken. The profile goes with it for
+    // the same reason: the account was created with a name and nothing else, so
+    // until this lands the relay treats the exact switch as off, whatever it
+    // says here.
+    void pushProfile();
     void pushMyAnchorNow();
     void refreshFollowers();
 }
@@ -310,6 +314,9 @@ async function follow(typed: string): Promise<void> {
     renderFollowing();
     toast(`Following ${name}.`, 'good');
 
+    // Redeeming may have created this device's account, and with no name on it:
+    // the sharer's list of who can see their time would say "Someone".
+    void pushProfile();
     void catchUp(result.shareId);
 }
 

@@ -244,6 +244,40 @@ export function shouldPush(
     return now - lastAt >= HEARTBEAT_MS;
 }
 
+/** What the relay is told about a sharer beyond their time: a name, and the one switch. */
+export interface SharedProfile {
+    name: string;
+    shareExact: boolean;
+}
+
+/** A profile the relay acknowledged, and which account it was acknowledged for. */
+export interface AcknowledgedProfile {
+    account: string;
+    profile: SharedProfile;
+}
+
+/**
+ * Whether the relay needs telling about the name or the privacy switch.
+ *
+ * Against what it last ACKNOWLEDGED, not what was last tried: a send that failed
+ * changed nothing there, and the switch is the one setting where the relay being
+ * behind is a privacy problem rather than a stale label. Unticking it with no
+ * signal left the relay sharing the zone while this screen said it was not.
+ *
+ * And per account. A new one — the first share, or after deleting everything —
+ * starts knowing nothing, whatever an old one was told; checking only the values
+ * is how a switch ticked before the first share never reached the relay at all.
+ */
+export function profileNeedsPush(
+    current: SharedProfile,
+    acknowledged: AcknowledgedProfile | null,
+    account: string,
+): boolean {
+    if (!acknowledged || acknowledged.account !== account) return true;
+    return acknowledged.profile.name !== current.name
+        || acknowledged.profile.shareExact !== current.shareExact;
+}
+
 /**
  * Names are shown on other people's screens and stored in someone else's
  * database, so they are bounded here rather than trusted.

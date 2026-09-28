@@ -18,7 +18,7 @@
 
 import { Capacitor } from '@capacitor/core';
 
-import { anchorFrom, anchorSubLabel, shouldPush, type Anchor } from './anchor';
+import { anchorFrom, anchorSubLabel, profileNeedsPush, shouldPush, type AcknowledgedProfile, type Anchor, type SharedProfile } from './anchor';
 import { getDisplayTimezoneName } from './utils';
 import { storedAccountId } from './account';
 import { fetchFollowing, pushAnchor, revokeShare, updateProfile } from './anchor-share';
@@ -37,6 +37,9 @@ const TICK_MS = 5 * 60 * 1000;
 
 /** Where the last successful push is remembered, so a relaunch does not repeat it. */
 const PUSHED_KEY = 'anchorPushed';
+
+/** The name and privacy switch the relay last acknowledged, and for which account. */
+const PROFILE_KEY = 'anchorProfilePushed';
 
 /**
  * Shares this device has asked to end and not had confirmed.
@@ -76,6 +79,22 @@ function rememberPushed(anchor: Anchor, at: number): void {
     try {
         localStorage.setItem(PUSHED_KEY, JSON.stringify({ anchor, at }));
     } catch { /* private mode; the worst case is pushing again next tick */ }
+}
+
+function acknowledgedProfile(): AcknowledgedProfile | null {
+    try {
+        const raw = JSON.parse(localStorage.getItem(PROFILE_KEY) || 'null') as AcknowledgedProfile | null;
+        if (!raw || typeof raw.account !== 'string' || !raw.profile) return null;
+        return raw;
+    } catch {
+        return null;
+    }
+}
+
+function rememberProfile(account: string, profile: SharedProfile): void {
+    try {
+        localStorage.setItem(PROFILE_KEY, JSON.stringify({ account, profile }));
+    } catch { /* private mode; the worst case is sending it again next sync */ }
 }
 
 /**
@@ -207,6 +226,9 @@ export async function refreshFollowing(): Promise<boolean> {
 
 /** Both halves, in the order that makes the answer include this device's own news. */
 async function syncNow(): Promise<void> {
+    // The profile first: it decides what a follower's next read of the anchor
+    // below is reduced to.
+    await pushProfile();
     await pushMyAnchor();
     await refreshFollowing();
 }
@@ -232,17 +254,27 @@ export async function pushMyAnchorNow(): Promise<boolean> {
 }
 
 /**
- * Puts the name and the privacy switch where the relay can see them.
+ * Puts the name and the privacy switch where the relay can see them, until it has.
  *
  * Kept on the device either way, so the switch works before anybody has an
- * account and goes up with the first one. See updateProfile, which no-ops
- * without a token rather than minting one.
+ * account, and goes up once there is one. Called on every sync as well as on
+ * every change, and only remembered once the relay says yes, so a change made
+ * with no signal keeps being sent until it lands. Until then the relay goes on
+ * applying whatever it was last told — which for the switch is the one lag that
+ * matters, and why this does not wait to be asked.
+ *
+ * Does nothing without an account, like updateProfile, rather than minting one.
  */
-export async function pushProfile(): Promise<void> {
-    await updateProfile({
-        name: state.shareName ?? '',
-        shareExact: state.shareExact,
-    });
+export async function pushProfile(): Promise<boolean> {
+    const account = storedAccountId();
+    if (!account) return false;
+
+    const profile: SharedProfile = { name: state.shareName ?? '', shareExact: state.shareExact };
+    if (!profileNeedsPush(profile, acknowledgedProfile(), account)) return true;
+    if (!await updateProfile(profile)) return false;
+
+    rememberProfile(account, profile);
+    return true;
 }
 
 let started = false;
