@@ -1,0 +1,40 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  // The web app at geotime.app, and the follow links that share its name.
+  //
+  // One Worker for every hostname the site answers on. The site itself is the
+  // Vite build in dist/, served as static assets; the code in src/ only decides
+  // which requests are something else: www, the follow links and the two files
+  // App Links and Universal Links fetch, and the old domain being retired.
+  "name": "geotime-web",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-07",
+  "account_id": "0bea2f2ee38420ce386b3e691614f178",
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  },
+  "assets": {
+    "directory": "../../dist",
+    "binding": "ASSETS",
+    // Every request reaches the script first, so www and the old domain can be
+    // redirected on any path — including paths that are real files, which
+    // would otherwise be served on those hosts as duplicates of the site.
+    "run_worker_first": true,
+    "not_found_handling": "none"
+  },
+  "routes": [
+    { "pattern": "geotime.app", "custom_domain": true },
+    { "pattern": "www.geotime.app", "custom_domain": true },
+    // The old domain, kept so that links and bookmarks keep working and so
+    // that anybody's saved clocks can be carried across — see legacy() in
+    // src/index.ts. It was a CNAME to GitHub Pages until the move.
+    { "pattern": "geotime.matthewcarroll.ca", "custom_domain": true }
+  ],
+  // The follow page and the .well-known files live in the gateway, which already
+  // serves them on the API host, rather than being copied here. Worker to
+  // Worker, inside the network.
+  "services": [
+    { "binding": "GATEWAY", "service": "geotime-api-gateway" }
+  ]
+}

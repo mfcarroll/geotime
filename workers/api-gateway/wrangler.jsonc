@@ -35,6 +35,13 @@
   // their own *.workers.dev names, which is what every 1.7.0 install in the
   // field is still calling — this is additive, and nothing shipped breaks.
   "routes": [
+    // The API's name from 2.0 on.
+    {
+      "pattern": "api.geotime.app",
+      "custom_domain": true
+    },
+    // Where 2.0's test builds pointed before geotime.app existed. Nothing in
+    // the stores ever used it, so it can go once no test build does.
     {
       "pattern": "geotime-api.matthewcarroll.ca",
       "custom_domain": true
@@ -43,7 +50,7 @@
 
   // Android App Links: the fingerprint of the certificate Play signs the app
   // with, which is what a phone checks /.well-known/assetlinks.json against
-  // before it will open a geotime-api.matthewcarroll.ca/f/ link in the app.
+  // before it will open a geotime.app/f/ link in the app.
   //
   // A PLAIN VAR AND NOT A SECRET, deliberately. This value is served publicly
   // in assetlinks.json — publishing it is its entire purpose — so treating it

@@ -1,10 +1,14 @@
 /**
  * One hostname in front of all of them.
  *
- *   geotime-api.matthewcarroll.ca/time/…    → geotime-utc-time
- *                                /rccl/…    → geotime-rccl-proxy
- *                                /ships/…   → geotime-ship-track
- *                                /anchor/…  → geotime-anchor-share
+ *   api.geotime.app/time/…    → geotime-utc-time
+ *                  /rccl/…    → geotime-rccl-proxy
+ *                  /ships/…   → geotime-ship-track
+ *                  /anchor/…  → geotime-anchor-share
+ *
+ * Also the follow links and the App Links / Universal Links files, which
+ * people meet at geotime.app/f/… — the site's Worker (workers/web) hands those
+ * paths here, so they are written once.
  *
  * WHY A HOSTNAME OF OUR OWN. These URLs are compiled into app binaries that go
  * to the App Store and Play, and a shipped build calls whatever it was built

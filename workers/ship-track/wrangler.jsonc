@@ -23,7 +23,7 @@
     // silently. geotime.local with an https scheme is what capacitor.config.ts
     // sets for both platforms; the capacitor:// form is iOS's default if
     // iosScheme is ever removed.
-    "ALLOWED_ORIGINS": "https://geotime.matthewcarroll.ca,https://geotime.local,capacitor://geotime.local,https://localhost:5173,http://localhost:5173"
+    "ALLOWED_ORIGINS": "https://geotime.app,https://geotime.matthewcarroll.ca,https://geotime.local,capacitor://geotime.local,https://localhost:5173,http://localhost:5173"
   },
   // Last known good track per voyage. The upstream `track` array goes empty
   // intermittently — observed on a vessel that had 720 points hours earlier
