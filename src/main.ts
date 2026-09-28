@@ -24,6 +24,7 @@ import { refreshShipMarkers, startShipMarkerWatch, type PlaceMarkerDetail } from
 import { installDiagnostics } from './diagnostics';
 import { maybeRunShipProbe } from './ship-probe';
 import { manageServiceWorker } from './service-worker';
+import { pinSafeAreaStrip } from './safe-area';
 import { library, dom as faDom } from '@fortawesome/fontawesome-svg-core';
 import { faLocationDot, faWifi, faBullseye, faMobileAlt, faSatellite, faShip, faAnchor, faUser } from '@fortawesome/free-solid-svg-icons';
 
@@ -568,6 +569,7 @@ async function startApp() {
 // Ahead of startApp, and outside it, so that a stale worker is retired even on a
 // launch where something in startApp throws.
 manageServiceWorker();
+pinSafeAreaStrip();
 startApp();
 
 /**
