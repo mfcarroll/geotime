@@ -566,9 +566,26 @@ async function startApp() {
   renderWorldClocks();
 }
 
+/**
+ * The footer's links, fitted to where the page is running.
+ *
+ * The web links to /privacy, the address people see and share. The apps serve
+ * the site from their bundle, and Capacitor answers any path without an
+ * extension with the app itself, so /privacy there opened GeoTime again rather
+ * than the policy. The bundled file works offline and has its own way back.
+ */
+function linkBundledPages(): void {
+    if (Capacitor.isNativePlatform()) {
+        document.getElementById('privacy-link')?.setAttribute('href', '/privacy.html');
+    }
+    const year = document.getElementById('copyright-year');
+    if (year) year.textContent = String(new Date().getFullYear());
+}
+
 // Ahead of startApp, and outside it, so that a stale worker is retired even on a
 // launch where something in startApp throws.
 manageServiceWorker();
+linkBundledPages();
 pinSafeAreaStrip();
 startApp();
 

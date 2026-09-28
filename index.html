@@ -409,8 +409,13 @@
     </template>
 
     <script type="module" src="/src/main.ts"></script>
+    <!-- /privacy, not /privacy.html: the address people see and share. The apps
+         swap in the bundled file — see linkBundledPages in main.ts. The year is
+         the page's to keep current; the markup holds the year it was written. -->
     <footer class="text-center p-4 text-gray-500 text-sm">
-        <a href="/privacy.html" class="hover:text-gray-400">Privacy Policy</a>
+        <span>&copy; 2025&ndash;<span id="copyright-year">2026</span> <a href="https://matthewcarroll.ca" target="_blank" rel="noopener" class="hover:text-gray-400">Matthew Carroll</a></span>
+        <span class="mx-2" aria-hidden="true">&middot;</span>
+        <a id="privacy-link" href="/privacy" class="hover:text-gray-400">Privacy Policy</a>
     </footer>
   </body>
 </html>
