@@ -16,9 +16,17 @@ takes up to ten.
 
 1. **overview** — local vs device time, GPS, and the timezone map with the GPS
    band in blue and a selected band in gold
-2. **ship-track** — a cruise's wake, the route ahead and its ports
-3. **widget** — the home screen widget
-4. timezone-map, 5. clocks — phone sets only
+2. **people** — the clock list with Mum and Dad on it, Mum's row tapped so her
+   band is lit on the map. The one shot that says what 2.0 is for.
+3. **widget** — the home screen widget, which carries the two people as well
+4. **sharing** — the Sharing card: the name, the exact-timezone switch left
+   off, *How you appear to them*, and the people you follow
+5. **ship-track** — a cruise's wake, the route ahead and its ports
+6. timezone-map, 7. clocks — phone sets only
+
+For 2.0, ship-track gives up its place in the first three to **people**. The
+sharing feature is the reason for the release, and the installation sheet is
+where someone decides whether to read further.
 
 ## Why three iPhone sizes when Apple scales one
 
@@ -46,12 +54,29 @@ npx cap copy ios
 ```
 
 `--mode screenshots` turns on `src/screenshot-seed.ts`, which writes a fixed set
-of cities and one ship into localStorage *if the list is empty*. It is compiled
-out of every other build — verify with:
+of cities, one ship, two followed people and a sharing name into localStorage,
+each *only if it is empty*. It is compiled out of every other build — verify
+with:
 
 ```
-npx vite build && grep -c "Star of the Seas" dist/assets/main-*.js   # expect 0
+npx vite build && grep -cE "Star of the Seas|screenshot-mum" dist/assets/main-*.js   # expect 0
 ```
+
+The two people are one of each row a follower can actually be sent: **Mum** is
+an offset band (UTC+10), which is what every follower gets by default, and
+**Dad** is aboard *Wonder of the Seas*, which is what a sharer with exact
+sharing on sends while at sea. The sharing name is **Sam**, so *How you appear
+to them* shows a person rather than "You".
+
+None of it touches the relay, because a fresh install has no account until it
+shares or redeems a code. **Do not tap *Share your time*, or submit a code
+under *Follow someone*, before the people shots.** Either one creates an
+account, and the next sync removes Mum and Dad, since the relay has never heard
+of them. Opening the Follow panel without submitting is harmless. If it does
+happen, uninstall and reinstall to seed again.
+
+The Sharing card only exists in the apps (there is no web follow in 2.0), so a
+browser preview of this build shows the people rows but not the card.
 
 Then per device: install, set the location, and drive the rest by hand. On iPad
 grant the location prompt first — it appears on a fresh install and blocks the
