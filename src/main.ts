@@ -23,6 +23,7 @@ import { zoneKey, type StoredZone } from './stored-zones';
 import { refreshShipMarkers, startShipMarkerWatch, type PlaceMarkerDetail } from './ship-markers';
 import { installDiagnostics } from './diagnostics';
 import { maybeRunShipProbe } from './ship-probe';
+import { manageServiceWorker } from './service-worker';
 import { library, dom as faDom } from '@fortawesome/fontawesome-svg-core';
 import { faLocationDot, faWifi, faBullseye, faMobileAlt, faSatellite, faShip, faAnchor, faUser } from '@fortawesome/free-solid-svg-icons';
 
@@ -564,6 +565,9 @@ async function startApp() {
   renderWorldClocks();
 }
 
+// Ahead of startApp, and outside it, so that a stale worker is retired even on a
+// launch where something in startApp throws.
+manageServiceWorker();
 startApp();
 
 /**

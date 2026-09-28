@@ -22,6 +22,14 @@ export default defineConfig(({ mode }) => ({
     dropDebugLayers(mode),
     VitePWA({
       registerType: 'autoUpdate',
+      // Registered by src/service-worker.ts instead, which does it on the web
+      // only. Injected, it ran in the native apps too — see that file.
+      injectRegister: null,
+      workbox: {
+        // First in the generated sw.js, so it can stand Workbox down in the
+        // apps. It is also what retires the worker every 1.7.0 install has.
+        importScripts: ['sw-native-guard.js'],
+      },
       includeAssets: ['timezones.topojson', 'cities.json', 'ships.json'],
       manifest: {
         name: 'GeoTime Dashboard',
