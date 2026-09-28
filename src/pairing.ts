@@ -581,9 +581,10 @@ export function initPairing(): void {
     document.addEventListener('gpstimezonefound', refreshSharingCard);
     document.addEventListener('followedpeoplechanged', renderFollowing);
 
-    // Somebody may have redeemed a code since this app was last looked at, and
-    // the sharer should see who without having to mint another one.
-    document.addEventListener('visibilitychange', () => {
-        if (document.visibilityState === 'visible') void refreshFollowers();
-    });
+    // Somebody may have redeemed a code, or deleted their data, since this list
+    // was drawn. It refreshed only on returning to the app, so with the app left
+    // open a follower who had gone stayed listed. Now on every sync — the same
+    // beat as the people you follow: returning to the app, and the five-minute
+    // tick.
+    document.addEventListener('anchorsynced', () => { void refreshFollowers(); });
 }

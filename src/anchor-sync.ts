@@ -231,6 +231,9 @@ async function syncNow(): Promise<void> {
     await pushProfile();
     await pushMyAnchor();
     await refreshFollowing();
+    // For what else is worth refreshing on the same beat — the list of who can
+    // see your time, which lives in pairing.ts and so cannot be called from here.
+    document.dispatchEvent(new CustomEvent('anchorsynced'));
 }
 
 /**
