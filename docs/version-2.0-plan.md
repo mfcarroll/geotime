@@ -354,6 +354,13 @@ icon — and because everything above has to be right first.
 while aboard; widget-side fetch if app-open frequency proves too low; the
 "share back" affordance.
 
+**Known, and left for later** — an in-place reload of the Android app crashes
+it: the WebView runs out of JavaScript memory inside Google Maps about ten
+seconds afterwards. It is in 1.7.0 too, and nothing in the app reloads the page
+any more, so nobody meets it; public/sw-native-guard.js and
+src/service-worker.ts avoid reloading because of it. Worth fixing before
+anything needs a reload again. Found 27 September 2026.
+
 **2.x** — billing, when there is something worth charging for. StoreKit 2 +
 Play Billing on the client; verification in the Worker; the `entitlements`
 table; the server-side gate at share creation. The paywall line chosen from
