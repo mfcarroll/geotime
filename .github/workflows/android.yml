@@ -3,13 +3,35 @@ name: Build Android Release
 on:
   push:
     branches: ["main"] # Triggers when you push to main
-  workflow_dispatch: # Allows you to trigger it manually
+  # Manual runs go to a testing track, so a branch can reach a phone as a
+  # Play-signed build without shipping to everyone. Play re-signs uploads with
+  # the app signing key, which is the only signature App Links verify against —
+  # a debug or locally signed build can never prove them.
+  workflow_dispatch:
+    inputs:
+      track:
+        description: "Play track. Pushes to main always go to production."
+        type: choice
+        options: [internal, alpha, beta, production]
+        default: internal
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      # A choice input is never empty, so this cannot fall through to
+      # production on a manual run.
+      TRACK: ${{ github.event_name == 'workflow_dispatch' && inputs.track || 'production' }}
 
     steps:
+      # Production is what merging to main does. Anywhere else, choosing it is
+      # far more likely a slip than a decision, and it ships at 100%.
+      - name: Refuse production from anywhere but main
+        if: env.TRACK == 'production' && github.ref != 'refs/heads/main'
+        run: |
+          echo "::error::Production releases come from main only; this run is on ${GITHUB_REF_NAME}."
+          exit 1
+
       - name: Checkout source code
         uses: actions/checkout@v4
 
@@ -69,6 +91,6 @@ jobs:
           serviceAccountJsonPlainText: ${{ secrets.PLAY_STORE_JSON }}
           packageName: ca.matthewcarroll.geotime
           releaseFiles: ${{steps.sign_app.outputs.signedReleaseFile}}
-          track: production
+          track: ${{ env.TRACK }}
           status: completed
           whatsNewDirectory: distribution/whatsnew
