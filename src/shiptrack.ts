@@ -35,7 +35,7 @@ import { shipImo } from './ships';
  * will refuse the very request the client is about to make.
  */
 const BASE: string =
-  import.meta.env.VITE_SHIP_TRACK ?? 'https://geotime-api.matthewcarroll.ca/ships';
+  import.meta.env.VITE_SHIP_TRACK ?? 'https://api.geotime.app/ships';
 
 /** One vessel's live position, as the fleet feed reports it. */
 export interface ShipFix {

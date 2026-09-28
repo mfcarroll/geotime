@@ -168,7 +168,7 @@ export async function syncClock() {
     // source would want if there is ever cause for one again.
     const SOURCES = [
       import.meta.env.VITE_UTC_TIME_URL
-        ?? 'https://geotime-api.matthewcarroll.ca/time',
+        ?? 'https://api.geotime.app/time',
     ].filter(Boolean) as string[];
 
     let noted = false;

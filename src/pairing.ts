@@ -68,7 +68,7 @@ import { toast } from './toast';
 import { buildPreviewRow, fillPreviewRow } from './map';
 
 /** Where a follow link points. See the Worker route and the .well-known files. */
-const FOLLOW_LINK_BASE = 'https://geotime-api.matthewcarroll.ca/f';
+const FOLLOW_LINK_BASE = 'https://geotime.app/f';
 
 /** Why a code did not work, for a person who is standing there waiting. */
 const REASONS: Record<string, string> = {

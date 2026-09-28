@@ -125,11 +125,19 @@ Decided while building the alpha, and applied to the three Workers that
 predate it as well as the new one:
 
 ```
-geotime-api.matthewcarroll.ca/time/…    → geotime-utc-time
-                             /rccl/…    → geotime-rccl-proxy
-                             /ships/…   → geotime-ship-track
-                             /anchor/…  → geotime-anchor-share
+api.geotime.app/time/…    → geotime-utc-time
+               /rccl/…    → geotime-rccl-proxy
+               /ships/…   → geotime-ship-track
+               /anchor/…  → geotime-anchor-share
+
+geotime.app/…             → the web app (workers/web)
+           /f/<code>      → follow links, via the gateway
 ```
+
+First built on geotime-api.matthewcarroll.ca, and moved to geotime.app on 28
+September 2026 before anything shipped with it. The follow links moved to the
+site's own name, so a link reads geotime.app/f/… and nobody is sent to an
+address with "api" in it.
 
 **Why now.** These URLs are compiled into binaries that go to the App Store and
 Play, and a shipped build calls whatever it was built with for as long as it is

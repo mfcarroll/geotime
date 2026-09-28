@@ -80,7 +80,7 @@ export interface Environment {
  * degradation rather than a broken one.
  */
 const PROXY_BASE: string =
-  import.meta.env.VITE_RCCL_PROXY ?? 'https://geotime-api.matthewcarroll.ca/rccl';
+  import.meta.env.VITE_RCCL_PROXY ?? 'https://api.geotime.app/rccl';
 
 /** True when this platform could make the requests at all. */
 function platformSupportsShipTime(): boolean {

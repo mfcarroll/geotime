@@ -110,17 +110,19 @@ test('showing a code', async (t) => {
 // What the share sheet sends — keep in step with sendCode() in pairing.ts.
 const message = (name: string) =>
     `${name} wants to share their time with you on GeoTime.\n\n`
-    + 'Tap to follow: https://geotime-api.matthewcarroll.ca/f/AH90M8FX\n\n'
+    + 'Tap to follow: https://geotime.app/f/AH90M8FX\n\n'
     + 'Or open GeoTime, tap "Follow someone" and enter AH90-M8FX.';
 
 test('the code is found in the whole message, not in the hostname', () => {
-    // The old rule took the first eight letters in a row: "matthewc".
     assert.equal(findShareCode(message('Matthew')), 'AH90M8FX');
     assert.equal(findShareCode(message('Christopher')), 'AH90M8FX');
+    // The old rule took the first eight letters in a row, which found "matthewc"
+    // in the link's host before it found the code. Any long enough host would.
+    assert.equal(findShareCode(message('Matthew').replace('geotime.app', 'geotime-api.matthewcarroll.ca')), 'AH90M8FX');
 });
 
 test('the code is found in a link, a printed code, or on its own', () => {
-    assert.equal(findShareCode('https://geotime-api.matthewcarroll.ca/f/AH90-M8FX'), 'AH90M8FX');
+    assert.equal(findShareCode('https://geotime.app/f/AH90-M8FX'), 'AH90M8FX');
     assert.equal(findShareCode('enter ah90-m8fx please'), 'AH90M8FX');
     assert.equal(findShareCode('  AH90 M8FX '), 'AH90M8FX');
 });

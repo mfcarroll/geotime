@@ -37,7 +37,7 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="https"
-                      android:host="geotime-api.matthewcarroll.ca"
+                      android:host="geotime.app"
                       android:pathPrefix="/f/" />
             </intent-filter>
         </activity>

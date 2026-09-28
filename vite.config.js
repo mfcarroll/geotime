@@ -229,10 +229,10 @@ function workerCsp() {
       // entries stay separate because an override can still point one service
       // somewhere else, which is what the shiptest mode does.
       const origins = [
-        env.VITE_RCCL_PROXY ?? 'https://geotime-api.matthewcarroll.ca/rccl',
-        env.VITE_UTC_TIME_URL ?? 'https://geotime-api.matthewcarroll.ca/time',
-        env.VITE_SHIP_TRACK ?? 'https://geotime-api.matthewcarroll.ca/ships',
-        env.VITE_ANCHOR_SHARE ?? 'https://geotime-api.matthewcarroll.ca/anchor',
+        env.VITE_RCCL_PROXY ?? 'https://api.geotime.app/rccl',
+        env.VITE_UTC_TIME_URL ?? 'https://api.geotime.app/time',
+        env.VITE_SHIP_TRACK ?? 'https://api.geotime.app/ships',
+        env.VITE_ANCHOR_SHARE ?? 'https://api.geotime.app/anchor',
         // The onboard stand-in, in a shiptest build only. A browser enforces the
         // CSP where CapacitorHttp does not, so without this the gateway is
         // reachable on a device and blocked in the one place it is quickest to

@@ -40,7 +40,7 @@ const BASE =
     // difference between this being testable against a real relay and being
     // testable only through a browser.
     import.meta.env?.VITE_ANCHOR_SHARE
-    ?? 'https://geotime-api.matthewcarroll.ca/anchor';
+    ?? 'https://api.geotime.app/anchor';
 
 /** One person you follow, as the relay describes them. */
 export interface Followed {

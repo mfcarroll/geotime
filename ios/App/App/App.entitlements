@@ -13,7 +13,7 @@
 	     ID in the developer portal, or signing fails. -->
 	<key>com.apple.developer.associated-domains</key>
 	<array>
-		<string>applinks:geotime-api.matthewcarroll.ca</string>
+		<string>applinks:geotime.app</string>
 	</array>
 </dict>
 </plist>
