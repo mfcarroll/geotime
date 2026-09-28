@@ -1,0 +1,120 @@
+// Deploy: npm run deploy:api-gateway  (from the repo root)
+//
+// Deploy this LAST. Its service bindings name the four Workers behind it, and a
+// binding to a Worker that does not exist yet fails the deploy — which is what
+// `npm run deploy:workers` orders for you.
+//
+// Everything here is declarative on purpose. `custom_domain: true` is what makes
+// the hostname infrastructure-as-code rather than a click: wrangler creates the
+// DNS record and provisions the certificate on deploy, and re-deploying
+// reconciles rather than duplicating. The alternative — a route pattern — needs
+// a proxied DNS record put there by hand first, which is exactly the kind of
+// step that is done once, undocumented, and irreproducible a year later.
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "geotime-api-gateway",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-07",
+  "observability": {
+    "enabled": true,
+    // Every request to every service now passes through here, so this is the
+    // one place with a complete picture. Still small enough to keep all of it.
+    "head_sampling_rate": 1
+  },
+
+  // IF THE VERY FIRST DEPLOY OF THIS WORKER FAILS, RE-RUN IT. Wrangler uploads
+  // the script and then immediately asks the API about its workers.dev
+  // subdomain, and on a brand-new script that second call can reach a node that
+  // has not seen the upload yet — which it reports, confusingly, as
+  // "This Worker does not exist on your account [code: 10007]". The upload has
+  // in fact succeeded; what did not happen is the trigger being attached, so the
+  // hostname resolves and answers 502. A second deploy finds the script and
+  // attaches the route. It only ever happens once, on creation.
+  //
+  // The hostname the 2.0 clients are built against. The Workers behind it keep
+  // their own *.workers.dev names, which is what every 1.7.0 install in the
+  // field is still calling — this is additive, and nothing shipped breaks.
+  "routes": [
+    // The API's name from 2.0 on.
+    {
+      "pattern": "api.geotime.app",
+      "custom_domain": true
+    },
+    // Where 2.0's test builds pointed before geotime.app existed. Nothing in
+    // the stores ever used it, so it can go once no test build does.
+    {
+      "pattern": "geotime-api.matthewcarroll.ca",
+      "custom_domain": true
+    }
+  ],
+
+  // Android App Links: the fingerprint of the certificate Play signs the app
+  // with, which is what a phone checks /.well-known/assetlinks.json against
+  // before it will open a geotime.app/f/ link in the app.
+  //
+  // A PLAIN VAR AND NOT A SECRET, deliberately. This value is served publicly
+  // in assetlinks.json — publishing it is its entire purpose — so treating it
+  // as a secret would hide a public string from the repository and leave the
+  // one piece of this hostname's configuration that cannot be reproduced from
+  // source. It is a fingerprint, not a key.
+  //
+  // It has to be Play's APP SIGNING certificate, not the UPLOAD certificate,
+  // and the two sit next to each other on the same Play Console page — the
+  // upload one got copied here first and was wrong. Play re-signs every
+  // upload, so the phone only ever sees the app signing key.
+  //
+  // Do not read it off the fingerprint list at all: that page has a "Digital
+  // Asset Links JSON" section that emits the whole statement with the right
+  // certificate already in it. Copy from there and there is nothing to pick
+  // wrongly. Nothing on a developer machine can derive this value — the
+  // private key is Google's.
+  "vars": {
+    "ANDROID_CERT_SHA256": "57:A8:75:9D:E6:6D:12:A9:F3:1B:E6:1D:C3:DD:EA:B0:25:C2:0A:2D:5B:27:51:BE:18:FE:CB:39:F7:B6:AA:BD"
+  },
+
+  // Rate limits, declared rather than provisioned: `namespace_id` is a number we
+  // choose, unique within the account, and the platform makes the counter on
+  // first use. Nothing to create, nothing to record afterwards — which is why
+  // this belongs here and not in scripts/provision.mjs.
+  //
+  // Here rather than in the relay because this is the layer that actually has
+  // the client's IP. A service binding hands the Worker behind it a request
+  // whose CF-* headers may or may not survive the hop, and a limiter keyed on
+  // something that might be absent silently degrades into one global counter
+  // for everybody — which is worse than no limiter at all.
+  //
+  // WHAT THIS DOES AND DOES NOT STOP. A minute-window limiter stops runaway
+  // loops, a script pointed at the redeem route, and casual hammering. It does
+  // not by itself protect the account's daily request budget: even 120/min is
+  // 172,800 a day from one address. A determined attacker with addresses to
+  // spare is not in scope for a free tier, and the answer to that day is
+  // Cloudflare's own WAF rules rather than another number in here.
+  "ratelimits": [
+    {
+      "name": "GENERAL",
+      "namespace_id": "1001",
+      // Comfortably above anything a real client does. The app makes a handful
+      // of requests on foreground; the widget refreshes ships on its own
+      // schedule. Anything at two a second is not a person using the app.
+      "simple": { "limit": 120, "period": 60 }
+    },
+    {
+      "name": "SENSITIVE",
+      "namespace_id": "1002",
+      // Minting an identity and spending somebody's code. Both are things a
+      // person does once and a script does forever, and five a minute is more
+      // than a human with a bad phone line will ever need.
+      "simple": { "limit": 5, "period": 60 }
+    }
+  ],
+
+  // Worker-to-Worker, inside Cloudflare's network: no DNS, no TLS handshake, no
+  // second trip off the edge. The names must match the `name` field in each
+  // target's own wrangler.jsonc.
+  "services": [
+    { "binding": "TIME", "service": "geotime-utc-time" },
+    { "binding": "RCCL", "service": "geotime-rccl-proxy" },
+    { "binding": "SHIPS", "service": "geotime-ship-track" },
+    { "binding": "ANCHOR", "service": "geotime-anchor-share" }
+  ]
+}

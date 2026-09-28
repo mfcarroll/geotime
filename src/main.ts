@@ -5,8 +5,9 @@ import './style.css';
 import { Loader } from '@googlemaps/js-api-loader';
 import * as dom from './dom';
 import { addShipClock, loadDebugFleet, migrateStoredTimezones, persistZones, savedZoneByKey, state, syncWidget } from './state';
-import { refreshAnchorChip, refreshMapStyles, initMaps, onLocationError, onLocationSuccess, selectSavedZone, selectShip, selectPlace, setHoveredShip, setHoveredPlace, renderWorldClocks, keepZone, updateUserTimezoneDetails, showLocationUnavailable, loadTimezoneGeoJson, selectAnchor, clearSelection, hoverAnchor, hoverSelected, hoverClockRow } from './map';
+import { refreshAnchorChip, refreshMapStyles, initMaps, onLocationError, onLocationSuccess, selectSavedZone, selectShip, selectPerson, selectPlace, setHoveredShip, setHoveredPlace, renderWorldClocks, keepZone, updateUserTimezoneDetails, showLocationUnavailable, loadTimezoneGeoJson, selectAnchor, clearSelection, hoverAnchor, hoverSelected, hoverClockRow } from './map';
 import { updateAllClocks, syncClock, startClockWatch, getDisplayTimezoneName, startClocks, findTimezoneFromGeoJSON } from './time';
+import { App } from '@capacitor/app';
 import { Capacitor } from '@capacitor/core';
 import { getDeviceTimezone, onDeviceTimezoneChanged } from './widget';
 import { Geolocation, PositionOptions } from '@capacitor/geolocation';
@@ -16,17 +17,21 @@ import { initShipTime } from './rccl';
 import { forgetShip, resolveAllShipClocks, startShipTimeWatch } from './shiptime';
 import { initShipTrack, cachedVoyageFor } from './shiptrack';
 import { portRefsFrom } from './ports';
+import { startAnchorSync, stopFollowing } from './anchor-sync';
+import { followFromLink, initPairing } from './pairing';
 import { zoneKey, type StoredZone } from './stored-zones';
 import { refreshShipMarkers, startShipMarkerWatch, type PlaceMarkerDetail } from './ship-markers';
 import { installDiagnostics } from './diagnostics';
 import { maybeRunShipProbe } from './ship-probe';
+import { manageServiceWorker } from './service-worker';
+import { pinSafeAreaStrip } from './safe-area';
 import { library, dom as faDom } from '@fortawesome/fontawesome-svg-core';
-import { faLocationDot, faWifi, faBullseye, faMobileAlt, faSatellite, faShip, faAnchor } from '@fortawesome/free-solid-svg-icons';
+import { faLocationDot, faWifi, faBullseye, faMobileAlt, faSatellite, faShip, faAnchor, faUser } from '@fortawesome/free-solid-svg-icons';
 
 // Every icon the markup names has to be registered here — the tree-shaken
 // core renders an unregistered one as a placeholder box, which is what the
-// anchor did until it was added.
-library.add(faLocationDot, faWifi, faBullseye, faMobileAlt, faSatellite, faShip, faAnchor);
+// anchor did until it was added, and what faUser did after it.
+library.add(faLocationDot, faWifi, faBullseye, faMobileAlt, faSatellite, faShip, faAnchor, faUser);
 faDom.watch();
 
 const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
@@ -119,6 +124,19 @@ async function startApp() {
       if (added) void resolveAllShipClocks();
     });
   });
+  // Sharing. The card decides for itself whether this build offers it, and
+  // the sync decides for itself whether there is an account to sync — so both
+  // are safe to start unconditionally, and neither touches the network for an
+  // install that has never paired.
+  initPairing();
+  startAnchorSync();
+  watchFollowLinks();
+  // The relay answering is the one thing that adds rows without a tap.
+  document.addEventListener('followedpeoplechanged', () => {
+    renderWorldClocks();
+    updateAllClocks();
+  });
+
   installDiagnostics(dom.deviceTimezoneEl);
 
   // Start watching for location immediately.
@@ -262,6 +280,49 @@ async function startApp() {
   });
 
   /**
+   * Follows somebody from a link, with no code to type.
+   *
+   * The link the share sheet sends is an https URL on our own hostname, claimed
+   * by the app through Associated Domains on iOS and an autoVerify intent
+   * filter on Android — so a tap in a messaging app opens GeoTime here rather
+   * than a browser. Somebody without the app installed gets the Worker's
+   * landing page instead, which shows the code to type in.
+   *
+   * Two arrivals, not one. `appUrlOpen` covers a running app; `getLaunchUrl`
+   * covers the cold start, where the event has already been and gone before any
+   * of this was listening. Missing the second is the classic version of this
+   * bug — it works every time you test it and never on a phone that was closed.
+   */
+  function watchFollowLinks(): void {
+    // ONCE PER LINK, and this is not a nicety. A cold start from a follow link
+    // fires appUrlOpen AND resolves getLaunchUrl with the same URL, so both
+    // listeners below see it — and two redemptions of a single-use code raced
+    // each other through account creation, minted two accounts, and left the
+    // share belonging to whichever one lost the write. Unreachable afterwards,
+    // and the code spent.
+    //
+    // Both listeners still exist because either alone misses a case: the event
+    // does not fire for a cold start, and the launch URL is not re-read when a
+    // running app is handed a new one.
+    const seen = new Set<string>();
+    const follow = (url: string | null | undefined) => {
+      if (!url) return;
+      // Only our own path, and only the last segment. A URL is attacker-supplied
+      // input even when it arrives through a mechanism only we can claim.
+      const code = /\/f\/([0-9A-Za-z-]{1,32})\/?$/.exec(url)?.[1];
+      if (!code || seen.has(code)) return;
+      seen.add(code);
+      void followFromLink(code);
+    };
+
+    App.addListener('appUrlOpen', (event) => follow(event.url))
+      .catch((err) => console.warn('appUrlOpen listener failed:', err));
+    App.getLaunchUrl()
+      .then((launch) => follow(launch?.url))
+      .catch(() => { /* no launch URL is the ordinary case */ });
+  }
+
+  /**
    * Brings the map back into view.
    *
    * On a phone the World Clock list is below the fold, so picking a row framed
@@ -275,13 +336,26 @@ async function startApp() {
    * learn. Going every time is the predictable thing, and where the map has
    * not moved this costs a scroll of nothing.
    *
-   * The MAP's own top edge, not the card's. Taking the card in meant taking
-   * its header too, which is further than the ask: the map is the thing being
-   * looked at, and the cards above it stay a scroll away rather than costing
-   * every trip a header's worth of overshoot.
+   * The CARD's top edge, not the map's own.
+   *
+   * It was the map's, on the argument that the map is the thing being looked at
+   * and its header is overshoot. The header is not the problem with that; the
+   * detail cards are. They sit between the header and the map, and stopping at
+   * the map put them ABOVE the viewport by exactly their own height — so the
+   * status bar landed across the middle of them, the anchor card's clock digits
+   * rendering behind the system clock. A thing sliced horizontally reads as
+   * broken in a way a thing merely scrolled past does not.
+   *
+   * Taking the whole card fixes it by having nothing left half-shown, and costs
+   * a header's worth of scroll — which turns out to be worth paying, because
+   * those detail cards name what was just picked and are the second thing you
+   * look at after the map itself.
+   *
+   * Landing it clear of the notch is scroll-margin-top's job, in style.css,
+   * where env(safe-area-inset-top) can be read.
    */
   function revealMap(): void {
-    document.getElementById('timezone-map')?.scrollIntoView({
+    document.getElementById('timezone-map-card')?.scrollIntoView({
       behavior: window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
         ? 'auto' : 'smooth',
       block: 'start',
@@ -337,6 +411,11 @@ async function startApp() {
       const key = (removeBtn as HTMLElement).dataset.clockTarget!;
       if (key.startsWith('ship:')) {
         forgetShip(key.slice('ship:'.length));
+      } else if (key.startsWith('person:')) {
+        // Not awaited: the row is already gone by the time this resolves, and
+        // the relay half retries itself on the next foreground until it lands.
+        // See stopFollowing, which is where all three steps of that live.
+        void stopFollowing(key.slice('person:'.length));
       } else {
         // By place, so removing Tampa leaves New York alone.
         persistZones(state.savedZones.filter((zone) => zoneKey(zone) !== key));
@@ -362,6 +441,9 @@ async function startApp() {
         // before the key reaches anything that stores or resolves it.
         if (key.startsWith('ship:')) {
             selectShip(key.slice('ship:'.length));
+        } else if (key.startsWith('person:')) {
+            // Their band, never their zone — see selectPerson.
+            selectPerson(key.slice('person:'.length));
         } else {
             // The row's own record, so a port row selects the port and a city
             // row does not answer with the name of its zone.
@@ -484,6 +566,27 @@ async function startApp() {
   renderWorldClocks();
 }
 
+/**
+ * The footer's links, fitted to where the page is running.
+ *
+ * The web links to /privacy, the address people see and share. The apps serve
+ * the site from their bundle, and Capacitor answers any path without an
+ * extension with the app itself, so /privacy there opened GeoTime again rather
+ * than the policy. The bundled file works offline and has its own way back.
+ */
+function linkBundledPages(): void {
+    if (Capacitor.isNativePlatform()) {
+        document.getElementById('privacy-link')?.setAttribute('href', '/privacy.html');
+    }
+    const year = document.getElementById('copyright-year');
+    if (year) year.textContent = String(new Date().getFullYear());
+}
+
+// Ahead of startApp, and outside it, so that a stale worker is retired even on a
+// launch where something in startApp throws.
+manageServiceWorker();
+linkBundledPages();
+pinSafeAreaStrip();
 startApp();
 
 /**

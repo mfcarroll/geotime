@@ -4,7 +4,7 @@ import * as dom from './dom';
 import { aboardShip, state } from './state';
 import { msUntilNextSecond, serverClockOffset, type ServerTimeReading } from './clock-offset';
 import { getDisplayTimezoneName, isValidTimezone } from './utils';
-import { clockKey, fixedOffsetWeekday, formatFixedOffsetDate, formatFixedOffsetTime, isUnresolved, visibleClocks } from './clocks';
+import { anchorOffset, clockKey, clockOffset, clockZone, fixedOffsetWeekday, formatFixedOffsetDate, formatFixedOffsetTime, isUnresolved, visibleClocks } from './clocks';
 import { fitSecondLines, type SecondLineRow } from './second-line';
 import { shipKey } from './ships';
 import { isUnresolvable } from './shiptime';
@@ -158,17 +158,17 @@ export function startClockWatch(): void {
 
 export async function syncClock() {
   try {
-    // Cloudflare Worker (workers/utc-time), with the original Cloud Run
-    // function as a fallback. Both return { dateTime: <ISO 8601> }.
+    // workers/utc-time, behind the API gateway. Returns { dateTime: <ISO 8601> }.
     //
-    // The fallback is a migration aid, not a permanent arrangement: the Cloud
-    // Run function was created in the console with no source control, and the
-    // point of the Worker is to retire it. Drop the second URL once a release
-    // has shipped on the first.
+    // A list of one, and kept as a list. It held the original Cloud Run function
+    // as a fallback while the Worker was unproven — a migration aid its own
+    // comment said to retire once a release had shipped on the Worker, which
+    // 1.7.0 did. The shape stays because the loop below is the useful part: it
+    // tries each source in turn and gives up quietly, which is what a second
+    // source would want if there is ever cause for one again.
     const SOURCES = [
       import.meta.env.VITE_UTC_TIME_URL
-        ?? 'https://geotime-utc-time.matthew-carroll.workers.dev/',
-      'https://get-utc-time-100547663673.us-west1.run.app/',
+        ?? 'https://api.geotime.app/time',
     ].filter(Boolean) as string[];
 
     let noted = false;
@@ -232,6 +232,24 @@ function showDateWhenItDiffers(el: HTMLElement, date: string, groundDate: string
   el.classList.toggle('hidden', !differs);
 }
 
+/**
+ * Things that want redrawing on the same tick the clocks are.
+ *
+ * One registration point rather than a second interval. The sharing card's
+ * preview row is a clock like any other and should move when the others do —
+ * a preview whose time drifts a minute behind the list it is imitating is a
+ * preview nobody trusts.
+ *
+ * Corrected time is passed through rather than read again, for the reason
+ * updateAllClocks takes one reading: two clocks drawn from two readings can
+ * differ by a second that was never real.
+ */
+const tickHooks: Array<(correctedTime: Date) => void> = [];
+
+export function onClockTick(hook: (correctedTime: Date) => void): void {
+  tickHooks.push(hook);
+}
+
 export function updateAllClocks() {
   // ONE reading, for everything this paint draws. Both stamps come off the same
   // millisecond, so the Local and Device cards can now differ only by the
@@ -274,10 +292,18 @@ export function updateAllClocks() {
       // "Finding" only while it is still plausibly being found. Once a request
       // has come back with nothing, saying so is the honest option — that state
       // can last a whole cruise if the ship is unreachable.
+      //
+      // A PERSON in this state is a third thing again: nothing is being looked
+      // up and nothing has failed. They paired and have not opened their app
+      // since, so there is no time to find and nobody to ask — the sub-label
+      // already says "Not shared yet", and this side of the row should not
+      // claim a search is under way on their behalf.
       el.querySelector('.date-diff')!.textContent =
-        entry.kind === 'ship' && isUnresolvable(clockKey(entry))
-          ? 'Ship time unavailable'
-          : 'Finding ship time…';
+        entry.kind === 'person'
+          ? 'Waiting for them'
+          : entry.kind === 'ship' && isUnresolvable(clockKey(entry))
+            ? 'Ship time unavailable'
+            : 'Finding ship time…';
       return;
     }
 
@@ -286,14 +312,24 @@ export function updateAllClocks() {
     let dayFull: string;
     let timeDiff: string;
 
-    if (entry.kind === 'ship') {
-      const offset = entry.ship.offsetHours as number;
+    // A row draws its clock from a ZONE or from a fixed OFFSET, and which of
+    // the two it is is not the same question as what kind of row it is. A ship
+    // is always an offset and a saved place always a zone — but a person is
+    // either, depending on whether they are ashore, so asking clockZone is what
+    // keeps all three cases in two branches.
+    const tz = clockZone(entry);
+    if (tz === null) {
+      const offset = clockOffset(entry);
       timeString = formatFixedOffsetTime(offset, { hour: 'numeric', minute: '2-digit' }, correctedTime);
       dayShort = fixedOffsetWeekday(offset, 'short', correctedTime);
       dayFull = fixedOffsetWeekday(offset, 'long', correctedTime);
-      timeDiff = relativeTextForShip(entry.ship as { brand: string; code: string; offsetHours: number });
+      timeDiff = entry.kind === 'ship'
+        // A vessel can be the one underfoot, which reads "Ship time" rather
+        // than "+0 hrs". A person aboard one never is: they are somewhere else
+        // by definition, which is the entire reason you are following them.
+        ? relativeTextForShip(entry.ship as { brand: string; code: string; offsetHours: number })
+        : formatOffsetDiff(offset - anchorOffsetHours());
     } else {
-      const tz = entry.zone.tz;
       timeString = getFormattedTime(tz, { hour: 'numeric', minute: '2-digit' }, correctedTime);
       dayShort = correctedTime.toLocaleDateString('en-US', { timeZone: tz, weekday: 'short' });
       dayFull = correctedTime.toLocaleDateString('en-US', { timeZone: tz, weekday: 'long' });
@@ -320,6 +356,13 @@ export function updateAllClocks() {
     second: '2-digit'
   });
   dom.deviceTimezoneEl.textContent = getDisplayTimezoneName(deviceTz);
+
+  // Last, and never allowed to take the clocks down with it: a hook is a
+  // secondary surface, and a throw in one would stop every row on the page
+  // updating for the rest of the session.
+  for (const hook of tickHooks) {
+    try { hook(correctedTime); } catch (err) { console.warn('clock tick hook failed:', err); }
+  }
   // The date, but only when the device is on a different day from the ground.
   // Crossing a date line or sitting near midnight is exactly when "8:15" on two
   // cards means two different things, and a bare time cannot say so.
@@ -451,6 +494,17 @@ export function mapSelection(): { tzid: string | null; offset: number | null } {
     // No offset until one resolves — otherwise an unresolved ship reads as 0
     // and lights up UTC.
     return { tzid: null, offset: ship?.offsetHours ?? null };
+  }
+
+  if (state.selectedPersonKey) {
+    const person = state.followedPeople.find((p) => p.shareId === state.selectedPersonKey);
+    // A BAND, and never a zone — the null tzid is the whole point, not an
+    // accident of not having one to hand. Ashore this app knows their zone
+    // exactly and declines to draw it: gold across every zone at their offset
+    // says "somewhere at this time", where a gold segment would say Vancouver
+    // and not Seattle. That line is the one the whole feature is built on, and
+    // this is the one place it could quietly be crossed.
+    return { tzid: null, offset: person?.anchor ? anchorOffset(person.anchor) : null };
   }
 
   // The GPS zone is shown as "selected" (gold) while it is the active choice.

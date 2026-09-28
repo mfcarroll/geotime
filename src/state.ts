@@ -1,11 +1,18 @@
 // src/state.ts
 
+import { migrateFollowedPeople, type FollowedPerson } from './people';
 import { migrateStoredTimezones, zoneKey, type StoredZone } from './stored-zones';
 export { migrateStoredTimezones, type StoredZone };
+export type { FollowedPerson };
 import { syncWidgetTimezones } from './widget';
 import { loadShipRoster, newShipClock, shipKey, type ShipClock, type ShipRef } from './ships';
 import type { DeviceFix } from './ship-position';
 import { debugFlag } from './utils';
+import { seedForScreenshots } from './screenshot-seed';
+
+// Before the state below reads localStorage, and only in a screenshot build —
+// see screenshot-seed.ts, which compiles to nothing in a shipped app.
+seedForScreenshots();
 
 export interface AppState {
     timeOffset: number;
@@ -49,6 +56,38 @@ export interface AppState {
      */
     shipClocks: ShipClock[];
     /**
+     * What you call yourself to the people you share with.
+     *
+     * The only thing about you that this app ever sends anywhere by name, and
+     * it is sent because the alternative is worse: a row arriving on somebody's
+     * phone with nothing on it but a clock. Whatever they end up calling you is
+     * then theirs to choose.
+     *
+     * Null until asked for, which is the first time somebody shares.
+     */
+    shareName: string | null;
+    /**
+     * Whether followers are told WHICH timezone, or only how far from UTC.
+     *
+     * False by default, and the default is the point: an offset says what time
+     * it is for you and nothing about where on earth you are. True hands over
+     * the zone id, which is a region rather than a place but is still more than
+     * nothing — so it is a choice, made once, applying to everybody.
+     *
+     * Enforced at the relay rather than here; see anchorAsSeen. This copy is
+     * what the switch on screen reads and what gets pushed.
+     */
+    shareExact: boolean;
+    /**
+     * People whose anchor is shared with this device.
+     *
+     * Held here, not fetched on demand, for the reason the fleet cache is: a
+     * launch with no signal should show the rows it had, aged, rather than an
+     * empty list. Half of each record is yours — the name — and never leaves
+     * the device; see people.ts.
+     */
+    followedPeople: FollowedPerson[];
+    /**
      * The ship we believe the user is currently on, by "brand/code" key.
      *
      * Persisted, and mutated ONLY by a definite gateway marker. Absence of a
@@ -82,6 +121,16 @@ export interface AppState {
     // (America/Vancouver) with a band's representative zone.
     hoveredTzid: string | null;
     /**
+     * The BAND the pointer is over, when there is one without a zone to name.
+     *
+     * Ordinarily it is just the hovered zone's own band and moves with it. The
+     * case it exists for is a followed person: their band should light and
+     * their zone must not be named, because the app knows they are somewhere at
+     * UTC−8 and deliberately declines to say Vancouver or Seattle. See
+     * resolveZoneStyle, where an outline is the thing that names one zone.
+     */
+    hoveredOffset: number | null;
+    /**
      * The hull the pointer is over, beside the zone it is over.
      *
      * Here rather than in map.ts because the marker layer has to style itself from
@@ -90,6 +139,14 @@ export interface AppState {
      */
     hoveredShipKey: string | null;
     selectedTzid: string | null;
+    /**
+     * The followed person whose band is on the map, by share id.
+     *
+     * A key rather than the record, so it cannot go stale against the list the
+     * relay keeps rewriting underneath it. Mutually exclusive with every other
+     * selection, as they all are with each other.
+     */
+    selectedPersonKey: string | null;
     /**
      * A place picked on the map but not kept, shown as one extra row with a pin.
      *
@@ -181,6 +238,9 @@ export const state: AppState = {
     localPlaceName: localStorage.getItem('localPlaceName') || null,
     savedZones: stored,
     shipClocks: loadStoredShips(),
+    followedPeople: loadFollowedPeople(),
+    shareName: localStorage.getItem('shareName') || null,
+    shareExact: localStorage.getItem('shareExact') === '1',
     aboardShipKey: localStorage.getItem('aboardShipKey') || null,
     clocksInterval: null,
     locationMap: null,
@@ -195,8 +255,10 @@ export const state: AppState = {
     geoJsonData: null,
     geoJsonLoaded: false,
     hoveredTzid: null,
+    hoveredOffset: null,
     hoveredShipKey: null,
     selectedTzid: null,
+    selectedPersonKey: null,
     temporaryZone: null,
     gpsTimezoneSelected: false,
     selectedShipKey: null,
@@ -218,6 +280,7 @@ export function syncWidget(): void {
         localTimezone: state.localTimezone,
         localPlaceName: state.localPlaceName,
         ships: state.shipClocks,
+        people: state.followedPeople,
         aboardShipKey: state.aboardShipKey,
     });
 }
@@ -277,6 +340,53 @@ export async function loadDebugFleet(): Promise<boolean> {
     announceShipClocks();
     // Whether the caller now has ships that have never been asked the time.
     return true;
+}
+
+function loadFollowedPeople(): FollowedPerson[] {
+    try {
+        return migrateFollowedPeople(JSON.parse(localStorage.getItem('followedPeople') || '[]'));
+    } catch {
+        return [];
+    }
+}
+
+/**
+ * Single write path for the followed list. Mirrors persistShipClocks.
+ *
+ * Rebuilt through the migration on the way out as well as in, so that whatever
+ * is written is exactly what will be read back — the same symmetry persistZones
+ * keeps, and the thing that stops a field being added on one side only.
+ */
+export function persistFollowedPeople(people: FollowedPerson[]): void {
+    state.followedPeople = migrateFollowedPeople(people);
+    localStorage.setItem('followedPeople', JSON.stringify(state.followedPeople));
+    syncWidget();
+    // Here rather than at the call sites, because unlike the ship list this one
+    // changes without anybody touching the screen: the relay answering is a
+    // membership change nobody asked for, and every writer would otherwise have
+    // to remember to say so.
+    document.dispatchEvent(new CustomEvent('followedpeoplechanged'));
+}
+
+/**
+ * Single write path for the two sharing preferences.
+ *
+ * Local first and unconditionally, so the switch works before anybody has an
+ * account and the answer survives a relaunch with no signal. Getting it to the
+ * relay is pushProfile's job in anchor-sync.ts — separate because one of these
+ * is a fact about this device and the other is a request over a network, and
+ * the first must not wait on the second.
+ */
+export function setSharePrefs(prefs: { name?: string | null; exact?: boolean }): void {
+    if (prefs.name !== undefined) {
+        state.shareName = prefs.name?.trim() || null;
+        if (state.shareName) localStorage.setItem('shareName', state.shareName);
+        else localStorage.removeItem('shareName');
+    }
+    if (prefs.exact !== undefined) {
+        state.shareExact = prefs.exact;
+        localStorage.setItem('shareExact', prefs.exact ? '1' : '0');
+    }
 }
 
 /** Single write path for the ship list. Mirrors persistZones. */

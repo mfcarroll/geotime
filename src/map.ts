@@ -1,15 +1,16 @@
 // src/map.ts
 
 import * as dom from './dom';
+import type { FollowedPerson } from './people';
 import { aboardShip, addSavedZone, state, persistZones, savedZoneByKey, setLocalPlaceName, syncWidget, whenMapReady } from './state';
-import { timezoneForCoordinates, findTimezoneFromGeoJSON, mapSelection, zoneForCoordinates, startClocks, relativeTextForZone, relativeTextForShip, getFormattedTime, getUtcOffset, getDisplayTimezoneName, updateAllClocks, formatOffsetDiff } from './time';
+import { timezoneForCoordinates, findTimezoneFromGeoJSON, mapSelection, zoneForCoordinates, startClocks, relativeTextForZone, relativeTextForShip, getFormattedTime, getUtcOffset, getDisplayTimezoneName, updateAllClocks, formatOffsetDiff, anchorOffsetHours, correctedNow } from './time';
 import { locationMapStyles, worldTimezoneMapStyles } from './map-styles';
 import { debugFlag, distance, formatAccuracy, fold } from './utils';
 import { loadCityIndex, nearestPlace } from './cities';
 import { feature as topoFeature } from 'topojson-client';
 import { resolveZoneStyle } from './map-highlight';
 import { flyTo, flyToBox } from './map-fly';
-import { clockKey, clockLabel, clockSubLabel, formatFixedOffsetTime, visibleClocks, type ClockEntry } from './clocks';
+import { anchorOffset, clockKey, clockLabel, clockOffset, clockSubLabel, clockZone, fixedOffsetWeekday, formatFixedOffsetTime, visibleClocks, type ClockEntry } from './clocks';
 import { shipKey, type ShipClock } from './ships';
 import { cachedVoyageFor, voyageForShip, type ShipPort, type ShipVoyage } from './shiptrack';
 import { clearShipChart, drawShipChart, fitToShip, refreshPlaceMarkers, refreshShipMarkers, type PlaceMarkerDetail } from './ship-markers';
@@ -287,6 +288,7 @@ function selectZone(picked: StoredZone | null) {
     // any port — a port is a point inside a zone, so a zone selection is a
     // strictly coarser answer to the same question.
     state.selectedShipKey = null;
+    state.selectedPersonKey = null;
     state.selectedPlace = null;
 
     const isGpsTz = newTzid === state.gpsTzid;
@@ -410,6 +412,7 @@ export function clearSelection(): void {
         return;
     }
     if (state.selectedShipKey) { selectShip(state.selectedShipKey); return; }
+    if (state.selectedPersonKey) { selectPerson(state.selectedPersonKey); return; }
     // Every zone selection records itself here, saved row or transient pick, so
     // handing it straight back is what reads as a second tap.
     if (state.temporaryZone) selectZone(state.temporaryZone);
@@ -475,7 +478,19 @@ export async function selectAnchor(): Promise<void> {
  * one. Nothing here is reachable on a phone.
  */
 export function hoverSelected(on: boolean): void {
-    hoverBand(on ? state.selectedPlace?.tzid ?? state.selectedTzid : null);
+    if (!on) { setHoveredBand(null); return; }
+
+    // A person's card lights their BAND with no zone named in it, the same line
+    // their row and their selection draw. Pointing at the card is the cheapest
+    // gesture in the app and would have been the cheapest way to find out what
+    // the other two refuse to say.
+    const anchor = state.selectedPersonKey
+        ? followedPersonBy(state.selectedPersonKey)?.anchor ?? null
+        : null;
+    if (anchor?.kind === 'zone') { hoverBand(anchor.tz); return; }
+    if (anchor) { setHoveredBand(anchorOffset(anchor)); return; }
+
+    hoverBand(state.selectedPlace?.tzid ?? state.selectedTzid);
 }
 
 /** The same, for the anchor: where you are, or the ship you are on. */
@@ -510,6 +525,17 @@ export function hoverClockRow(key: string | null): void {
     }
 
     setHoveredShip(null);
+
+    // A person lights their BAND with no zone named inside it — the same line
+    // selectPerson draws, held on the cheaper path too, since a pointer resting
+    // on a row would otherwise outline the zone a tap refuses to.
+    if (key.startsWith('person:')) {
+        const anchor = followedPersonBy(key.slice('person:'.length))?.anchor ?? null;
+        if (anchor?.kind === 'zone') hoverBand(anchor.tz);
+        else setHoveredBand(anchor ? anchorOffset(anchor) : null);
+        return;
+    }
+
     const zone = savedZoneByKey(key)
         ?? (state.temporaryZone && zoneKey(state.temporaryZone) === key
                 ? state.temporaryZone : null);
@@ -591,6 +617,7 @@ export function selectShip(key: string): void {
     if (!isDeselecting) {
         state.selectedTzid = null;
         state.temporaryZone = null;
+        state.selectedPersonKey = null;
         if (state.gpsTimezoneSelected) {
             state.gpsTimezoneSelected = false;
             document.dispatchEvent(
@@ -630,6 +657,111 @@ export function selectShip(key: string): void {
         if (state.selectedShipKey === key) setShipVoyageLine(resolved, key);
     }).catch(() => {});
 }
+
+/**
+ * Puts a followed person's time on the map.
+ *
+ * A BAND, never a zone. This app knows exactly which zone somebody ashore is
+ * keeping — it is what crossed the wire — and deliberately declines to draw it:
+ * gold across every zone at their offset says "somewhere at this time", where a
+ * gold segment would say Vancouver and not Seattle. The whole feature is built
+ * on sharing what time it is for someone rather than where they are, and the
+ * map is the one surface where that line could be crossed without anybody
+ * noticing. See mapSelection, which returns a null tzid here on purpose.
+ *
+ * Aboard is different, and the difference is theirs to make: being on a named
+ * ship is already what their row says, because a crew-set clock cannot be
+ * expressed any other way. So a ship this device also tracks gets her whole
+ * treatment — route, ports, hull — and nothing is given away that the row was
+ * not already giving.
+ */
+/** The followed row a `person:` key names, if it is still on the list. */
+function followedPersonBy(shareId: string): FollowedPerson | undefined {
+    return state.followedPeople.find((person) => person.shareId === shareId);
+}
+
+export function selectPerson(shareId: string): void {
+    const person = followedPersonBy(shareId);
+    // Paired but never pushed. There is no time to show and so nothing to point
+    // at; the row already says "Not shared yet" and the map should not flinch.
+    if (!person?.anchor) return;
+
+    // Her own row's behaviour, if she is a ship we know. A vessel we do not
+    // track has no route to draw and no hull to light, so she falls through to
+    // the band — which is still the honest answer to what time it is aboard.
+    if (person.anchor.kind === 'ship') {
+        const ship = state.shipClocks.find((s) => s.name === (person.anchor as { name: string }).name);
+        if (ship) { selectShip(shipKey(ship)); return; }
+    }
+
+    const isDeselecting = state.selectedPersonKey === shareId;
+
+    // One selection at a time, the way every other selector here does it.
+    state.selectedShipKey = null;
+    state.selectedPlace = null;
+    state.selectedTzid = null;
+    state.temporaryZone = null;
+    if (state.gpsTimezoneSelected) {
+        state.gpsTimezoneSelected = false;
+        document.dispatchEvent(
+            new CustomEvent('gpstimezoneSelectionChanged', { detail: { selected: false } }));
+    }
+    state.selectedPersonKey = isDeselecting ? null : shareId;
+
+    updateShipCard(null);
+    updatePersonCard(isDeselecting ? null : person);
+    resetShipChart();
+    if (isTouchDevice) setHoveredBand(null);
+    refreshMapStyles();
+    refreshShipMarkers();
+    refreshPlaceMarkers();
+    document.dispatchEvent(new CustomEvent('temporarytimezonechanged'));
+
+    if (isDeselecting) return;
+
+    // How close the map is allowed to get is THEIR decision, taken once in
+    // their own app and carried by the shape of what arrives here: a zone id
+    // means they ticked "share my exact timezone", and a bare offset means they
+    // did not. The paint and the hover read the same field, so all three agree
+    // without anybody passing a flag around.
+    if (person.anchor.kind === 'zone') frameZone(person.anchor.tz);
+    else frameBand(anchorOffset(person.anchor));
+}
+
+/**
+ * Brings a whole band into view.
+ *
+ * The band IS the answer, so the band is what gets framed. Framing their zone
+ * instead would hand back, in the camera, precisely what the paint was careful
+ * not to say — a map centred on British Columbia has named British Columbia
+ * whatever colour the polygons are.
+ *
+ * Ocean zones are left out of the bounds. An Etc/GMT stripe runs the width of
+ * an ocean and pole to pole, and including one would zoom the map out to
+ * roughly nothing on behalf of water nobody is standing on.
+ */
+function frameBand(offset: number): void {
+    const features = (featuresByOffset.get(offset) ?? [])
+        .filter((f) => !isUnlocatedZone(f.getProperty('tzid') as string));
+    if (features.length === 0) return;
+
+    const bounds = new google.maps.LatLngBounds();
+    for (const feature of features) {
+        feature.getGeometry()?.forEachLatLng((latLng) => bounds.extend(latLng));
+    }
+    if (bounds.isEmpty()) return;
+
+    whenMapReady((map) => flyToBox(map, bounds, BAND_PADDING));
+}
+
+/**
+ * Room around a framed band.
+ *
+ * Wider than a place's, because a band is tall and thin and a tight fit would
+ * pin it to the edges of a phone with nothing either side to say where in the
+ * world it is.
+ */
+const BAND_PADDING = 48;
 
 /** The chart currently drawn on the aboard ship's behalf, if any. */
 let aboardChartKey: string | null = null;
@@ -799,6 +931,7 @@ export function selectPlace(detail: PlaceMarkerDetail, reveal = false): void {
         // resetShipChart hands it straight back, because a ship underfoot was
         // never a selection to begin with.
         state.selectedShipKey = null;
+        state.selectedPersonKey = null;
         updateShipCard(null);
         resetShipChart();
         paintHoverCard();
@@ -854,6 +987,10 @@ export function selectPlace(detail: PlaceMarkerDetail, reveal = false): void {
         state.selectedShipKey = null;
         resetShipChart();
     }
+    // A place is a place; nobody's band survives it. Unconditional where the
+    // ship's clear is not, because a person is never the context for a port the
+    // way a vessel calling there is.
+    state.selectedPersonKey = null;
     const framed = framedCruiseFor(detail);
 
     // Reached from the search box rather than from the map, the map is wherever
@@ -1022,6 +1159,36 @@ function updateShipCard(ship: ShipClock | null): void {
     dom.selectedTimezoneNameEl.textContent = ship.name;
     const value = shipCardValue(ship);
     setCardValue(dom.selectedTimezoneOffsetEl, value.text, value.mono);
+    dom.selectedTimezoneDetailsEl.classList.remove('hidden');
+}
+
+/**
+ * Names the selected person on the map's detail card, or hides it.
+ *
+ * The same card a zone and a ship use, because it already means "the thing you
+ * picked" and a person is a thing you picked. Without it the gold band over
+ * India sits there unlabelled, which is the one reading of it that IS
+ * misleading: a band with nobody's name on it looks like a place.
+ *
+ * Their name and their offset, both of which their row already carries. The
+ * card is deliberately no more specific than the paint underneath it — no
+ * town, no zone — so scrolling up to the map cannot tell you something the
+ * list would not.
+ */
+function updatePersonCard(person: FollowedPerson | null): void {
+    if (!person?.anchor) {
+        updateCard(
+            dom.selectedTimezoneDetailsEl, dom.selectedTimezoneNameEl,
+            dom.selectedTimezoneOffsetEl, null, 'offset'
+        );
+        setShipVoyageLine(null, null);
+        return;
+    }
+    setShipVoyageLine(null, null);
+
+    dom.selectedTimezoneNameEl.textContent = person.name;
+    setCardValue(dom.selectedTimezoneOffsetEl,
+                 formatOffsetDiff(anchorOffset(person.anchor) - anchorOffsetHours()), true);
     dom.selectedTimezoneDetailsEl.classList.remove('hidden');
 }
 
@@ -1529,11 +1696,6 @@ function indexFeaturesByOffset() {
   });
 }
 
-function bandOf(tzid: string | null): google.maps.Data.Feature[] {
-  if (!tzid) return [];
-  return featuresByOffset.get(getUtcOffset(tzid)) ?? [];
-}
-
 /**
  * The zone id the gold *segment* belongs to, and the offset the gold *band*
  * covers. A ship has the second without the first.
@@ -1574,11 +1736,35 @@ export function refreshMapStyles() {
  * setStyle across every feature on every mouse move.
  */
 function setHoveredZone(tzid: string | null) {
-  if (!state.timezoneMap || state.hoveredTzid === tzid) return;
+  setHovered(tzid, tzid ? getUtcOffset(tzid) : null);
+}
 
-  const touched = new Set([...bandOf(state.hoveredTzid), ...bandOf(tzid)]);
+/**
+ * Lights a band with no zone named inside it.
+ *
+ * What a followed person's row does. Their band is the answer; which zone
+ * within it is not one this app gives, and an outline would give it — see
+ * resolveZoneStyle.
+ */
+function setHoveredBand(offset: number | null) {
+  setHovered(null, offset);
+}
+
+function setHovered(tzid: string | null, offset: number | null) {
+  if (!state.timezoneMap) return;
+  if (state.hoveredTzid === tzid && state.hoveredOffset === offset) return;
+
+  // Keyed on the OFFSET on both sides, because the band leaving and the band
+  // arriving are what need repainting and a tzid is only ever a way of naming
+  // one of them.
+  const touched = new Set([...featuresAt(state.hoveredOffset), ...featuresAt(offset)]);
   state.hoveredTzid = tzid;
+  state.hoveredOffset = offset;
   for (const f of touched) state.timezoneMap.data.overrideStyle(f, styleFor(f));
+}
+
+function featuresAt(offset: number | null): google.maps.Data.Feature[] {
+  return offset === null ? [] : featuresByOffset.get(offset) ?? [];
 }
 
 export async function loadTimezoneGeoJson() {
@@ -1842,6 +2028,53 @@ export function renderWorldClocks() {
     // narrower than the one it will actually sit beside.
 }
 
+/**
+ * A clock row built to be looked at rather than used.
+ *
+ * The sharing card shows you your own row as your followers will see it, and
+ * the only way to be sure that picture is honest is for it to BE the row —
+ * same template, same label and sub-label functions, same person mark. A
+ * hand-drawn approximation would drift from the real thing exactly when
+ * somebody was relying on it to understand what they are sharing.
+ *
+ * What it is not is a control: the clock key goes, so the per-second updater
+ * cannot find it and try to treat it as a real row, and the buttons go with the
+ * padding that was reserved for them.
+ */
+export function buildPreviewRow(entry: ClockEntry): HTMLElement {
+    const row = createClockElement(entry);
+    delete row.dataset.clockKey;
+    row.querySelectorAll('button').forEach((button) => button.remove());
+    row.classList.remove('pr-10');
+    return row;
+}
+
+/**
+ * Puts the time into a preview row, on the same tick the real ones move.
+ *
+ * The right-hand column carries the WEEKDAY rather than a difference, because
+ * a difference is measured from the reader's own clock and a preview has no
+ * reader: "+3 hrs" would be true only for somebody who happens to be three
+ * hours behind you. The day is true for everybody.
+ */
+export function fillPreviewRow(row: HTMLElement, entry: ClockEntry | null): void {
+    if (!entry) return;
+
+    const at = correctedNow();
+    const tz = clockZone(entry);
+    const offset = clockOffset(entry);
+
+    row.querySelector('.time')!.textContent = tz
+        ? getFormattedTime(tz, { hour: 'numeric', minute: '2-digit' }, at)
+        : formatFixedOffsetTime(offset, { hour: 'numeric', minute: '2-digit' }, at);
+    row.querySelector('.date-diff')!.textContent = tz
+        ? at.toLocaleDateString('en-US', { timeZone: tz, weekday: 'short' })
+        : fixedOffsetWeekday(offset, 'short', at);
+    // Re-read every tick rather than once: the switch can move while this row
+    // is on screen, and the second line appearing IS the feedback.
+    row.querySelector('.region')!.textContent = clockSubLabel(entry);
+}
+
 function createClockElement(entry: ClockEntry): HTMLElement {
     const template = dom.worldClockTemplate;
     const clone = template.content.cloneNode(true) as DocumentFragment;
@@ -1868,6 +2101,12 @@ function createClockElement(entry: ClockEntry): HTMLElement {
         && shipKey(entry.ship) === state.selectedShipKey
         && !state.selectedPlace;
 
+    // A person's band is a selection like any other, so their row wears the
+    // same gold. Nothing to qualify it with the way a ship needs qualifying:
+    // a person is never the context for something else's pick.
+    const isSelectedPerson = entry.kind === 'person'
+        && entry.person.shareId === state.selectedPersonKey;
+
     // Compared by PLACE, all of it. Both of these used to test the ZONE, which
     // was the same thing right up until a zone could hold two rows: standing in
     // Vancouver with Nelson also saved lit them both, and picking a third place
@@ -1879,7 +2118,7 @@ function createClockElement(entry: ClockEntry): HTMLElement {
         clockDiv.classList.add('border-yellow-500');
     } else if (zone && zoneKey(zone) === localRowKey()) {
         clockDiv.classList.add('border-blue-500');
-    } else if (isSelectedShip) {
+    } else if (isSelectedShip || isSelectedPerson) {
         // Same gold as a selected zone: the row, the band and the marker are one
         // selection shown three ways, so they should not look like three states.
         clockDiv.classList.add('border-yellow-500');
@@ -1910,6 +2149,13 @@ function createClockElement(entry: ClockEntry): HTMLElement {
     // zone, so it names its line instead.
     clone.querySelector('.region')!.textContent = clockSubLabel(entry);
     if (isShip) clone.querySelector('.ship-icon')!.classList.remove('hidden');
+    // A person, for the reason a ship carries a mark: "Dad" is a name and so is
+    // half the world's cities, and the row would otherwise be indistinguishable
+    // from a place somebody happened to call that. The mark is what says the
+    // clock belongs to somebody rather than somewhere.
+    if (entry.kind === 'person') {
+        clone.querySelector('.person-icon')!.classList.remove('hidden');
+    }
     // An anchor says this row is a port a ship on the list calls at, not a
     // place the user chose for its own sake. Mutually exclusive with the ship
     // mark by construction: a ship row has no tzid to have been added under.
@@ -1933,7 +2179,9 @@ function createClockElement(entry: ClockEntry): HTMLElement {
     const isAboard = entry.kind === 'ship' && shipKey(entry.ship) === state.aboardShipKey;
 
     // Only a zone can be transient — it is the map's unsaved selection. A ship
-    // is saved the moment it is added, so it otherwise always offers removal.
+    // is saved the moment it is added, and a followed person the moment the
+    // pairing went through, so both otherwise always offer removal. Removing a
+    // person also ends the sharing; see the handler in main.ts.
     if (isTransient) {
         removeBtn.classList.add('hidden');
         pinBtn.classList.remove('hidden');

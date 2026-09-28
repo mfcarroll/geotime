@@ -187,6 +187,7 @@ struct GeoTimeWidgetView: View {
                 // up to three of them — a ship in port keeps the pin, and a phone
                 // agreeing with either is marked there rather than given a row.
                 let marks = (r.isShip ? 1 : 0) + (r.isLocal ? 1 : 0)
+                    + (r.isPerson ? 1 : 0)
                     + ((r.isDevice && deviceMark) ? 1 : 0)
                     + ((r.isPort && portMark) ? 1 : 0)
                 // markW, not pinSize. pinSize is a FONT size, and nothing was
@@ -559,10 +560,24 @@ private struct RowView: View {
     @ViewBuilder private func marker(for row: WidgetRow) -> some View {
         HStack(spacing: metrics.hGap * 0.5) {
             if row.isShip { shipMark }
+            if row.isPerson { person }
             if row.isLocal { pin }
             if row.isDevice && metrics.showDeviceMark { phone }
             if row.isPort && metrics.showPortMark { anchor }
         }
+    }
+
+    // Somebody, rather than somewhere. Ungated, unlike the phone and the
+    // anchor: those two garnish a row that reads correctly without them, while
+    // this is the only thing separating "Dad" from a city that happens to be
+    // called that. An SF Symbol, as the pin is — `person.fill` is the same
+    // head-and-shoulders as the app's own rows, and available well before this
+    // target's iOS 15, which is what sent the ship and anchor to Font Awesome.
+    @ViewBuilder private var person: some View {
+        Image(systemName: "person.fill")
+            .font(.system(size: metrics.pinSize))
+            .foregroundColor(.widgetAccent)
+            .frame(width: metrics.markW)
     }
 
     @ViewBuilder private var pin: some View {

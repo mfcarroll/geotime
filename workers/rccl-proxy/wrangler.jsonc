@@ -11,7 +11,7 @@
     // Not a security boundary — anyone can curl the Worker directly. This stops
     // a browser on someone else's site from quietly spending our key quota.
     // Non-secret, so it belongs in vars rather than a secret.
-    "ALLOWED_ORIGINS": "https://geotime.matthewcarroll.ca,https://localhost:5173,http://localhost:5173"
+    "ALLOWED_ORIGINS": "https://geotime.app,https://geotime.matthewcarroll.ca,https://localhost:5173,http://localhost:5173"
   },
   "observability": {
     "enabled": true,

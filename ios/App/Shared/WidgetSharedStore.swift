@@ -13,6 +13,7 @@ enum WidgetSharedStore {
     static let kindsKey = "worldClockKinds"
     static let regionsKey = "worldClockRegions"
     static let shipsKey = "shipClocks"
+    static let peopleKey = "followedPeople"
     static let appKeyKey = "rcclAppKey"
     static let aboardShipKey = "aboardShipKey"
 
@@ -184,6 +185,60 @@ enum WidgetSharedStore {
                now.timeIntervalSince1970 * 1000 > until { return false }
             return now.timeIntervalSince1970 - (fetchedAt / 1000) > staleAfter
         }
+    }
+
+    /// Somebody you follow, as the widget draws them.
+    ///
+    /// Every field after `key` and `name` is OPTIONAL, for the reason spelled
+    /// out on Ship.short: JSONDecoder fails the WHOLE array when one record is
+    /// missing a non-optional field, so a store written by any build that
+    /// predates a field would decode to nothing and every person would vanish
+    /// at once. Anything added here later gets the same treatment.
+    struct Person: Codable {
+        /// The share id. Two people can be called Mum; only this is identity.
+        let key: String
+        /// What the follower calls them. It exists nowhere but their devices.
+        let name: String
+        /// IANA id while they are ashore; nil or "" while aboard a ship.
+        ///
+        /// A real zone rather than an offset, so this widget applies the
+        /// daylight-saving rules itself. A person who has not opened their app
+        /// since before a transition still reads correctly here, which is the
+        /// whole reason a zone id — not a number — crossed the wire from their
+        /// phone in the first place.
+        let tz: String?
+        /// Minutes from UTC while aboard. Meaningless when `tz` names a zone.
+        let offsetMinutes: Int?
+        /// Their ship's short name, for a tight row.
+        let short: String?
+
+        /// The clock to draw them by, or nil if the record says nothing usable.
+        var timeZone: TimeZone? {
+            if let tz = tz, !tz.isEmpty { return TimeZone(identifier: tz) }
+            guard let minutes = offsetMinutes else { return nil }
+            return TimeZone(secondsFromGMT: minutes * 60)
+        }
+
+        /// The name to prefer when the layout is tight.
+        var shortOrFull: String { (short?.isEmpty ?? true) ? name : short! }
+    }
+
+    static func savePeople(_ people: [Person]) {
+        guard let defaults = UserDefaults(suiteName: suiteName) else { return }
+        if let data = try? JSONEncoder().encode(people),
+           let json = String(data: data, encoding: .utf8) {
+            defaults.set(json, forKey: peopleKey)
+        }
+    }
+
+    static func loadPeople() -> [Person] {
+        guard let defaults = UserDefaults(suiteName: suiteName),
+              let json = defaults.string(forKey: peopleKey),
+              let data = json.data(using: .utf8),
+              let people = try? JSONDecoder().decode([Person].self, from: data) else {
+            return []   // written by a build before 2.0, or nobody followed
+        }
+        return people
     }
 
     static func saveShips(_ ships: [Ship]) {

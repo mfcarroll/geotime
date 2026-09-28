@@ -74,7 +74,7 @@ async function gather(): Promise<Attempt[]> {
     await attempt('same-origin GET (cache-busted)', `${origin}/icons/favicon.svg`,
       () => fetch(`${origin}/icons/favicon.svg?probe=${Date.now()}`, { cache: 'no-store' })),
     await attempt('cross-origin, our Worker', 'geotime-ship-track /fleet',
-      () => fetch('https://geotime-ship-track.matthew-carroll.workers.dev/fleet', { cache: 'no-store' })),
+      () => fetch('https://api.geotime.app/ships/fleet', { cache: 'no-store' })),
   ];
 }
 

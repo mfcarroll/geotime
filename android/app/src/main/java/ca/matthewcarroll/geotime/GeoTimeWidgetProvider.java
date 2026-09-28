@@ -185,6 +185,10 @@ public class GeoTimeWidgetProvider extends AppWidgetProvider {
             // They answer different questions, so neither is left to inference.
             // Mirrors marker(for:) in GeoTimeWidget.swift.
             row.setViewVisibility(R.id.row_ship, r.isShip ? View.VISIBLE : View.GONE);
+            // Ungated, unlike the phone and the anchor: those garnish a row that
+            // reads correctly without them, while this is the only thing
+            // separating "Dad" from a city that happens to be called that.
+            row.setViewVisibility(R.id.row_person, r.isPerson ? View.VISIBLE : View.GONE);
             row.setViewVisibility(R.id.row_pin, r.isLocal ? View.VISIBLE : View.GONE);
             if (rich) {
                 // Line 2 carries everything that qualifies the name, because down
@@ -292,6 +296,14 @@ public class GeoTimeWidgetProvider extends AppWidgetProvider {
         final boolean isLocal;     // GPS-derived base zone (green pin)
         final boolean isDevice;    // device OS zone when it differs from local (phone)
         final boolean isShip;      // a cruise ship's crew-set clock (ship mark)
+        /**
+         * Somebody the user follows (person mark).
+         *
+         * Not final only because the short constructor cannot set it; nothing
+         * changes it after the row is built. Mirrors WidgetRow.isPerson in
+         * ZoneRowResolver.swift.
+         */
+        boolean isPerson;
         /**
          * The row every other row's `offset` is measured from.
          *
@@ -575,6 +587,35 @@ public class GeoTimeWidgetProvider extends AppWidgetProvider {
                     relativeOffset(ship.offsetMin, anchorOffset)));
         }
 
+        // People, outside the no-repeated-clocks rule for the reason ships are,
+        // and more so. "Dad" is not a timezone: he is somebody, and a saved city
+        // keeping the same hour is not another copy of him. Mirrors the people
+        // pass in ZoneRowResolver.swift.
+        //
+        // The age is not on the row. A person who has not opened their app for
+        // days still draws, and draws their last known time — the same bargain
+        // this widget already makes with a ship's last confirmed offset. The
+        // app's own list is where "· 3 days ago" fits.
+        for (Person person : readPeople(ctx)) {
+            Resolved resolved = resolveTimeZone(person.tzId);
+            // Java answers GMT for an id it does not know, silently, so an
+            // unrecognised zone would draw a confident midnight in Greenwich
+            // rather than nothing. Checked here and not for the stored list
+            // because this id came off a NETWORK, from a device whose tzdb is
+            // not this one's — the client validated it against its own Intl,
+            // which is not the same question as whether this phone has it.
+            if (!resolved.tz.getID().equals(resolved.tzId)) continue;
+            long offsetMin = resolved.tz.getOffset(now) / 60000L;
+            boolean differs = dayDiffers(resolved.tz, anchorTz, now);
+            Row row = new Row(person.name, person.shortName, resolved.tzId, offsetMin,
+                    false, false, false, false,
+                    differs ? formatDay(resolved.tz, now, false) : null,
+                    differs ? formatDay(resolved.tz, now, true) : null,
+                    relativeOffset(offsetMin, anchorOffset));
+            row.isPerson = true;
+            rows.add(row);
+        }
+
         // Two rows still sharing a name are two DIFFERENT hours by now — the
         // pass above folded away the ones that agreed. So the reader is looking
         // at two places called Vancouver reading two times, and nothing on the
@@ -663,6 +704,68 @@ public class GeoTimeWidgetProvider extends AppWidgetProvider {
             }
         } catch (JSONException e) {
             // Malformed store: no ships rather than a wrong clock.
+        }
+        return out;
+    }
+
+    /**
+     * Somebody you follow, as the widget needs them.
+     *
+     * `tzId` is either a real IANA id — they are ashore, and this device applies
+     * the daylight-saving rules, so a person who has not opened their app since
+     * before a transition still reads correctly — or a "GMT±HH:MM" built from
+     * the offset they sent while aboard a ship, whose crew-set clock no zone
+     * describes. Which one it is is settled in readPeople, so nothing past this
+     * point has to ask.
+     */
+    private static class Person {
+        /** What the user calls them. It exists nowhere but their own devices. */
+        final String name;
+        final String tzId;
+        /** Their ship's short name, for a tight row; the full name otherwise. */
+        final String shortName;
+
+        // No share id, unlike Ship's key and unlike the iOS Person: RemoteViews
+        // has no list identity to get wrong, so nothing here would ever read it.
+        Person(String name, String tzId, String shortName) {
+            this.name = name;
+            this.tzId = tzId;
+            this.shortName = shortName;
+        }
+    }
+
+    /**
+     * People written by the web layer. A record with no usable clock is dropped.
+     *
+     * The web layer already withholds anybody who has never pushed an anchor, so
+     * this is the widget refusing to render a store the app would not have
+     * written — and a missing row is honest, where midnight in Greenwich would
+     * be a confident lie about somebody's evening.
+     */
+    private static List<Person> readPeople(Context ctx) {
+        List<Person> out = new ArrayList<>();
+        String json = ctx.getSharedPreferences(WidgetBridgePlugin.PREFS_NAME, Context.MODE_PRIVATE)
+                .getString(WidgetBridgePlugin.PREFS_PEOPLE_KEY, "[]");
+        try {
+            JSONArray arr = new JSONArray(json);
+            for (int i = 0; i < arr.length(); i++) {
+                JSONObject o = arr.optJSONObject(i);
+                if (o == null) continue;
+                String name = o.optString("name", "");
+                if (name.isEmpty()) continue;
+                String tz = o.optString("tz", "");
+                // Ashore wins when both are present, which the web layer never
+                // sends — reading it in one order rather than trusting that.
+                String tzId = !tz.isEmpty() ? tz
+                        : o.has("offsetMinutes") ? offsetTzId(o.optLong("offsetMinutes"))
+                        : "";
+                if (tzId.isEmpty()) continue;
+                // Falls back to the full name so a store written by an older
+                // build still renders, just without the ability to abbreviate.
+                out.add(new Person(name, tzId, o.optString("short", name)));
+            }
+        } catch (JSONException e) {
+            // Malformed store: no people rather than a wrong clock.
         }
         return out;
     }
@@ -789,7 +892,7 @@ public class GeoTimeWidgetProvider extends AppWidgetProvider {
         detail.setTextSize(11 * dm.scaledDensity);
 
         float need = 0;
-        int marks = (r.isShip ? 1 : 0) + (r.isLocal ? 1 : 0)
+        int marks = (r.isShip ? 1 : 0) + (r.isPerson ? 1 : 0) + (r.isLocal ? 1 : 0)
                 + ((r.isDevice && deviceMark) ? 1 : 0)
                 + ((r.isPort && portMark) ? 1 : 0);
         need += marks * (12 * dm.density + gap);

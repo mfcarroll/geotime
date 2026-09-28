@@ -180,3 +180,42 @@ describe('the fills a reader can see through', () => {
         assert.ok(FILLS.gpsBand.fillOpacity < FILLS.gpsSegment.fillOpacity);
     });
 });
+
+describe('hovering a band without naming a zone', () => {
+    // What a followed person's row does. The app knows they are somewhere at
+    // UTC−4 and declines to say whether that is New York or Nassau, so the band
+    // lights and nothing is outlined. An outline is the one thing in here that
+    // names a single zone, which makes it the one thing that would give it away.
+    it('lights every zone in the band', () => {
+        const nassau = style(NASSAU, { hoveredTzid: null, hoveredOffset: -4 });
+        const newYork = style(NEW_YORK, { hoveredTzid: null, hoveredOffset: -4 });
+
+        assert.equal(nassau.fillColor, FILLS.hoverBand.fillColor);
+        assert.equal(newYork.fillColor, FILLS.hoverBand.fillColor,
+                     'both halves of the band, or the band is not the unit');
+    });
+
+    it('outlines none of them', () => {
+        for (const id of [NASSAU, NEW_YORK]) {
+            const hovered = style(id, { hoveredTzid: null, hoveredOffset: -4 });
+            assert.equal(hovered.strokeColor, OUTLINE.none.strokeColor,
+                         `${id} was outlined, which says which zone they are in`);
+        }
+    });
+
+    it('leaves other bands alone', () => {
+        const london = style(LONDON, { hoveredTzid: null, hoveredOffset: -4 });
+        assert.equal(london.fillColor, FILLS.base.fillColor);
+    });
+
+    it('still outlines the zone under the pointer when there IS one', () => {
+        // The ordinary case, unchanged: leaving hoveredOffset out means "the
+        // hovered zone's own band", which is every hover but a person's.
+        const hovered = style(NASSAU, { hoveredTzid: NASSAU });
+        const neighbour = style(NEW_YORK, { hoveredTzid: NASSAU });
+
+        assert.equal(hovered.strokeColor, OUTLINE.hover.strokeColor);
+        assert.equal(neighbour.strokeColor, OUTLINE.none.strokeColor);
+        assert.equal(neighbour.fillColor, FILLS.hoverBand.fillColor, 'and its band still lights');
+    });
+});

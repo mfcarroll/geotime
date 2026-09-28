@@ -22,6 +22,14 @@ export default defineConfig(({ mode }) => ({
     dropDebugLayers(mode),
     VitePWA({
       registerType: 'autoUpdate',
+      // Registered by src/service-worker.ts instead, which does it on the web
+      // only. Injected, it ran in the native apps too — see that file.
+      injectRegister: null,
+      workbox: {
+        // First in the generated sw.js, so it can stand Workbox down in the
+        // apps. It is also what retires the worker every 1.7.0 install has.
+        importScripts: ['sw-native-guard.js'],
+      },
       includeAssets: ['timezones.topojson', 'cities.json', 'ships.json'],
       manifest: {
         name: 'GeoTime Dashboard',
@@ -82,6 +90,7 @@ export default defineConfig(({ mode }) => ({
     // Compiled to `null` in every mode but `shiptest`, so a release build has
     // no path to a test host at all — see shipGateway().
     __SHIP_GATEWAY__: JSON.stringify(shipGateway(mode)),
+    __SCREENSHOT_SEED__: JSON.stringify(screenshotSeed(mode)),
   },
 }));
 
@@ -124,6 +133,21 @@ function shipMarkerHeaders(mode) {
   if (mode !== 'shiptest' || process.env.SHIP_MARKER !== 'ship') return {};
   console.warn('\n[shiptest] preview reports ABOARD Star of the Seas (ST).\n');
   return { 'environment-marker': 'ship', 'environment-ship-code': 'ST' };
+}
+
+/**
+ * Whether to pre-populate the clock list for App Store screenshots.
+ *
+ * False for every ordinary build, which is what makes screenshot-seed.ts dead
+ * code the bundler drops. Opt in with `--mode screenshots`, or with
+ * VITE_SCREENSHOT_SEED=1 so it can ride along with `--mode shiptest` for the
+ * aboard shots.
+ */
+function screenshotSeed(mode) {
+  const on = mode === 'screenshots'
+    || loadEnv(mode, process.cwd(), 'VITE_').VITE_SCREENSHOT_SEED === '1';
+  if (on) console.warn('\n[screenshots] clock list will be pre-seeded. Do not ship this build.\n');
+  return on;
 }
 
 function shipGateway(mode) {
@@ -195,13 +219,20 @@ function workerCsp() {
     name: 'geotime:worker-csp',
     transformIndexHtml(html, ctx) {
       const env = loadEnv(ctx?.server ? 'development' : 'production', process.cwd(), 'VITE_');
-      // Defaults must match the ones in src/rccl.ts and src/time.ts: the CSP
-      // has to admit whatever the client will actually call, and the client
-      // falls back to these when the variables are unset.
+      // Defaults must match the ones in src/rccl.ts, src/time.ts, src/shiptrack.ts
+      // and src/anchor-share.ts: the CSP has to admit whatever the client will
+      // actually call, and the client falls back to these when the variables are
+      // unset.
+      //
+      // Four services, one origin — everything lives behind the API gateway now,
+      // so this list collapses to whatever each variable overrides it with. The
+      // entries stay separate because an override can still point one service
+      // somewhere else, which is what the shiptest mode does.
       const origins = [
-        env.VITE_RCCL_PROXY ?? 'https://geotime-rccl-proxy.matthew-carroll.workers.dev',
-        env.VITE_UTC_TIME_URL ?? 'https://geotime-utc-time.matthew-carroll.workers.dev',
-        env.VITE_SHIP_TRACK ?? 'https://geotime-ship-track.matthew-carroll.workers.dev',
+        env.VITE_RCCL_PROXY ?? 'https://api.geotime.app/rccl',
+        env.VITE_UTC_TIME_URL ?? 'https://api.geotime.app/time',
+        env.VITE_SHIP_TRACK ?? 'https://api.geotime.app/ships',
+        env.VITE_ANCHOR_SHARE ?? 'https://api.geotime.app/anchor',
         // The onboard stand-in, in a shiptest build only. A browser enforces the
         // CSP where CapacitorHttp does not, so without this the gateway is
         // reachable on a device and blocked in the one place it is quickest to

@@ -29,6 +29,20 @@ enum Fixture {
             refreshUntil: nil
         )
     }
+
+    /// Somebody ashore, keeping `tz`.
+    static func personAshore(_ key: String, _ name: String,
+                             _ tz: TimeZone) -> WidgetSharedStore.Person {
+        WidgetSharedStore.Person(key: key, name: name, tz: tz.identifier,
+                                 offsetMinutes: nil, short: nil)
+    }
+
+    /// Somebody aboard a ship, keeping a clock the crew set.
+    static func personAboard(_ key: String, _ name: String, offsetHours: Double,
+                             short: String? = nil) -> WidgetSharedStore.Person {
+        WidgetSharedStore.Person(key: key, name: name, tz: nil,
+                                 offsetMinutes: Int(offsetHours * 60), short: short)
+    }
 }
 
 extension XCTestCase {

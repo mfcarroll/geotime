@@ -147,6 +147,20 @@ export interface ZoneStyleInput {
   gpsTzid: string | null;
   /** Zone under the pointer, or null. */
   hoveredTzid: string | null;
+  /**
+   * The band under the pointer when there is one with no zone to name.
+   *
+   * Normally the hovered band IS the hovered zone's band, and leaving this out
+   * says exactly that — which is why it is optional rather than a field every
+   * caller has to derive.
+   *
+   * The case that needs it is a followed person. Their band should light up,
+   * and their ZONE must not: the app knows they are somewhere at UTC−8 and
+   * deliberately declines to say whether that is Vancouver or Seattle. Passing
+   * their tzid as the hover would have outlined the answer, since an outline is
+   * the one thing here that names a single zone rather than a whole band.
+   */
+  hoveredOffset?: number | null;
   /** The ship's offset when a marker confirms we are aboard; null ashore. */
   anchorShipOffset: number | null;
   /** Current UTC offset of an arbitrary zone id. */
@@ -163,12 +177,21 @@ export interface ZoneStyleInput {
 }
 
 export function resolveZoneStyle(input: ZoneStyleInput): ZoneStyle {
-  const { tzid, offset, selectedTzid, selectedOffset, gpsTzid, hoveredTzid, offsetOf,
-          anchorShipOffset, chartShown } = input;
+  const { tzid, offset, selectedTzid, selectedOffset, gpsTzid, hoveredTzid, hoveredOffset,
+          offsetOf, anchorShipOffset, chartShown } = input;
 
   const sameOffsetAs = (other: string | null) =>
     other !== null && offsetOf(other) === offset;
 
+  // Undefined means "whatever the hovered zone's band is", which is every case
+  // but one. Null means a hover that is deliberately no band at all.
+  const hoveredBand = hoveredOffset !== undefined
+    ? hoveredOffset
+    : (hoveredTzid !== null ? offsetOf(hoveredTzid) : null);
+
+  // An outline names ONE zone, so it follows the tzid and never the band. A
+  // band hovered without a tzid gets its fill and no outline, which is the
+  // whole point of being able to hover a band without naming a zone.
   const isHovered = tzid === hoveredTzid;
 
   // Structural rather than one of FILLS, because the hover band is scaled
@@ -190,7 +213,7 @@ export function resolveZoneStyle(input: ZoneStyleInput): ZoneStyle {
   else if (selectedOffset === offset) fill = FILLS.selectedBand;
   // Covers the hovered zone itself, which is why this is scaled and not just
   // the lift below — see hoverFillScale.
-  else if (sameOffsetAs(hoveredTzid)) {
+  else if (hoveredBand === offset) {
     fill = {
       ...FILLS.hoverBand,
       fillOpacity: FILLS.hoverBand.fillOpacity * hoverFillScale(tzid, chartShown),

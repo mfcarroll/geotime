@@ -35,6 +35,7 @@ public class WidgetBridgePlugin: CAPPlugin, CAPBridgedPlugin {
         WidgetSharedStore.saveLocalTimezone(call.getString("localTimezone"))
         WidgetSharedStore.saveLocalPlaceName(call.getString("localPlaceName"))
         WidgetSharedStore.saveShips(Self.decodeShips(call.getArray("ships")))
+        WidgetSharedStore.savePeople(Self.decodePeople(call.getArray("people")))
         WidgetSharedStore.saveAboardShipKey(call.getString("aboardShipKey"))
         if #available(iOS 14.0, *) {
             WidgetCenter.shared.reloadAllTimelines()
@@ -66,6 +67,31 @@ public class WidgetBridgePlugin: CAPPlugin, CAPBridgedPlugin {
                 key: key, name: name, short: short,
                 offsetMinutes: offset, fetchedAt: fetchedAt,
                 refreshUntil: refreshUntil)
+        }
+    }
+
+    /// People, read field by field for the reason ships are.
+    ///
+    /// A record with neither a zone nor an offset is dropped. The web layer
+    /// already withholds anybody who has never pushed an anchor, so this is the
+    /// widget declining to draw a store the app would not have written — and a
+    /// missing row is honest where a clock at UTC would be a confident lie
+    /// about somebody's evening.
+    private static func decodePeople(_ raw: [JSValue]?) -> [WidgetSharedStore.Person] {
+        guard let raw = raw else { return [] }
+        return raw.compactMap { entry in
+            guard let dict = entry as? JSObject,
+                  let key = dict["key"] as? String,
+                  let name = dict["name"] as? String else { return nil }
+            let tz = (dict["tz"] as? String) ?? ""
+            let offset = (dict["offsetMinutes"] as? Int)
+                ?? (dict["offsetMinutes"] as? Double).map(Int.init)
+            if tz.isEmpty && offset == nil { return nil }
+            return WidgetSharedStore.Person(
+                key: key, name: name,
+                tz: tz.isEmpty ? nil : tz,
+                offsetMinutes: offset,
+                short: dict["short"] as? String)
         }
     }
 
