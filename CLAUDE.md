@@ -81,5 +81,10 @@ describes those endpoints is excluded via `.git/info/exclude`, not
 
 ## Merging to `main` ships to production
 
-Play at **100%**, and an App Store submission with automatic release. There is
+Play at **100%**, an App Store submission with automatic release, and the web
+app to geotime.app (a Worker, `workers/web`, deployed by `deploy.yml`). There is
 no staging step. Never push to `main` without being asked.
+
+The Workers behind the API are deployed by hand (`npm run deploy:<name>`), and
+four of them serve 1.7.0 in the field on their `*.workers.dev` names. Check that
+a Worker's code on this branch matches what is deployed before redeploying it.
