@@ -60,18 +60,21 @@ interface Env {
 }
 
 /**
- * The two paths worth a tighter limit than everything else.
+ * The paths worth a tighter limit than everything else.
  *
- * Minting an identity and spending somebody's code: the first is the only
- * unauthenticated write in the whole system, and the second is the only place a
- * guess could ever be worth making. Neither is something a person does more
- * than once in a sitting.
+ * Minting an identity and spending somebody's code: the unauthenticated writes
+ * in the whole system, and the only places a guess could ever be worth making.
+ * None is something a person does more than once in a sitting.
  *
  * A share code is eight Crockford characters — about 1.1e12 of them — so
  * guessing was never the practical risk. Exhausting a free tier's daily budget
  * on somebody else's behalf is, and it costs an attacker nothing.
  */
-const SENSITIVE_PATHS = ['/anchor/v1/account', '/anchor/v1/shares/redeem'] as const;
+const SENSITIVE_PATHS = [
+  '/anchor/v1/account',
+  '/anchor/v1/shares/redeem',
+  '/anchor/v1/devices/claim',
+] as const;
 
 /**
  * Longest prefix first would matter if any were a prefix of another. None are,
