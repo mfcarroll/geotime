@@ -1,99 +1,240 @@
 <!DOCTYPE html>
 <html lang="en" class="h-full bg-gray-900">
-<head>
+  <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover"
+    />
     <meta name="theme-color" content="#1f2937" />
-    <title>Privacy Policy - GeoTime Dashboard</title>
+    <title>Privacy Policy - GeoTime</title>
     <link rel="stylesheet" href="/src/style.css" />
-    <link rel="icon" type="image/png" href="/icons/favicon-96x96.png" sizes="96x96" />
+    <link
+      rel="icon"
+      type="image/png"
+      href="/icons/favicon-96x96.png"
+      sizes="96x96"
+    />
     <link rel="icon" type="image/svg+xml" href="/icons/favicon.svg" />
     <link rel="shortcut icon" href="/icons/favicon.ico" />
-    <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png" />
+    <link
+      rel="apple-touch-icon"
+      sizes="180x180"
+      href="/icons/apple-touch-icon.png"
+    />
     <meta name="apple-mobile-web-app-title" content="GeoTime" />
     <link rel="manifest" href="/icons/site.webmanifest" />
-</head>
-<!-- native-safe-area: this page has no script, so it cannot be given .is-ios the
+  </head>
+  <!-- native-safe-area: this page has no script, so it cannot be given .is-ios the
      way the main app is. See src/style.css. -->
-<body class="h-full text-gray-200 antialiased native-safe-area">
+  <body class="h-full text-gray-200 antialiased native-safe-area">
     <div id="app-container" class="min-h-full p-4 sm:p-6 lg:p-8 bg-gray-900">
-        <div class="max-w-7xl mx-auto">
-            <div class="prose prose-invert max-w-none text-gray-300 space-y-4">
-                <h1 class="text-3xl font-bold text-white text-center mb-12">Privacy Policy</h1>
-                <p>This Privacy Policy applies to the GeoTime application by <a  class="text-blue-400 hover:text-blue-500" href="https://www.linkedin.com/in/matthewfcarroll/">Matthew F. Carroll</a>, currently available as a <a href="/" class="text-blue-400 hover:text-blue-500">web app</a>, on <a href="https://apps.apple.com/app/geotime/id6753636878" class="text-blue-400 hover:text-blue-500">iOS</a> and on <a href="https://play.google.com/store/apps/details?id=ca.matthewcarroll.geotime" class="text-blue-400 hover:text-blue-500">Android</a>.</p>
-                <p>
-                    GeoTime collects nothing about you by default, and there is no account to create in order to use it.
-                    The app requests access to your device's location for the sole purpose of displaying the current time and timezone at your location.
-                    Your coordinates are used only while the app is running, and are never transmitted to our servers or to any third party.
-                    The app stores the name of the city or town closest to your last known position on your device, so the home-screen widget can label your local time while the app is closed. That name is never transmitted anywhere, including to the people you share your time with.
-                </p>
-                <p>
-                    One optional feature does send something, and only if you turn it on. It is described in &ldquo;Sharing your time&rdquo; below.
-                </p>
-                <p>
-                    GeoTime can also show &ldquo;ship time&rdquo; &mdash; the onboard clock on a Royal Caribbean or Celebrity cruise, which shifts during a sailing.
-                    Because that clock is set by the crew and cannot be worked out from a map, the app fetches the current ship time from Royal Caribbean when you add a ship to your world clock list, and while you are connected to a ship's wi-fi, to recognise which ship you are aboard.
-                    Those requests identify only the ship name &mdash; never your location, device or account identifiers, or personal information of any kind.
-                </p>
-                <h2 class="text-2xl font-semibold text-white pt-6">Sharing your time</h2>
-                <p>
-                    GeoTime can show you what time it is for someone else &mdash; a partner in another country, a parent on a cruise &mdash; on your world clock list and your home-screen widget.
-                    This is entirely optional. Nothing described in this section happens, and no record of you exists on our server, unless and until you tap &ldquo;Share your time&rdquo; or enter somebody's code.
-                </p>
-                <p>
-                    When you do, our server creates an account for you under a random identifier, and gives this device a random key of its own, which it keeps. The server stores only a scrambled form of that key, so its records cannot be used to act as you. None of it is tied to your email address, phone number, your device's own identifiers, or any account you hold elsewhere; there is no password, because there is nothing to sign in to.
-                </p>
-                <p>
-                    It asks you for a name, and that name is sent &mdash; it is what the people you share with see above your clock, and without it their screen would show a time with nothing to say whose it is. Put whatever you like in it; nothing checks it against anything.
-                    Whoever you share with can rename you on their own device afterwards, and that renaming happens entirely on their phone: we never see it.
-                </p>
-                <p>
-                    While sharing is on, the app sends the server <em>what time it is where you are</em>, and nothing more. In practice that is a timezone name such as
-                    <span class="font-mono text-gray-200">America/Vancouver</span> &mdash; or, aboard a ship, that ship's name and how many hours its clock is from UTC.
-                </p>
-                <p>
-                    <strong class="text-white">Nothing narrower than a timezone is ever sent.</strong> Not your coordinates, and not the name of your town either.
-                    A timezone is thousands of kilometres wide and shared by millions of people: everyone from Vancouver to Nelson to Los Angeles keeps the same one, and nothing in what we send distinguishes them.
-                </p>
-                <p>
-                    <strong class="text-white">By default they are not even told which timezone.</strong> Unless you turn on &ldquo;Share my exact timezone&rdquo;, the only thing our server passes on is how many hours your clock is from theirs &mdash; a number, with no region attached.
-                    Turning it on tells them the timezone by name, which is a region and never a place; the app's map deliberately lights up the whole band of that time rather than the single zone, and the Sharing screen shows you a preview of the row they will see so you can decide with it in front of you.
-                    Either way they see what time it is for you and not where you are.
-                </p>
-                <p>
-                    No history is kept either. Each update replaces the last, so there is no record of where you have been or when. The only date kept with your time is when it was last updated, which is what lets the other person see that an answer has gone stale.
-                    Beyond that the server notes when your account and each linked device were created and last used, and when each share was made and accepted &mdash; dates, never places &mdash; which is what lets you tell your devices apart and lets an account nobody has opened in a long time eventually be removed.
-                </p>
-                <p>
-                    The name you give somebody you follow &mdash; &ldquo;Mum&rdquo;, &ldquo;Dad&rdquo; &mdash; is stored only on your own device and is never sent anywhere. The server does not know it and cannot be asked for it.
-                </p>
-                <p>
-                    You can use the same account on more than one device &mdash; a tablet, or a browser on your computer &mdash; by linking it from a device that already is. The device already linked shows a code that works once and stops working after 10 minutes, and it has to approve the new device before that device can see anything.
-                    For each device linked to your account, the server records what kind it is (&ldquo;iPhone&rdquo;, &ldquo;Chrome on macOS&rdquo;), whether it is the one that shares your time, and when it was last used, so that you can recognise each one and remove it under &ldquo;Your devices&rdquo;. Only one device shares your time, and a browser never does.
-                </p>
-                <p>
-                    Codes are single-use and stop working after 24 hours. A share, once accepted, lasts until either of you ends it: removing somebody from your list also stops their time reaching you, and removing a follower stops your time reaching them. Either side can do this at any moment without the other's agreement.
-                </p>
-                <p>
-                    The server is a small application run by us on <a href="https://www.cloudflare.com/privacypolicy/" class="text-blue-400 hover:text-blue-500">Cloudflare</a>'s network, which processes the requests on our behalf. Nothing is sold, shared with advertisers, or used to build a profile, and there is no analytics or tracking in the app at all.
-                </p>
-                <h2 id="delete" class="text-2xl font-semibold text-white pt-6">Deleting your data</h2>
-                <p>
-                    In GeoTime, open the Sharing card and tap <strong class="text-white">Delete my sharing data</strong> at the bottom, then confirm.
-                    That deletes your account, every device linked to it, your name, your current time, and every share you are part of, immediately and permanently. The people you follow stop reaching you, and the people who follow you stop seeing your time.
-                    Nothing is retained after deletion, and there is no backup copy to ask us for.
-                </p>
-                <p>
-                    You can do this from any of your linked devices, including a browser linked at geotime.app. To remove just one device and keep the rest, tap <strong class="text-white">Remove</strong> or <strong class="text-white">Unlink</strong> beside it under &ldquo;Your devices&rdquo; instead.
-                </p>
-                <p>
-                    If you no longer have any device with GeoTime on it, nothing we hold can be matched to you: there is no email address, phone number or password on the account, so we have no way to tell which one was yours. The people who followed you can remove you from their own lists at any time, which ends those shares.
-                    If you have never tapped &ldquo;Share your time&rdquo; or followed anybody, there is nothing on our server to delete.
-                </p>
-                <p class="text-sm text-gray-400 pt-6">Last updated 28 September 2026.</p>
-                <p class="text-center"><a href="/" class="text-blue-400 hover:text-blue-500">← Back to the app</a></p>
-            </div>
+      <div class="max-w-3xl mx-auto">
+        <div class="prose prose-invert max-w-none text-gray-300 space-y-4">
+          <h1 class="text-3xl font-bold text-white text-center mb-12">
+            Privacy Policy
+          </h1>
+          <p>
+            This Privacy Policy applies to the GeoTime application by
+            <a
+              class="text-blue-400 hover:text-blue-500"
+              href="https://matthewcarroll.ca"
+              >Matthew Carroll</a
+            >, currently available as a
+            <a href="/" class="text-blue-400 hover:text-blue-500">web app</a>,
+            on
+            <a
+              href="https://apps.apple.com/app/geotime/id6753636878"
+              class="text-blue-400 hover:text-blue-500"
+              >iOS</a
+            >
+            and on
+            <a
+              href="https://play.google.com/store/apps/details?id=ca.matthewcarroll.geotime"
+              class="text-blue-400 hover:text-blue-500"
+              >Android</a
+            >.
+          </p>
+          <h2 class="text-2xl font-semibold text-white pt-8">Your location</h2>
+          <ul class="list-disc pl-6 space-y-2 marker:text-gray-500">
+            <li>
+              GeoTime collects nothing about you by default, and no account is
+              needed to use it.
+            </li>
+            <li>
+              It uses your device's location, only while it is running, to work
+              out your timezone and nearby town <em>on your device</em>. Your
+              location is never sent to our server.
+            </li>
+            <li>
+              The app uses maps drawn by Google Maps, so, as with any map, Google
+              supplies the map of the area being shown, which is usually the area
+              around you. We do not transmit your actual coordinates to Google
+              Maps.
+            </li>
+          </ul>
+
+          <h2 class="text-2xl font-semibold text-white pt-8">Ships</h2>
+          <ul class="list-disc pl-6 space-y-2 marker:text-gray-500">
+            <li>
+              For ships on your list, the app fetches the ship's time and
+              position, and while you are on a ship's wi-fi it checks which ship
+              you are aboard.
+            </li>
+            <li>
+              Those requests name only the ship, never you, your location or your
+              device.
+            </li>
+          </ul>
+
+          <h2 class="text-2xl font-semibold text-white pt-8">Sharing your time</h2>
+          <p>
+            GeoTime can show you what time it is for someone else &mdash; a
+            partner in another country, a parent on a cruise &mdash; on your world
+            clock list and your home-screen widget. This is entirely optional.
+            Nothing in this section happens, and no record of you exists on our
+            server, unless and until you tap &ldquo;Share your time&rdquo; or
+            enter somebody's code.
+          </p>
+
+          <h3 class="text-lg font-semibold text-white pt-4">What our server keeps</h3>
+          <ul class="list-disc pl-6 space-y-2 marker:text-gray-500">
+            <li>
+              <strong class="text-white">An account</strong> under a random identifier, and a
+              random key for each of your devices. The server stores only a
+              scrambled form of each key, so its records cannot be used to act as
+              you. None of it is tied to your email address, phone number, your
+              device's own hardware identifiers, or any account you hold
+              elsewhere.
+            </li>
+            <li>
+              <strong class="text-white">Your name</strong>, which you choose. The people you
+              share your time with see it above your clock, and the people you
+              follow see it in their list of who can see their time.
+            </li>
+            <li>
+              <strong class="text-white">What time it is where you are</strong>, and nothing
+              more. In practice that is a timezone name such as
+              <span class="font-mono text-gray-200">America/Vancouver</span>
+              &mdash; or, aboard a ship, that ship's name and how many hours its
+              clock is from UTC.
+            </li>
+            <li>
+              <strong class="text-white">No history.</strong> When your main device sends an
+              update, the old one is removed, so there is no record of where you
+              have been.
+            </li>
+            <li>
+              <strong class="text-white">Dates only, never places</strong> &mdash; when your
+              account, devices and shares were created and last used &mdash; so
+              you can tell your devices apart and so an account unused for a long
+              time can be removed.
+            </li>
+          </ul>
+
+          <h3 class="text-lg font-semibold text-white pt-4">What the people you share with see</h3>
+          <ul class="list-disc pl-6 space-y-2 marker:text-gray-500">
+            <li>
+              By default, only how many hours your clock is from theirs &mdash; a
+              number, with no region attached.
+            </li>
+            <li>
+              With &ldquo;Share my exact timezone&rdquo; on, the timezone by name,
+              for example &ldquo;Vancouver&rdquo; or &ldquo;Los Angeles&rdquo;.
+              The sharing screen shows you a preview of what they will see.
+            </li>
+            <li>
+              If you share your exact timezone while aboard a ship, they see the
+              ship's name. The ship's position is public.
+            </li>
+            <li>
+              Whoever you share with can rename you on their own device. Those
+              labels, like the names you give the people you follow, never leave
+              the device they were set on.
+            </li>
+          </ul>
+
+          <h3 class="text-lg font-semibold text-white pt-4">Following, and stopping</h3>
+          <ul class="list-disc pl-6 space-y-2 marker:text-gray-500">
+            <li>Sharing codes are single-use and stop working after 24 hours.</li>
+            <li>
+              Following someone does not let them see your time: if you both want
+              to see each other's clocks, you share yours with them too.
+            </li>
+            <li>
+              A share can be removed at any time: removing somebody from your list
+              stops their time reaching you, and removing a follower stops your
+              time reaching them.
+            </li>
+          </ul>
+
+          <h3 class="text-lg font-semibold text-white pt-4">More than one device</h3>
+          <ul class="list-disc pl-6 space-y-2 marker:text-gray-500">
+            <li>
+              You can use the same account on a tablet, or a browser on your
+              computer, by linking it. Your existing device has to approve the new
+              one before it can see anything.
+            </li>
+            <li>The time you share with others comes from your main device.</li>
+            <li>
+              For each linked device, the server records what kind it is
+              (&ldquo;iPhone&rdquo;, &ldquo;Chrome on macOS&rdquo;), whether it is
+              your main device, and when it was last used, so that you can
+              recognise each one and remove it under &ldquo;Your devices&rdquo;.
+            </li>
+          </ul>
+
+          <h2 class="text-2xl font-semibold text-white pt-8">Who runs the server</h2>
+          <p>
+            The server is a small application run by us on
+            <a href="https://www.cloudflare.com/privacypolicy/" class="text-blue-400 hover:text-blue-500">Cloudflare</a>'s
+            network, which processes the requests on our behalf. Nothing is sold,
+            shared with advertisers, or used to build a profile, and there is no
+            analytics or tracking in the app at all.
+          </p>
+
+          <h2 id="delete" class="text-2xl font-semibold text-white pt-8">Deleting your data</h2>
+          <ul class="list-disc pl-6 space-y-2 marker:text-gray-500">
+            <li>
+              In GeoTime, open the Sharing card, tap
+              <strong class="text-white">Delete my sharing data</strong> at the bottom, and
+              confirm. That deletes your account, every device linked to it, your
+              name, your current time, and every share you are part of,
+              immediately and permanently.
+            </li>
+            <li>
+              You will stop seeing the people you follow, and the people who
+              follow you stop seeing your time. Nothing is retained after
+              deletion, and there is no backup copy to ask us for.
+            </li>
+            <li>
+              You can do this from any of your linked devices, including a browser
+              linked at <a href="https://geotime.app" class="text-blue-400 hover:text-blue-500">geotime.app</a>. To
+              remove just one device and keep the rest, tap
+              <strong class="text-white">Remove</strong> or <strong class="text-white">Unlink</strong> beside it
+              under &ldquo;Your devices&rdquo; instead.
+            </li>
+            <li>
+              If you no longer have any device with GeoTime on it, nothing we hold
+              can be matched to you: there is no email address, phone number or
+              password on the account, so we have no way to tell which one was
+              yours.
+            </li>
+            <li>
+              If you have never tapped &ldquo;Share your time&rdquo; or followed
+              anybody, there is nothing on our server to delete.
+            </li>
+          </ul>
+          <p class="text-sm text-gray-400 pt-6">
+            Last updated 29 September 2026.
+          </p>
+          <p class="text-center">
+            <a href="/" class="text-blue-400 hover:text-blue-500"
+              >← Back to the app</a
+            >
+          </p>
         </div>
+      </div>
     </div>
-</body>
+  </body>
 </html>

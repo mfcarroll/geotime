@@ -19,7 +19,7 @@ keystore.jks
 # App Store screenshots. Release assets, ~22MB, and regenerated from
 # distribution/screenshots/README.md — the repo tracks how to make them
 # rather than the images themselves.
-distribution/screenshots/*/*.png
+distribution/screenshots/**/*.png
 
 # SwiftPM build output for the widget-logic test package
 ios/SharedKit/.build/

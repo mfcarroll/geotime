@@ -358,6 +358,24 @@ September 2026 to build it in 2.1 rather than soften the policy. Beyond that:
 staleness thresholds; heartbeat while aboard; widget-side fetch if app-open frequency proves too low; the
 "share back" affordance.
 
+**2.0.1** — a person's widget row must say who, not where. When a row is
+tight, both widgets swap in `short`, which for a person aboard is their SHIP's
+short name: Dad aboard Wonder of the Seas reads "Wonder", and two people on two
+ships cannot be told apart. `shortOrFull` exists for ships, where "Star" is a
+shorter "Star of the Seas"; a ship's name is not a shorter form of anybody's.
+People should keep their name and truncate. iOS: `ZoneRowResolver` passes
+`person.short` as `shortName`, pinned by a test in `PersonRowTests`. Android:
+`GeoTimeWidgetProvider`, the same. Found capturing the 2.0 screenshots, 28
+September 2026; left for 2.0.1 rather than re-releasing.
+
+**Done in 2.0, second build** — the iOS location prompt's wording. It said
+"Location is required to determine your local timezone.", which was not true
+(the app works without location) and said nothing about sharing. Now: "GeoTime
+uses your location to find your local timezone and nearest town, and to tell
+when you're aboard a ship. If you share your time, only your timezone or ship
+is sent, never your location." Folded in 29 September 2026, when a privacy
+policy revision needed a second 2.0 build anyway.
+
 **Known, and left for later** — an in-place reload of the Android app crashes
 it: the WebView runs out of JavaScript memory inside Google Maps about ten
 seconds afterwards. It is in 1.7.0 too, and nothing in the app reloads the page

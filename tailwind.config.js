@@ -10,6 +10,7 @@ export default {
   future: { hoverOnlyWhenSupported: true },
   content: [
     "./index.html",
+    "./privacy.html",
     "./src/**/*.{js,ts,jsx,tsx}",
   ],
   theme: {
