@@ -368,6 +368,18 @@ People should keep their name and truncate. iOS: `ZoneRowResolver` passes
 `GeoTimeWidgetProvider`, the same. Found capturing the 2.0 screenshots, 28
 September 2026; left for 2.0.1 rather than re-releasing.
 
+**2.0.1, also** — the iOS location prompt's wording. `Info.plist` gives both
+location keys "Location is required to determine your local timezone." Two
+things are off since 2.0: location is not required (the app works without it),
+and the sentence says nothing about sharing, although the timezone worked out
+from location is what the relay receives when somebody shares, and the store
+forms now declare it as coarse location. Replace both with: "GeoTime uses your
+location on this device to find your timezone, the nearest town, and whether
+you're aboard a ship. If you share your time, only your timezone is sent, never
+your location." Android has no equivalent: its prompt uses the system's own
+wording. Raised 29 September 2026; left out of 2.0 because changing it meant a
+new build after build 41 was attached for review.
+
 **Known, and left for later** — an in-place reload of the Android app crashes
 it: the WebView runs out of JavaScript memory inside Google Maps about ten
 seconds afterwards. It is in 1.7.0 too, and nothing in the app reloads the page
