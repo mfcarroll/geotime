@@ -96,7 +96,8 @@ export function showLocationUnavailable() {
   console.log("Location unavailable")
   
   dom.locationLoader.classList.add('hidden');
-  dom.locationContent.classList.remove('hidden');
+  // `grid` goes on as `hidden` comes off: both set `display`, so the markup can hold only one.
+  dom.locationContent.classList.replace('hidden', 'grid');
 
   dom.locationTitleEl.innerHTML = `<i class="fas fa-location-dot fa-fw mr-3 text-red-400"></i>Location Unavailable`;
   dom.latitudeEl.textContent = '---.----°';
@@ -1879,7 +1880,7 @@ export async function onLocationSuccess(pos: GeolocationPosition) {
   dom.longitudeEl.textContent = formatCoordinate(longitude, 4);
   
   dom.locationLoader.classList.add('hidden');
-  dom.locationContent.classList.remove('hidden');
+  dom.locationContent.classList.replace('hidden', 'grid');
 
   // --- MODIFICATION START ---
   // Only center the map if it's ready and this is the first location update of the session.

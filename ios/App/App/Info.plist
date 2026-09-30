@@ -44,8 +44,8 @@
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>Location is required to determine your local timezone.</string>
+	<string>GeoTime uses your location to find your local timezone and nearest town, and to tell when you’re aboard a ship. If you share your time, only your timezone or ship is sent, never your location.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-	<string>Location is required to determine your local timezone.</string>
+	<string>GeoTime uses your location to find your local timezone and nearest town, and to tell when you’re aboard a ship. If you share your time, only your timezone or ship is sent, never your location.</string>
 </dict>
 </plist>

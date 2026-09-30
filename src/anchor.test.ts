@@ -290,10 +290,12 @@ test('a zone, as far from UTC as it is right now', async (t) => {
     });
 
     await t.test('follows daylight saving, which is the whole reason it exists', () => {
+        // Los Angeles, not Vancouver: British Columbia stays on UTC-7 from
+        // November 2026 (tz 2026b), so Vancouver no longer changes its clocks.
         const summer = new Date('2026-09-08T12:00:00Z');
         const winter = new Date('2026-11-15T12:00:00Z');
-        assert.equal(zoneOffsetMinutes('America/Vancouver', summer), -420);
-        assert.equal(zoneOffsetMinutes('America/Vancouver', winter), -480);
+        assert.equal(zoneOffsetMinutes('America/Los_Angeles', summer), -420);
+        assert.equal(zoneOffsetMinutes('America/Los_Angeles', winter), -480);
     });
 
     await t.test('a zone nobody can resolve is null, not zero', () => {
